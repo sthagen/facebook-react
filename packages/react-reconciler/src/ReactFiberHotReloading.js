@@ -11,12 +11,15 @@ import type {ReactElement} from 'shared/ReactElementType';
 import type {Fiber} from './ReactFiber';
 import type {FiberRoot} from './ReactFiberRoot';
 import type {Instance} from './ReactFiberHostConfig';
+import type {ReactNodeList} from 'shared/ReactTypes';
 
 import {
   flushSync,
   scheduleWork,
   flushPassiveEffects,
 } from './ReactFiberWorkLoop';
+import {updateContainerAtExpirationTime} from './ReactFiberReconciler';
+import {emptyContextObject} from './ReactFiberContext';
 import {Sync} from './ReactFiberExpirationTime';
 import {
   ClassComponent,
@@ -49,6 +52,7 @@ type RefreshHandler = any => Family | void;
 // Used by React Refresh runtime through DevTools Global Hook.
 export type SetRefreshHandler = (handler: RefreshHandler | null) => void;
 export type ScheduleRefresh = (root: FiberRoot, update: RefreshUpdate) => void;
+export type ScheduleRoot = (root: FiberRoot, element: ReactNodeList) => void;
 export type FindHostInstancesForRefresh = (
   root: FiberRoot,
   families: Array<Family>,
@@ -242,6 +246,22 @@ export let scheduleRefresh: ScheduleRefresh = (
   }
 };
 
+export let scheduleRoot: ScheduleRoot = (
+  root: FiberRoot,
+  element: ReactNodeList,
+): void => {
+  if (__DEV__) {
+    if (root.context !== emptyContextObject) {
+      // Super edge case: root has a legacy _renderSubtree context
+      // but we don't know the parentComponent so we can't pass it.
+      // Just ignore. We'll delete this with _renderSubtree code path later.
+      return;
+    }
+    flushPassiveEffects();
+    updateContainerAtExpirationTime(element, root, null, Sync, null);
+  }
+};
+
 function scheduleFibersWithFamiliesRecursively(
   fiber: Fiber,
   updatedFamilies: Set<Family>,
@@ -276,7 +296,11 @@ function scheduleFibersWithFamiliesRecursively(
         if (staleFamilies.has(family)) {
           needsRemount = true;
         } else if (updatedFamilies.has(family)) {
-          needsRender = true;
+          if (tag === ClassComponent) {
+            needsRemount = true;
+          } else {
+            needsRender = true;
+          }
         }
       }
     }

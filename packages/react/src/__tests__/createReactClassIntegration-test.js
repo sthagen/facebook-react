@@ -443,6 +443,7 @@ describe('create-react-class-integration', () => {
 
   it('warns if getDerivedStateFromProps is not static', () => {
     const Foo = createReactClass({
+      displayName: 'Foo',
       getDerivedStateFromProps() {
         return {};
       },
@@ -453,7 +454,7 @@ describe('create-react-class-integration', () => {
     expect(() =>
       ReactDOM.render(<Foo foo="foo" />, document.createElement('div')),
     ).toWarnDev(
-      'Component: getDerivedStateFromProps() is defined as an instance method ' +
+      'Foo: getDerivedStateFromProps() is defined as an instance method ' +
         'and will be ignored. Instead, declare it as a static method.',
       {withoutStack: true},
     );
@@ -461,6 +462,7 @@ describe('create-react-class-integration', () => {
 
   it('warns if getDerivedStateFromError is not static', () => {
     const Foo = createReactClass({
+      displayName: 'Foo',
       getDerivedStateFromError() {
         return {};
       },
@@ -471,7 +473,7 @@ describe('create-react-class-integration', () => {
     expect(() =>
       ReactDOM.render(<Foo foo="foo" />, document.createElement('div')),
     ).toWarnDev(
-      'Component: getDerivedStateFromError() is defined as an instance method ' +
+      'Foo: getDerivedStateFromError() is defined as an instance method ' +
         'and will be ignored. Instead, declare it as a static method.',
       {withoutStack: true},
     );
@@ -479,6 +481,7 @@ describe('create-react-class-integration', () => {
 
   it('warns if getSnapshotBeforeUpdate is static', () => {
     const Foo = createReactClass({
+      displayName: 'Foo',
       statics: {
         getSnapshotBeforeUpdate: function() {
           return null;
@@ -491,7 +494,7 @@ describe('create-react-class-integration', () => {
     expect(() =>
       ReactDOM.render(<Foo foo="foo" />, document.createElement('div')),
     ).toWarnDev(
-      'Component: getSnapshotBeforeUpdate() is defined as a static method ' +
+      'Foo: getSnapshotBeforeUpdate() is defined as a static method ' +
         'and will be ignored. Instead, declare it as an instance method.',
       {withoutStack: true},
     );
@@ -499,6 +502,7 @@ describe('create-react-class-integration', () => {
 
   it('should warn if state is not properly initialized before getDerivedStateFromProps', () => {
     const Component = createReactClass({
+      displayName: 'Component',
       statics: {
         getDerivedStateFromProps: function() {
           return null;
@@ -555,14 +559,14 @@ describe('create-react-class-integration', () => {
           '  componentWillReceiveProps\n' +
           '  componentWillUpdate\n\n' +
           'The above lifecycles should be removed. Learn more about this warning here:\n' +
-          'https://fb.me/react-async-component-lifecycle-hooks',
+          'https://fb.me/react-unsafe-component-lifecycles',
         {withoutStack: true},
       );
     }).toLowPriorityWarnDev(
       [
-        'componentWillMount is deprecated',
-        'componentWillReceiveProps is deprecated',
-        'componentWillUpdate is deprecated',
+        'componentWillMount has been renamed',
+        'componentWillReceiveProps has been renamed',
+        'componentWillUpdate has been renamed',
       ],
       {withoutStack: true},
     );
@@ -599,14 +603,14 @@ describe('create-react-class-integration', () => {
           '  componentWillReceiveProps\n' +
           '  componentWillUpdate\n\n' +
           'The above lifecycles should be removed. Learn more about this warning here:\n' +
-          'https://fb.me/react-async-component-lifecycle-hooks',
+          'https://fb.me/react-unsafe-component-lifecycles',
         {withoutStack: true},
       );
     }).toLowPriorityWarnDev(
       [
-        'componentWillMount is deprecated',
-        'componentWillReceiveProps is deprecated',
-        'componentWillUpdate is deprecated',
+        'componentWillMount has been renamed',
+        'componentWillReceiveProps has been renamed',
+        'componentWillUpdate has been renamed',
       ],
       {withoutStack: true},
     );
@@ -649,9 +653,9 @@ describe('create-react-class-integration', () => {
       ReactDOM.render(<Component foo="bar" />, div),
     ).toLowPriorityWarnDev(
       [
-        'componentWillMount is deprecated',
-        'componentWillReceiveProps is deprecated',
-        'componentWillUpdate is deprecated',
+        'componentWillMount has been renamed',
+        'componentWillReceiveProps has been renamed',
+        'componentWillUpdate has been renamed',
       ],
       {withoutStack: true},
     );

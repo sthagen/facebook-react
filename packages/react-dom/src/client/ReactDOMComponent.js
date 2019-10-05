@@ -9,16 +9,13 @@
 
 // TODO: direct imports like some-package/src/* are bad. Fix me.
 import {getCurrentFiberOwnerNameInDevOrNull} from 'react-reconciler/src/ReactCurrentFiber';
-import {registrationNameModules} from 'events/EventPluginRegistry';
+import {registrationNameModules} from 'legacy-events/EventPluginRegistry';
 import warning from 'shared/warning';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import warningWithoutStack from 'shared/warningWithoutStack';
-import type {ReactDOMEventResponderEventType} from 'shared/ReactDOMTypes';
-import type {DOMTopLevelEventType} from 'events/TopLevelEventTypes';
-import {
-  setListenToResponderEventTypes,
-  generateListeningKey,
-} from '../events/DOMEventResponderSystem';
+import endsWith from 'shared/endsWith';
+import type {DOMTopLevelEventType} from 'legacy-events/TopLevelEventTypes';
+import {setListenToResponderEventTypes} from '../events/DOMEventResponderSystem';
 
 import {
   getValueForAttribute,
@@ -88,20 +85,25 @@ import possibleStandardNames from '../shared/possibleStandardNames';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
 import {validateProperties as validateInputProperties} from '../shared/ReactDOMNullInputValuePropHook';
 import {validateProperties as validateUnknownProperties} from '../shared/ReactDOMUnknownPropertyHook';
+import {toStringOrTrustedType} from './ToStringValue';
 
-import {enableEventAPI} from 'shared/ReactFeatureFlags';
+import {
+  enableFlareAPI,
+  enableTrustedTypesIntegration,
+} from 'shared/ReactFeatureFlags';
 
 let didWarnInvalidHydration = false;
 let didWarnShadyDOM = false;
+let didWarnScriptTags = false;
 
 const DANGEROUSLY_SET_INNER_HTML = 'dangerouslySetInnerHTML';
 const SUPPRESS_CONTENT_EDITABLE_WARNING = 'suppressContentEditableWarning';
 const SUPPRESS_HYDRATION_WARNING = 'suppressHydrationWarning';
-const HYDRATE_TOUCH_HIT_TARGET = 'hydrateTouchHitTarget';
 const AUTOFOCUS = 'autoFocus';
 const CHILDREN = 'children';
 const STYLE = 'style';
 const HTML = '__html';
+const LISTENERS = 'listeners';
 
 const {html: HTML_NAMESPACE} = Namespaces;
 
@@ -344,6 +346,7 @@ function setInitialDOMProperties(
         setTextContent(domElement, '' + nextProp);
       }
     } else if (
+      (enableFlareAPI && propKey === LISTENERS) ||
       propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
       propKey === SUPPRESS_HYDRATION_WARNING
     ) {
@@ -424,6 +427,18 @@ export function createElement(
       // Create the script via .innerHTML so its "parser-inserted" flag is
       // set to true and it does not execute
       const div = ownerDocument.createElement('div');
+      if (__DEV__) {
+        if (enableTrustedTypesIntegration && !didWarnScriptTags) {
+          warning(
+            false,
+            'Encountered a script tag while rendering React component. ' +
+              'Scripts inside React components are never executed when rendering ' +
+              'on the client. Consider using template tag instead ' +
+              '(https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template).',
+          );
+          didWarnScriptTags = true;
+        }
+      }
       div.innerHTML = '<script><' + '/script>'; // eslint-disable-line
       // This is guaranteed to yield a script element.
       const firstChild = ((div.firstChild: any): HTMLScriptElement);
@@ -700,6 +715,7 @@ export function diffProperties(
     } else if (propKey === DANGEROUSLY_SET_INNER_HTML || propKey === CHILDREN) {
       // Noop. This is handled by the clear text mechanism.
     } else if (
+      (enableFlareAPI && propKey === LISTENERS) ||
       propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
       propKey === SUPPRESS_HYDRATION_WARNING
     ) {
@@ -777,7 +793,10 @@ export function diffProperties(
       const lastHtml = lastProp ? lastProp[HTML] : undefined;
       if (nextHtml != null) {
         if (lastHtml !== nextHtml) {
-          (updatePayload = updatePayload || []).push(propKey, '' + nextHtml);
+          (updatePayload = updatePayload || []).push(
+            propKey,
+            toStringOrTrustedType(nextHtml),
+          );
         }
       } else {
         // TODO: It might be too late to clear this if we have children
@@ -791,6 +810,7 @@ export function diffProperties(
         (updatePayload = updatePayload || []).push(propKey, '' + nextProp);
       }
     } else if (
+      (enableFlareAPI && propKey === LISTENERS) ||
       propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
       propKey === SUPPRESS_HYDRATION_WARNING
     ) {
@@ -1034,8 +1054,6 @@ export function diffHydratedProperties(
         }
         ensureListeningTo(rootContainerElement, propKey);
       }
-    } else if (enableEventAPI && propKey === HYDRATE_TOUCH_HIT_TARGET) {
-      updatePayload = [STYLE, rawProps.style];
     } else if (
       __DEV__ &&
       // Convince Flow we've calculated it (it's DEV-only in this method.)
@@ -1047,6 +1065,7 @@ export function diffHydratedProperties(
       if (suppressHydrationWarning) {
         // Don't bother comparing. We're ignoring all these warnings.
       } else if (
+        (enableFlareAPI && propKey === LISTENERS) ||
         propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
         propKey === SUPPRESS_HYDRATION_WARNING ||
         // Controlled attributes are not validated
@@ -1287,56 +1306,35 @@ export function restoreControlledState(
 }
 
 export function listenToEventResponderEventTypes(
-  eventTypes: Array<ReactDOMEventResponderEventType>,
+  eventTypes: Array<string>,
   element: Element | Document,
 ): void {
-  if (enableEventAPI) {
+  if (enableFlareAPI) {
     // Get the listening Set for this element. We use this to track
     // what events we're listening to.
     const listeningSet = getListeningSetForElement(element);
 
     // Go through each target event type of the event responder
     for (let i = 0, length = eventTypes.length; i < length; ++i) {
-      const targetEventType = eventTypes[i];
-      let topLevelType;
-      let passive = true;
-
-      // If no event config object is provided (i.e. - only a string),
-      // we default to enabling passive and not capture.
-      if (typeof targetEventType === 'string') {
-        topLevelType = targetEventType;
-      } else {
-        if (__DEV__) {
-          warning(
-            typeof targetEventType === 'object' && targetEventType !== null,
-            'Event Responder: invalid entry in event types array. ' +
-              'Entry must be string or an object. Instead, got %s.',
-            targetEventType,
-          );
-        }
-        const targetEventConfigObject = ((targetEventType: any): {
-          name: string,
-          passive?: boolean,
-        });
-        topLevelType = targetEventConfigObject.name;
-        if (targetEventConfigObject.passive !== undefined) {
-          passive = targetEventConfigObject.passive;
-        }
-      }
-      const listeningName = generateListeningKey(topLevelType, passive);
-      if (!listeningSet.has(listeningName)) {
+      const eventType = eventTypes[i];
+      const isPassive = !endsWith(eventType, '_active');
+      const eventKey = isPassive ? eventType + '_passive' : eventType;
+      const targetEventType = isPassive
+        ? eventType
+        : eventType.substring(0, eventType.length - 7);
+      if (!listeningSet.has(eventKey)) {
         trapEventForResponderEventSystem(
           element,
-          ((topLevelType: any): DOMTopLevelEventType),
-          passive,
+          ((targetEventType: any): DOMTopLevelEventType),
+          isPassive,
         );
-        listeningSet.add(listeningName);
+        listeningSet.add(eventKey);
       }
     }
   }
 }
 
 // We can remove this once the event API is stable and out of a flag
-if (enableEventAPI) {
+if (enableFlareAPI) {
   setListenToResponderEventTypes(listenToEventResponderEventTypes);
 }

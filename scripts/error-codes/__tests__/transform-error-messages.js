@@ -7,7 +7,7 @@
 /* eslint-disable quotes */
 'use strict';
 
-let babel = require('babel-core');
+let babel = require('@babel/core');
 let devExpressionWithCodes = require('../transform-error-messages');
 
 function transform(input, options = {}) {
@@ -37,14 +37,13 @@ invariant(condition, 'Do not override existing functions.');
     ).toMatchSnapshot();
   });
 
-  it('should only add `ReactError` and `ReactErrorProd` once each', () => {
-    expect(
+  it('should throw if invariant is not in an expression statement', () => {
+    expect(() => {
       transform(`
 import invariant from 'shared/invariant';
-invariant(condition, 'Do not override existing functions.');
-invariant(condition, 'Do not override existing functions.');
-`)
-    ).toMatchSnapshot();
+cond && invariant(condition, 'Do not override existing functions.');
+`);
+    }).toThrow('invariant() cannot be called from expression context');
   });
 
   it('should support invariant calls with args', () => {

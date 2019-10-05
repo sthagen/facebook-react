@@ -15,14 +15,12 @@ import type {Update} from './ReactUpdateQueue';
 import type {Thenable} from './ReactFiberWorkLoop';
 import type {SuspenseContext} from './ReactFiberSuspenseContext';
 
-import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
 import getComponentName from 'shared/getComponentName';
 import warningWithoutStack from 'shared/warningWithoutStack';
 import {
   ClassComponent,
   HostRoot,
   SuspenseComponent,
-  DehydratedSuspenseComponent,
   IncompleteClassComponent,
 } from 'shared/ReactWorkTags';
 import {
@@ -32,10 +30,6 @@ import {
   ShouldCapture,
   LifecycleEffectMask,
 } from 'shared/ReactSideEffectTags';
-import {
-  enableSchedulerTracing,
-  enableSuspenseServerRenderer,
-} from 'shared/ReactFeatureFlags';
 import {NoMode, BatchedMode} from './ReactTypeOfMode';
 import {shouldCaptureSuspense} from './ReactFiberSuspenseComponent';
 
@@ -61,15 +55,11 @@ import {
   markLegacyErrorBoundaryAsFailed,
   isAlreadyFailedLegacyErrorBoundary,
   pingSuspendedRoot,
-  resolveRetryThenable,
   checkForWrongSuspensePriorityInDEV,
 } from './ReactFiberWorkLoop';
 
-import invariant from 'shared/invariant';
-
 import {Sync} from './ReactFiberExpirationTime';
 
-const PossiblyWeakSet = typeof WeakSet === 'function' ? WeakSet : Set;
 const PossiblyWeakMap = typeof WeakMap === 'function' ? WeakMap : Map;
 
 function createRootErrorUpdate(
@@ -102,6 +92,7 @@ function createClassErrorUpdate(
   if (typeof getDerivedStateFromError === 'function') {
     const error = errorInfo.value;
     update.payload = () => {
+      logError(fiber, errorInfo);
       return getDerivedStateFromError(error);
     };
   }
@@ -119,10 +110,12 @@ function createClassErrorUpdate(
         // TODO: Warn in strict mode if getDerivedStateFromError is
         // not defined.
         markLegacyErrorBoundaryAsFailed(this);
+
+        // Only log here if componentDidCatch is the only error boundary method defined
+        logError(fiber, errorInfo);
       }
       const error = errorInfo.value;
       const stack = errorInfo.stack;
-      logError(fiber, errorInfo);
       this.componentDidCatch(error, {
         componentStack: stack !== null ? stack : '',
       });
@@ -178,9 +171,6 @@ function attachPingListener(
       thenable,
       renderExpirationTime,
     );
-    if (enableSchedulerTracing) {
-      ping = Schedule_tracing_wrap(ping);
-    }
     thenable.then(ping, ping);
   }
 }
@@ -257,7 +247,7 @@ function throwException(
               sourceFiber.tag = IncompleteClassComponent;
             } else {
               // When we try rendering again, we should not reuse the current fiber,
-              // since it's known to be in an inconsistent state. Use a force updte to
+              // since it's known to be in an inconsistent state. Use a force update to
               // prevent a bail out.
               const update = createUpdate(Sync, null);
               update.tag = ForceUpdate;
@@ -320,36 +310,6 @@ function throwException(
         workInProgress.effectTag |= ShouldCapture;
         workInProgress.expirationTime = renderExpirationTime;
 
-        return;
-      } else if (
-        enableSuspenseServerRenderer &&
-        workInProgress.tag === DehydratedSuspenseComponent
-      ) {
-        attachPingListener(root, renderExpirationTime, thenable);
-
-        // Since we already have a current fiber, we can eagerly add a retry listener.
-        let retryCache = workInProgress.memoizedState;
-        if (retryCache === null) {
-          retryCache = workInProgress.memoizedState = new PossiblyWeakSet();
-          const current = workInProgress.alternate;
-          invariant(
-            current,
-            'A dehydrated suspense boundary must commit before trying to render. ' +
-              'This is probably a bug in React.',
-          );
-          current.memoizedState = retryCache;
-        }
-        // Memoize using the boundary fiber to prevent redundant listeners.
-        if (!retryCache.has(thenable)) {
-          retryCache.add(thenable);
-          let retry = resolveRetryThenable.bind(null, workInProgress, thenable);
-          if (enableSchedulerTracing) {
-            retry = Schedule_tracing_wrap(retry);
-          }
-          thenable.then(retry, retry);
-        }
-        workInProgress.effectTag |= ShouldCapture;
-        workInProgress.expirationTime = renderExpirationTime;
         return;
       }
       // This boundary already captured during this render. Continue to the next

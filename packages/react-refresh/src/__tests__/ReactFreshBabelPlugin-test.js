@@ -7,7 +7,7 @@
 
 'use strict';
 
-let babel = require('babel-core');
+let babel = require('@babel/core');
 let {wrap} = require('jest-snapshot-serializer-raw');
 let freshPlugin = require('react-refresh/babel');
 
@@ -15,7 +15,20 @@ function transform(input, options = {}) {
   return wrap(
     babel.transform(input, {
       babelrc: false,
-      plugins: ['syntax-jsx', 'syntax-dynamic-import', freshPlugin],
+      configFile: false,
+      plugins: [
+        '@babel/syntax-jsx',
+        '@babel/syntax-dynamic-import',
+        [
+          freshPlugin,
+          {
+            skipEnvCheck: true,
+            // To simplify debugging tests:
+            emitFullSignatures: true,
+          },
+        ],
+        ...(options.plugins || []),
+      ],
     }).code,
   );
 }
@@ -387,6 +400,26 @@ describe('ReactFreshBabelPlugin', () => {
     ).toMatchSnapshot();
   });
 
+  it('includes custom hooks into the signatures when commonjs target is used', () => {
+    // this test is passing with Babel 6
+    // but would fail for Babel 7 _without_ custom hook node being cloned for signature
+    expect(
+      transform(
+        `
+        import {useFancyState} from './hooks';
+        
+        export default function App() {
+          const bar = useFancyState();
+          return <h1>{bar}</h1>;
+        }
+    `,
+        {
+          plugins: ['transform-es2015-modules-commonjs'],
+        },
+      ),
+    ).toMatchSnapshot();
+  });
+
   it('generates valid signature for exotic ways to call Hooks', () => {
     expect(
       transform(`
@@ -432,6 +465,19 @@ describe('ReactFreshBabelPlugin', () => {
           );
         }
     `),
+    ).toMatchSnapshot();
+  });
+
+  it('can handle implicit arrow returns', () => {
+    expect(
+      transform(`
+        export default () => useContext(X);
+        export const Foo = () => useContext(X);
+        module.exports = () => useContext(X);
+        const Bar = () => useContext(X);
+        const Baz = memo(() => useContext(X));
+        const Qux = () => (0, useContext(X));
+      `),
     ).toMatchSnapshot();
   });
 });

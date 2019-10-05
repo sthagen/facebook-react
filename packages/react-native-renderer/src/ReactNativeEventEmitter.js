@@ -7,18 +7,19 @@
  * @flow
  */
 
+import {PLUGIN_EVENT_SYSTEM} from 'legacy-events/EventSystemFlags';
 import {
   getListener,
   runExtractedPluginEventsInBatch,
-} from 'events/EventPluginHub';
-import {registrationNameModules} from 'events/EventPluginRegistry';
-import {batchedUpdates} from 'events/ReactGenericBatching';
+} from 'legacy-events/EventPluginHub';
+import {registrationNameModules} from 'legacy-events/EventPluginRegistry';
+import {batchedUpdates} from 'legacy-events/ReactGenericBatching';
 import warningWithoutStack from 'shared/warningWithoutStack';
 
 import {getInstanceFromNode} from './ReactNativeComponentTree';
 
-import type {AnyNativeEvent} from 'events/PluginModuleType';
-import type {TopLevelType} from 'events/TopLevelEventTypes';
+import type {AnyNativeEvent} from 'legacy-events/PluginModuleType';
+import type {TopLevelType} from 'legacy-events/TopLevelEventTypes';
 
 export {getListener, registrationNameModules as registrationNames};
 
@@ -103,6 +104,7 @@ function _receiveRootNodeIDEvent(
       inst,
       nativeEvent,
       nativeEvent.target,
+      PLUGIN_EVENT_SYSTEM,
     );
   });
   // React Native doesn't use ReactControlledComponent but if it did, here's

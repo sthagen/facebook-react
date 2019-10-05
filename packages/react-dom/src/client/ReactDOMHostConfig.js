@@ -31,8 +31,7 @@ import {
   isEnabled as ReactBrowserEventEmitterIsEnabled,
   setEnabled as ReactBrowserEventEmitterSetEnabled,
 } from '../events/ReactBrowserEventEmitter';
-import {Namespaces, getChildNamespace} from '../shared/DOMNamespaces';
-import {addRootEventTypesForComponentInstance} from '../events/DOMEventResponderSystem';
+import {getChildNamespace} from '../shared/DOMNamespaces';
 import {
   ELEMENT_NODE,
   TEXT_NODE,
@@ -45,14 +44,15 @@ import dangerousStyleValue from '../shared/dangerousStyleValue';
 import type {DOMContainer} from './ReactDOM';
 import type {
   ReactDOMEventResponder,
-  ReactDOMEventComponentInstance,
+  ReactDOMEventResponderInstance,
+  ReactDOMFundamentalComponentInstance,
 } from 'shared/ReactDOMTypes';
 import {
+  addRootEventTypesForResponderInstance,
   mountEventResponder,
   unmountEventResponder,
 } from '../events/DOMEventResponderSystem';
-import {REACT_EVENT_TARGET_TOUCH_HIT} from 'shared/ReactSymbols';
-import {canUseDOM} from 'shared/ExecutionEnvironment';
+import {retryIfBlockedOn} from '../events/ReactDOMEventReplaying';
 
 export type Type = string;
 export type Props = {
@@ -91,10 +91,6 @@ export type PublicInstance = Element | Text;
 type HostContextDev = {
   namespace: string,
   ancestorInfo: mixed,
-  eventData: null | {|
-    isEventComponent?: boolean,
-    isEventTarget?: boolean,
-  |},
 };
 type HostContextProd = string;
 export type HostContext = HostContextDev | HostContextProd;
@@ -105,11 +101,9 @@ export type NoTimeout = -1;
 
 import {
   enableSuspenseServerRenderer,
-  enableEventAPI,
+  enableFlareAPI,
+  enableFundamentalAPI,
 } from 'shared/ReactFeatureFlags';
-import warning from 'shared/warning';
-
-const {html: HTML_NAMESPACE} = Namespaces;
 
 let SUPPRESS_HYDRATION_WARNING;
 if (__DEV__) {
@@ -167,7 +161,7 @@ export function getRootHostContext(
   if (__DEV__) {
     const validatedTag = type.toLowerCase();
     const ancestorInfo = updatedAncestorInfo(null, validatedTag);
-    return {namespace, ancestorInfo, eventData: null};
+    return {namespace, ancestorInfo};
   }
   return namespace;
 }
@@ -184,61 +178,10 @@ export function getChildHostContext(
       parentHostContextDev.ancestorInfo,
       type,
     );
-    return {namespace, ancestorInfo, eventData: null};
+    return {namespace, ancestorInfo};
   }
   const parentNamespace = ((parentHostContext: any): HostContextProd);
   return getChildNamespace(parentNamespace, type);
-}
-
-export function getChildHostContextForEventComponent(
-  parentHostContext: HostContext,
-): HostContext {
-  if (__DEV__) {
-    const parentHostContextDev = ((parentHostContext: any): HostContextDev);
-    const {namespace, ancestorInfo} = parentHostContextDev;
-    warning(
-      parentHostContextDev.eventData === null ||
-        !parentHostContextDev.eventData.isEventTarget,
-      'validateDOMNesting: React event targets must not have event components as children.',
-    );
-    const eventData = {
-      isEventComponent: true,
-      isEventTarget: false,
-    };
-    return {namespace, ancestorInfo, eventData};
-  }
-  return parentHostContext;
-}
-
-export function getChildHostContextForEventTarget(
-  parentHostContext: HostContext,
-  type: Symbol | number,
-): HostContext {
-  if (__DEV__) {
-    const parentHostContextDev = ((parentHostContext: any): HostContextDev);
-    const {namespace, ancestorInfo} = parentHostContextDev;
-    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-      warning(
-        parentHostContextDev.eventData === null ||
-          !parentHostContextDev.eventData.isEventComponent,
-        'validateDOMNesting: <TouchHitTarget> cannot not be a direct child of an event component. ' +
-          'Ensure <TouchHitTarget> is a direct child of a DOM element.',
-      );
-      const parentNamespace = parentHostContextDev.namespace;
-      if (parentNamespace !== HTML_NAMESPACE) {
-        throw new Error(
-          '<TouchHitTarget> was used in an unsupported DOM namespace. ' +
-            'Ensure the <TouchHitTarget> is used in an HTML namespace.',
-        );
-      }
-    }
-    const eventData = {
-      isEventComponent: false,
-      isEventTarget: true,
-    };
-    return {namespace, ancestorInfo, eventData};
-  }
-  return parentHostContext;
 }
 
 export function getPublicInstance(instance: Instance): * {
@@ -372,17 +315,6 @@ export function createTextInstance(
   if (__DEV__) {
     const hostContextDev = ((hostContext: any): HostContextDev);
     validateDOMNesting(null, text, hostContextDev.ancestorInfo);
-    if (enableEventAPI) {
-      const eventData = hostContextDev.eventData;
-      if (eventData !== null) {
-        warning(
-          !eventData.isEventComponent,
-          'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
-            'Wrap the child text "%s" in an element.',
-          text,
-        );
-      }
-    }
   }
   const textNode: TextInstance = createTextNode(text, rootContainerInstance);
   precacheFiberNode(internalInstanceHandle, textNode);
@@ -390,6 +322,7 @@ export function createTextInstance(
 }
 
 export const isPrimaryRenderer = true;
+export const warnsIfNotActing = true;
 // This initialization code may run even on server environments
 // if a component just imports ReactDOM (e.g. for findDOMNode).
 // Some environments might not have setTimeout or clearTimeout.
@@ -545,6 +478,8 @@ export function clearSuspenseBoundary(
       if (data === SUSPENSE_END_DATA) {
         if (depth === 0) {
           parentInstance.removeChild(nextNode);
+          // Retry if any event replaying was blocked on this.
+          retryIfBlockedOn(suspenseInstance);
           return;
         } else {
           depth--;
@@ -560,6 +495,8 @@ export function clearSuspenseBoundary(
     node = nextNode;
   } while (node);
   // TODO: Warn, we didn't find the end comment boundary.
+  // Retry if any event replaying was blocked on this.
+  retryIfBlockedOn(suspenseInstance);
 }
 
 export function clearSuspenseBoundaryFromContainer(
@@ -573,6 +510,8 @@ export function clearSuspenseBoundaryFromContainer(
   } else {
     // Document nodes should never contain suspense boundaries.
   }
+  // Retry if any event replaying was blocked on this.
+  retryIfBlockedOn(container);
 }
 
 export function hideInstance(instance: Instance): void {
@@ -669,44 +608,39 @@ export function registerSuspenseInstanceRetry(
   instance._reactRetry = callback;
 }
 
+function getNextHydratable(node) {
+  // Skip non-hydratable nodes.
+  for (; node != null; node = node.nextSibling) {
+    const nodeType = node.nodeType;
+    if (nodeType === ELEMENT_NODE || nodeType === TEXT_NODE) {
+      break;
+    }
+    if (enableSuspenseServerRenderer) {
+      if (nodeType === COMMENT_NODE) {
+        const nodeData = (node: any).data;
+        if (
+          nodeData === SUSPENSE_START_DATA ||
+          nodeData === SUSPENSE_FALLBACK_START_DATA ||
+          nodeData === SUSPENSE_PENDING_START_DATA
+        ) {
+          break;
+        }
+      }
+    }
+  }
+  return (node: any);
+}
+
 export function getNextHydratableSibling(
   instance: HydratableInstance,
 ): null | HydratableInstance {
-  let node = instance.nextSibling;
-  // Skip non-hydratable nodes.
-  while (
-    node &&
-    node.nodeType !== ELEMENT_NODE &&
-    node.nodeType !== TEXT_NODE &&
-    (!enableSuspenseServerRenderer ||
-      node.nodeType !== COMMENT_NODE ||
-      ((node: any).data !== SUSPENSE_START_DATA &&
-        (node: any).data !== SUSPENSE_PENDING_START_DATA &&
-        (node: any).data !== SUSPENSE_FALLBACK_START_DATA))
-  ) {
-    node = node.nextSibling;
-  }
-  return (node: any);
+  return getNextHydratable(instance.nextSibling);
 }
 
 export function getFirstHydratableChild(
   parentInstance: Container | Instance,
 ): null | HydratableInstance {
-  let next = parentInstance.firstChild;
-  // Skip non-hydratable nodes.
-  while (
-    next &&
-    next.nodeType !== ELEMENT_NODE &&
-    next.nodeType !== TEXT_NODE &&
-    (!enableSuspenseServerRenderer ||
-      next.nodeType !== COMMENT_NODE ||
-      ((next: any).data !== SUSPENSE_START_DATA &&
-        (next: any).data !== SUSPENSE_FALLBACK_START_DATA &&
-        (next: any).data !== SUSPENSE_PENDING_START_DATA))
-  ) {
-    next = next.nextSibling;
-  }
-  return (next: any);
+  return getNextHydratable(parentInstance.firstChild);
 }
 
 export function hydrateInstance(
@@ -746,6 +680,13 @@ export function hydrateTextInstance(
   return diffHydratedText(textInstance, text);
 }
 
+export function hydrateSuspenseInstance(
+  suspenseInstance: SuspenseInstance,
+  internalInstanceHandle: Object,
+) {
+  precacheFiberNode(internalInstanceHandle, suspenseInstance);
+}
+
 export function getNextHydratableInstanceAfterSuspenseInstance(
   suspenseInstance: SuspenseInstance,
 ): null | HydratableInstance {
@@ -763,7 +704,11 @@ export function getNextHydratableInstanceAfterSuspenseInstance(
         } else {
           depth--;
         }
-      } else if (data === SUSPENSE_START_DATA) {
+      } else if (
+        data === SUSPENSE_START_DATA ||
+        data === SUSPENSE_FALLBACK_START_DATA ||
+        data === SUSPENSE_PENDING_START_DATA
+      ) {
         depth++;
       }
     }
@@ -771,6 +716,51 @@ export function getNextHydratableInstanceAfterSuspenseInstance(
   }
   // TODO: Warn, we didn't find the end comment boundary.
   return null;
+}
+
+// Returns the SuspenseInstance if this node is a direct child of a
+// SuspenseInstance. I.e. if its previous sibling is a Comment with
+// SUSPENSE_x_START_DATA. Otherwise, null.
+export function getParentSuspenseInstance(
+  targetInstance: Instance,
+): null | SuspenseInstance {
+  let node = targetInstance.previousSibling;
+  // Skip past all nodes within this suspense boundary.
+  // There might be nested nodes so we need to keep track of how
+  // deep we are and only break out when we're back on top.
+  let depth = 0;
+  while (node) {
+    if (node.nodeType === COMMENT_NODE) {
+      let data = ((node: any).data: string);
+      if (
+        data === SUSPENSE_START_DATA ||
+        data === SUSPENSE_FALLBACK_START_DATA ||
+        data === SUSPENSE_PENDING_START_DATA
+      ) {
+        if (depth === 0) {
+          return ((node: any): SuspenseInstance);
+        } else {
+          depth--;
+        }
+      } else if (data === SUSPENSE_END_DATA) {
+        depth++;
+      }
+    }
+    node = node.previousSibling;
+  }
+  return null;
+}
+
+export function commitHydratedContainer(container: Container): void {
+  // Retry if any event replaying was blocked on this.
+  retryIfBlockedOn(container);
+}
+
+export function commitHydratedSuspenseInstance(
+  suspenseInstance: SuspenseInstance,
+): void {
+  // Retry if any event replaying was blocked on this.
+  retryIfBlockedOn(suspenseInstance);
 }
 
 export function didNotMatchHydratedContainerTextInstance(
@@ -887,125 +877,102 @@ export function didNotFindHydratableSuspenseInstance(
   }
 }
 
-export function mountEventComponent(
-  eventComponentInstance: ReactDOMEventComponentInstance,
-): void {
-  if (enableEventAPI) {
-    const rootContainerInstance = ((eventComponentInstance.rootInstance: any): Container);
-    const doc = rootContainerInstance.ownerDocument;
-    const documentBody = doc.body || doc;
-    const responder = eventComponentInstance.responder;
-    const {
-      rootEventTypes,
-      targetEventTypes,
-    } = ((responder: any): ReactDOMEventResponder);
-    if (targetEventTypes !== undefined) {
-      listenToEventResponderEventTypes(targetEventTypes, documentBody);
-    }
-    if (rootEventTypes !== undefined) {
-      addRootEventTypesForComponentInstance(
-        eventComponentInstance,
-        rootEventTypes,
-      );
-      listenToEventResponderEventTypes(rootEventTypes, documentBody);
-    }
-    mountEventResponder(eventComponentInstance);
-  }
-}
-
-export function updateEventComponent(
-  eventComponentInstance: ReactDOMEventComponentInstance,
-): void {
-  // NO-OP, why might use this in the future
-}
-
-export function unmountEventComponent(
-  eventComponentInstance: ReactDOMEventComponentInstance,
-): void {
-  if (enableEventAPI) {
-    // TODO stop listening to targetEventTypes
-    unmountEventResponder(eventComponentInstance);
-  }
-}
-
-export function getEventTargetChildElement(
-  type: Symbol | number,
-  props: Props,
-): null | EventTargetChildElement {
-  if (enableEventAPI) {
-    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-      const {bottom, left, right, top} = props;
-
-      if (!bottom && !left && !right && !top) {
-        return null;
-      }
-      return {
-        type: 'div',
-        props: {
-          style: {
-            position: 'absolute',
-            zIndex: -1,
-            pointerEvents: null,
-            bottom: bottom ? `-${bottom}px` : '0px',
-            left: left ? `-${left}px` : '0px',
-            right: right ? `-${right}px` : '0px',
-            top: top ? `-${top}px` : '0px',
-          },
-          hydrateTouchHitTarget: true,
-          suppressHydrationWarning: true,
-        },
-      };
-    }
-  }
-  return null;
-}
-
-export function handleEventTarget(
-  type: Symbol | number,
-  props: Props,
-  rootContainerInstance: Container,
-  internalInstanceHandle: Object,
-): boolean {
-  if (
-    __DEV__ &&
-    type === REACT_EVENT_TARGET_TOUCH_HIT &&
-    (props.left || props.right || props.top || props.bottom)
-  ) {
-    return true;
-  }
-  return false;
-}
-
-export function commitEventTarget(
-  type: Symbol | number,
-  props: Props,
+export function mountResponderInstance(
+  responder: ReactDOMEventResponder,
+  responderInstance: ReactDOMEventResponderInstance,
+  responderProps: Object,
+  responderState: Object,
   instance: Instance,
-  parentInstance: Instance,
+): ReactDOMEventResponderInstance {
+  // Listen to events
+  const doc = instance.ownerDocument;
+  const {
+    rootEventTypes,
+    targetEventTypes,
+  } = ((responder: any): ReactDOMEventResponder);
+  if (targetEventTypes !== null) {
+    listenToEventResponderEventTypes(targetEventTypes, doc);
+  }
+  if (rootEventTypes !== null) {
+    addRootEventTypesForResponderInstance(responderInstance, rootEventTypes);
+    listenToEventResponderEventTypes(rootEventTypes, doc);
+  }
+  mountEventResponder(
+    responder,
+    responderInstance,
+    responderProps,
+    responderState,
+  );
+  return responderInstance;
+}
+
+export function unmountResponderInstance(
+  responderInstance: ReactDOMEventResponderInstance,
 ): void {
-  if (enableEventAPI) {
-    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-      if (__DEV__ && canUseDOM) {
-        // This is done at DEV time because getComputedStyle will
-        // typically force a style recalculation and force a layout,
-        // reflow -– both of which are sync are expensive.
-        const computedStyles = window.getComputedStyle(parentInstance);
-        const position = computedStyles.getPropertyValue('position');
-        warning(
-          position !== '' && position !== 'static',
-          '<TouchHitTarget> inserts an empty absolutely positioned <div>. ' +
-            'This requires its parent DOM node to be positioned too, but the ' +
-            'parent DOM node was found to have the style "position" set to ' +
-            'either no value, or a value of "static". Try using a "position" ' +
-            'value of "relative".',
-        );
-        warning(
-          computedStyles.getPropertyValue('z-index') !== '',
-          '<TouchHitTarget> inserts an empty <div> with "z-index" of "-1". ' +
-            'This requires its parent DOM node to have a "z-index" greater than "-1",' +
-            'but the parent DOM node was found to no "z-index" value set.' +
-            ' Try using a "z-index" value of "0" or greater.',
-        );
-      }
+  if (enableFlareAPI) {
+    // TODO stop listening to targetEventTypes
+    unmountEventResponder(responderInstance);
+  }
+}
+
+export function getFundamentalComponentInstance(
+  fundamentalInstance: ReactDOMFundamentalComponentInstance,
+): Instance {
+  if (enableFundamentalAPI) {
+    const {currentFiber, impl, props, state} = fundamentalInstance;
+    const instance = impl.getInstance(null, props, state);
+    precacheFiberNode(currentFiber, instance);
+    return instance;
+  }
+  // Because of the flag above, this gets around the Flow error;
+  return (null: any);
+}
+
+export function mountFundamentalComponent(
+  fundamentalInstance: ReactDOMFundamentalComponentInstance,
+): void {
+  if (enableFundamentalAPI) {
+    const {impl, instance, props, state} = fundamentalInstance;
+    const onMount = impl.onMount;
+    if (onMount !== undefined) {
+      onMount(null, instance, props, state);
+    }
+  }
+}
+
+export function shouldUpdateFundamentalComponent(
+  fundamentalInstance: ReactDOMFundamentalComponentInstance,
+): boolean {
+  if (enableFundamentalAPI) {
+    const {impl, prevProps, props, state} = fundamentalInstance;
+    const shouldUpdate = impl.shouldUpdate;
+    if (shouldUpdate !== undefined) {
+      return shouldUpdate(null, prevProps, props, state);
+    }
+  }
+  return true;
+}
+
+export function updateFundamentalComponent(
+  fundamentalInstance: ReactDOMFundamentalComponentInstance,
+): void {
+  if (enableFundamentalAPI) {
+    const {impl, instance, prevProps, props, state} = fundamentalInstance;
+    const onUpdate = impl.onUpdate;
+    if (onUpdate !== undefined) {
+      onUpdate(null, instance, prevProps, props, state);
+    }
+  }
+}
+
+export function unmountFundamentalComponent(
+  fundamentalInstance: ReactDOMFundamentalComponentInstance,
+): void {
+  if (enableFundamentalAPI) {
+    const {impl, instance, props, state} = fundamentalInstance;
+    const onUnmount = impl.onUnmount;
+    if (onUnmount !== undefined) {
+      onUnmount(null, instance, props, state);
     }
   }
 }

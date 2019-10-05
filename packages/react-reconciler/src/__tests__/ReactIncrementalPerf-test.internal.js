@@ -89,6 +89,15 @@ describe('ReactDebugFiberPerf', () => {
       // We don't use the overload with three arguments.
       measure(label, markName) {
         if (markName !== activeMeasure.markName) {
+          // Fail the test.
+          console.error(
+            'Unexpected measure() call: "%s". Active mark is "%s".',
+            markName,
+            activeMeasure.markName,
+          );
+          // This exception will be caught and ignored
+          // because in the real implementation, we don't want
+          // to spam the console due to a React bug.
           throw new Error('Unexpected measure() call.');
         }
         // Step one level up
@@ -127,6 +136,7 @@ describe('ReactDebugFiberPerf', () => {
     require('shared/ReactFeatureFlags').enableProfilerTimer = false;
     require('shared/ReactFeatureFlags').replayFailedUnitOfWorkWithInvokeGuardedCallback = false;
     require('shared/ReactFeatureFlags').debugRenderPhaseSideEffectsForStrictMode = false;
+    require('scheduler/src/SchedulerFeatureFlags').enableProfiling = false;
 
     // Import after the polyfill is set up:
     React = require('react');
@@ -316,10 +326,8 @@ describe('ReactDebugFiberPerf', () => {
     addComment('Should not print a warning');
     expect(() => expect(Scheduler).toFlushWithoutYielding()).toWarnDev(
       [
-        'componentWillMount: Please update the following components ' +
-          'to use componentDidMount instead: NotCascading' +
-          '\n\ncomponentWillReceiveProps: Please update the following components ' +
-          'to use static getDerivedStateFromProps instead: NotCascading',
+        'Using UNSAFE_componentWillMount in strict mode is not recommended',
+        'Using UNSAFE_componentWillReceiveProps in strict mode is not recommended',
       ],
       {withoutStack: true},
     );
@@ -358,14 +366,10 @@ describe('ReactDebugFiberPerf', () => {
     addComment('Mount');
     expect(() => expect(Scheduler).toFlushWithoutYielding()).toWarnDev(
       [
-        'componentWillMount: Please update the following components ' +
-          'to use componentDidMount instead: AllLifecycles' +
-          '\n\ncomponentWillReceiveProps: Please update the following components ' +
-          'to use static getDerivedStateFromProps instead: AllLifecycles' +
-          '\n\ncomponentWillUpdate: Please update the following components ' +
-          'to use componentDidUpdate instead: AllLifecycles',
-        'Legacy context API has been detected within a strict-mode tree: \n\n' +
-          'Please update the following components: AllLifecycles',
+        'Using UNSAFE_componentWillMount in strict mode is not recommended',
+        'Using UNSAFE_componentWillReceiveProps in strict mode is not recommended',
+        'Using UNSAFE_componentWillUpdate in strict mode is not recommended',
+        'Legacy context API has been detected within a strict-mode tree',
       ],
       {withoutStack: true},
     );
@@ -397,21 +401,21 @@ describe('ReactDebugFiberPerf', () => {
   it('measures deferred work in chunks', () => {
     class A extends React.Component {
       render() {
-        Scheduler.yieldValue('A');
+        Scheduler.unstable_yieldValue('A');
         return <div>{this.props.children}</div>;
       }
     }
 
     class B extends React.Component {
       render() {
-        Scheduler.yieldValue('B');
+        Scheduler.unstable_yieldValue('B');
         return <div>{this.props.children}</div>;
       }
     }
 
     class C extends React.Component {
       render() {
-        Scheduler.yieldValue('C');
+        Scheduler.unstable_yieldValue('C');
         return <div>{this.props.children}</div>;
       }
     }
@@ -652,7 +656,7 @@ describe('ReactDebugFiberPerf', () => {
 
   it('warns if an in-progress update is interrupted', () => {
     function Foo() {
-      Scheduler.yieldValue('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return <span />;
     }
 

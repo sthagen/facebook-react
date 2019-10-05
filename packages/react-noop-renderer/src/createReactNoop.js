@@ -23,33 +23,12 @@ import type {RootTag} from 'shared/ReactRootTags';
 import * as Scheduler from 'scheduler/unstable_mock';
 import {createPortal} from 'shared/ReactPortal';
 import expect from 'expect';
-import {
-  REACT_FRAGMENT_TYPE,
-  REACT_ELEMENT_TYPE,
-  REACT_EVENT_TARGET_TOUCH_HIT,
-} from 'shared/ReactSymbols';
-import warning from 'shared/warning';
+import {REACT_FRAGMENT_TYPE, REACT_ELEMENT_TYPE} from 'shared/ReactSymbols';
 import enqueueTask from 'shared/enqueueTask';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import warningWithoutStack from 'shared/warningWithoutStack';
-import {
-  warnAboutMissingMockScheduler,
-  enableEventAPI,
-} from 'shared/ReactFeatureFlags';
 import {ConcurrentRoot, BatchedRoot, LegacyRoot} from 'shared/ReactRootTags';
 
-type EventTargetChildElement = {
-  type: string,
-  props: null | {
-    style?: {
-      position?: string,
-      bottom?: string,
-      left?: string,
-      right?: string,
-      top?: string,
-    },
-  },
-};
 type Container = {
   rootID: string,
   children: Array<Instance | TextInstance>,
@@ -81,13 +60,10 @@ type TextInstance = {|
 |};
 type HostContext = Object;
 
-const {ReactCurrentActingRendererSigil} = ReactSharedInternals;
+const {IsSomeRendererActing} = ReactSharedInternals;
 
 const NO_CONTEXT = {};
 const UPPERCASE_CONTEXT = {};
-const EVENT_COMPONENT_CONTEXT = {};
-const EVENT_TARGET_CONTEXT = {};
-const EVENT_TOUCH_HIT_TARGET_CONTEXT = {};
 const UPDATE_SIGNAL = {};
 if (__DEV__) {
   Object.freeze(NO_CONTEXT);
@@ -284,36 +260,6 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       return NO_CONTEXT;
     },
 
-    getChildHostContextForEventComponent(parentHostContext: HostContext) {
-      if (__DEV__ && enableEventAPI) {
-        warning(
-          parentHostContext !== EVENT_TARGET_CONTEXT &&
-            parentHostContext !== EVENT_TOUCH_HIT_TARGET_CONTEXT,
-          'validateDOMNesting: React event targets must not have event components as children.',
-        );
-        return EVENT_COMPONENT_CONTEXT;
-      }
-      return parentHostContext;
-    },
-
-    getChildHostContextForEventTarget(
-      parentHostContext: HostContext,
-      type: Symbol | number,
-    ) {
-      if (__DEV__ && enableEventAPI) {
-        if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-          warning(
-            parentHostContext !== EVENT_COMPONENT_CONTEXT,
-            'validateDOMNesting: <TouchHitTarget> cannot not be a direct child of an event component. ' +
-              'Ensure <TouchHitTarget> is a direct child of a DOM element.',
-          );
-          return EVENT_TOUCH_HIT_TARGET_CONTEXT;
-        }
-        return EVENT_TARGET_CONTEXT;
-      }
-      return parentHostContext;
-    },
-
     getPublicInstance(instance) {
       return instance;
     },
@@ -397,14 +343,6 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       hostContext: Object,
       internalInstanceHandle: Object,
     ): TextInstance {
-      if (__DEV__ && enableEventAPI) {
-        warning(
-          hostContext !== EVENT_COMPONENT_CONTEXT,
-          'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
-            'Wrap the child text "%s" in an element.',
-          text,
-        );
-      }
       if (hostContext === UPPERCASE_CONTEXT) {
         text = text.toUpperCase();
       }
@@ -434,65 +372,66 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     now: Scheduler.unstable_now,
 
     isPrimaryRenderer: true,
+    warnsIfNotActing: true,
     supportsHydration: false,
 
-    mountEventComponent(): void {
+    mountResponderInstance(): void {
       // NO-OP
     },
 
-    updateEventComponent(): void {
+    unmountResponderInstance(): void {
       // NO-OP
     },
 
-    unmountEventComponent(): void {
-      // NO-OP
+    getFundamentalComponentInstance(fundamentalInstance): Instance {
+      const {impl, props, state} = fundamentalInstance;
+      return impl.getInstance(null, props, state);
     },
 
-    getEventTargetChildElement(
-      type: Symbol | number,
-      props: Props,
-    ): null | EventTargetChildElement {
-      if (enableEventAPI) {
-        if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
-          const {bottom, left, right, top} = props;
-
-          if (!bottom && !left && !right && !top) {
-            return null;
-          }
-          return {
-            type: 'div',
-            props: {
-              style: {
-                position: 'absolute',
-                zIndex: -1,
-                bottom: bottom ? `-${bottom}px` : '0px',
-                left: left ? `-${left}px` : '0px',
-                right: right ? `-${right}px` : '0px',
-                top: top ? `-${top}px` : '0px',
-              },
-            },
-          };
-        }
+    mountFundamentalComponent(fundamentalInstance): void {
+      const {impl, instance, props, state} = fundamentalInstance;
+      const onMount = impl.onUpdate;
+      if (onMount !== undefined) {
+        onMount(null, instance, props, state);
       }
-      return null;
     },
 
-    handleEventTarget(
-      type: Symbol | number,
-      props: Props,
-      rootContainerInstance: Container,
-      internalInstanceHandle: Object,
-    ): boolean {
-      return false;
+    shouldUpdateFundamentalComponent(fundamentalInstance): boolean {
+      const {impl, instance, prevProps, props, state} = fundamentalInstance;
+      const shouldUpdate = impl.shouldUpdate;
+      if (shouldUpdate !== undefined) {
+        return shouldUpdate(null, instance, prevProps, props, state);
+      }
+      return true;
     },
 
-    commitEventTarget(
-      type: Symbol | number,
-      props: Props,
-      instance: Instance,
-      parentInstance: Instance,
-    ): void {
-      // NO-OP
+    updateFundamentalComponent(fundamentalInstance): void {
+      const {impl, instance, prevProps, props, state} = fundamentalInstance;
+      const onUpdate = impl.onUpdate;
+      if (onUpdate !== undefined) {
+        onUpdate(null, instance, prevProps, props, state);
+      }
+    },
+
+    unmountFundamentalComponent(fundamentalInstance): void {
+      const {impl, instance, props, state} = fundamentalInstance;
+      const onUnmount = impl.onUnmount;
+      if (onUnmount !== undefined) {
+        onUnmount(null, instance, props, state);
+      }
+    },
+
+    cloneFundamentalInstance(fundamentalInstance): Instance {
+      const instance = fundamentalInstance.instance;
+      return {
+        children: [],
+        text: instance.text,
+        type: instance.type,
+        prop: instance.prop,
+        id: instance.id,
+        context: instance.context,
+        hidden: instance.hidden,
+      };
     },
   };
 
@@ -653,31 +592,23 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
   const {
     flushPassiveEffects,
     batchedUpdates,
-    ReactActingRendererSigil,
+    IsThisRendererActing,
   } = NoopRenderer;
 
   // this act() implementation should be exactly the same in
   // ReactTestUtilsAct.js, ReactTestRendererAct.js, createReactNoop.js
 
-  let hasWarnedAboutMissingMockScheduler = false;
+  const isSchedulerMocked =
+    typeof Scheduler.unstable_flushAllWithoutAsserting === 'function';
   const flushWork =
-    Scheduler.unstable_flushWithoutYielding ||
+    Scheduler.unstable_flushAllWithoutAsserting ||
     function() {
-      if (warnAboutMissingMockScheduler === true) {
-        if (hasWarnedAboutMissingMockScheduler === false) {
-          warningWithoutStack(
-            null,
-            'Starting from React v17, the "scheduler" module will need to be mocked ' +
-              'to guarantee consistent behaviour across tests and browsers. To fix this, add the following ' +
-              "to the top of your tests, or in your framework's global config file -\n\n" +
-              'As an example, for jest - \n' +
-              "jest.mock('scheduler', () => require.requireActual('scheduler/unstable_mock'));\n\n" +
-              'For more info, visit https://fb.me/react-mock-scheduler',
-          );
-          hasWarnedAboutMissingMockScheduler = true;
-        }
+      let didFlushWork = false;
+      while (flushPassiveEffects()) {
+        didFlushWork = true;
       }
-      while (flushPassiveEffects()) {}
+
+      return didFlushWork;
     };
 
   function flushWorkAndMicroTasks(onDone: (err: ?Error) => void) {
@@ -699,20 +630,32 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
   // so we can tell if any async act() calls try to run in parallel.
 
   let actingUpdatesScopeDepth = 0;
+  let didWarnAboutUsingActInProd = false;
 
   function act(callback: () => Thenable) {
-    let previousActingUpdatesScopeDepth = actingUpdatesScopeDepth;
-    let previousActingUpdatesSigil;
-    actingUpdatesScopeDepth++;
-    if (__DEV__) {
-      previousActingUpdatesSigil = ReactCurrentActingRendererSigil.current;
-      ReactCurrentActingRendererSigil.current = ReactActingRendererSigil;
+    if (!__DEV__) {
+      if (didWarnAboutUsingActInProd === false) {
+        didWarnAboutUsingActInProd = true;
+        console.error(
+          'act(...) is not supported in production builds of React, and might not behave as expected.',
+        );
+      }
     }
+    let previousActingUpdatesScopeDepth = actingUpdatesScopeDepth;
+    let previousIsSomeRendererActing;
+    let previousIsThisRendererActing;
+    actingUpdatesScopeDepth++;
+
+    previousIsSomeRendererActing = IsSomeRendererActing.current;
+    previousIsThisRendererActing = IsThisRendererActing.current;
+    IsSomeRendererActing.current = true;
+    IsThisRendererActing.current = true;
 
     function onDone() {
       actingUpdatesScopeDepth--;
+      IsSomeRendererActing.current = previousIsSomeRendererActing;
+      IsThisRendererActing.current = previousIsThisRendererActing;
       if (__DEV__) {
-        ReactCurrentActingRendererSigil.current = previousActingUpdatesSigil;
         if (actingUpdatesScopeDepth > previousActingUpdatesScopeDepth) {
           // if it's _less than_ previousActingUpdatesScopeDepth, then we can assume the 'other' one has warned
           warningWithoutStack(
@@ -767,7 +710,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
           called = true;
           result.then(
             () => {
-              if (actingUpdatesScopeDepth > 1) {
+              if (
+                actingUpdatesScopeDepth > 1 ||
+                (isSchedulerMocked === true &&
+                  previousIsSomeRendererActing === true)
+              ) {
                 onDone();
                 resolve();
                 return;
@@ -802,7 +749,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
 
       // flush effects until none remain, and cleanup
       try {
-        if (actingUpdatesScopeDepth === 1) {
+        if (
+          actingUpdatesScopeDepth === 1 &&
+          (isSchedulerMocked === false ||
+            previousIsSomeRendererActing === false)
+        ) {
           // we're about to exit the act() scope,
           // now's the time to flush effects
           flushWork();
@@ -957,7 +908,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       if (!root) {
         const container = {rootID: rootID, pendingChildren: [], children: []};
         rootContainers.set(rootID, container);
-        root = NoopRenderer.createContainer(container, tag, false);
+        root = NoopRenderer.createContainer(container, tag, false, null);
         roots.set(rootID, root);
       }
       return root.current.stateNode.containerInfo;
@@ -974,6 +925,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
         container,
         ConcurrentRoot,
         false,
+        null,
       );
       return {
         _Scheduler: Scheduler,
@@ -999,6 +951,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
         container,
         BatchedRoot,
         false,
+        null,
       );
       return {
         _Scheduler: Scheduler,
@@ -1107,7 +1060,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       hostUpdateCounter = 0;
       hostCloneCounter = 0;
       try {
-        Scheduler.flushAll();
+        Scheduler.unstable_flushAll();
         return useMutation
           ? {
               hostDiffCounter,
@@ -1124,7 +1077,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       }
     },
 
-    expire: Scheduler.advanceTime,
+    expire: Scheduler.unstable_advanceTime,
 
     flushExpired(): Array<mixed> {
       return Scheduler.unstable_flushExpired();
@@ -1260,7 +1213,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
         _next: null,
       };
       root.firstBatch = batch;
-      Scheduler.unstable_flushWithoutYielding();
+      Scheduler.unstable_flushAllWithoutAsserting();
       const actual = Scheduler.unstable_clearYields();
       expect(actual).toEqual(expectedFlush);
       return (expectedCommit: Array<mixed>) => {

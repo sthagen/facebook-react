@@ -10,7 +10,10 @@ import Mode from 'art/modes/current';
 import invariant from 'shared/invariant';
 
 import {TYPES, EVENT_TYPES, childrenAsString} from './ReactARTInternals';
-import type {ReactEventComponentInstance} from 'shared/ReactTypes';
+import type {
+  ReactEventResponder,
+  ReactEventResponderInstance,
+} from 'shared/ReactTypes';
 
 const pooledTransform = new Transform();
 
@@ -329,14 +332,6 @@ export function getChildHostContext() {
   return NO_CONTEXT;
 }
 
-export function getChildHostContextForEventComponent() {
-  return NO_CONTEXT;
-}
-
-export function getChildHostContextForEventTarget() {
-  return NO_CONTEXT;
-}
-
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
@@ -349,6 +344,9 @@ export function shouldSetTextContent(type, props) {
 
 // The ART renderer is secondary to the React DOM renderer.
 export const isPrimaryRenderer = false;
+
+// The ART renderer shouldn't trigger missing act() warnings
+export const warnsIfNotActing = false;
 
 export const supportsMutation = true;
 
@@ -428,45 +426,38 @@ export function unhideTextInstance(textInstance, text): void {
   // Noop
 }
 
-export function mountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
+export function mountResponderInstance(
+  responder: ReactEventResponder<any, any>,
+  responderInstance: ReactEventResponderInstance<any, any>,
+  props: Object,
+  state: Object,
+  instance: Object,
 ) {
   throw new Error('Not yet implemented.');
 }
 
-export function updateEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
-) {
-  throw new Error('Not yet implemented.');
-}
-
-export function unmountEventComponent(
-  eventComponentInstance: ReactEventComponentInstance,
+export function unmountResponderInstance(
+  responderInstance: ReactEventResponderInstance<any, any>,
 ): void {
   throw new Error('Not yet implemented.');
 }
 
-export function getEventTargetChildElement(
-  type: Symbol | number,
-  props: Props,
-): null {
+export function getFundamentalComponentInstance(fundamentalInstance) {
   throw new Error('Not yet implemented.');
 }
 
-export function handleEventTarget(
-  type: Symbol | number,
-  props: Props,
-  rootContainerInstance: Container,
-  internalInstanceHandle: Object,
-): boolean {
+export function mountFundamentalComponent(fundamentalInstance) {
   throw new Error('Not yet implemented.');
 }
 
-export function commitEventTarget(
-  type: Symbol | number,
-  props: Props,
-  instance: Instance,
-  parentInstance: Instance,
-): void {
+export function shouldUpdateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function updateFundamentalComponent(fundamentalInstance) {
+  throw new Error('Not yet implemented.');
+}
+
+export function unmountFundamentalComponent(fundamentalInstance) {
   throw new Error('Not yet implemented.');
 }

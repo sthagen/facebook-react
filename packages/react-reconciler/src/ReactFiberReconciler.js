@@ -16,16 +16,26 @@ import type {
   Container,
   PublicInstance,
 } from './ReactFiberHostConfig';
+import {FundamentalComponent} from 'shared/ReactWorkTags';
 import type {ReactNodeList} from 'shared/ReactTypes';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {SuspenseConfig} from './ReactFiberSuspenseConfig';
+import type {
+  SuspenseHydrationCallbacks,
+  SuspenseState,
+} from './ReactFiberSuspenseComponent';
 
 import {
   findCurrentHostFiber,
   findCurrentHostFiberWithNoPortals,
 } from 'react-reconciler/reflection';
 import {get as getInstance} from 'shared/ReactInstanceMap';
-import {HostComponent, ClassComponent} from 'shared/ReactWorkTags';
+import {
+  HostComponent,
+  ClassComponent,
+  HostRoot,
+  SuspenseComponent,
+} from 'shared/ReactWorkTags';
 import getComponentName from 'shared/getComponentName';
 import invariant from 'shared/invariant';
 import warningWithoutStack from 'shared/warningWithoutStack';
@@ -57,7 +67,8 @@ import {
   flushDiscreteUpdates,
   flushPassiveEffects,
   warnIfNotScopedWithMatchingAct,
-  ReactActingRendererSigil,
+  warnIfUnmockedScheduler,
+  IsThisRendererActing,
 } from './ReactFiberWorkLoop';
 import {createUpdate, enqueueUpdate} from './ReactUpdateQueue';
 import ReactFiberInstrumentation from './ReactFiberInstrumentation';
@@ -67,11 +78,15 @@ import {
   current as ReactCurrentFiberCurrent,
 } from './ReactCurrentFiber';
 import {StrictMode} from './ReactTypeOfMode';
-import {Sync} from './ReactFiberExpirationTime';
-import {revertPassiveEffectsChange} from 'shared/ReactFeatureFlags';
+import {
+  Sync,
+  computeInteractiveExpiration,
+  computeContinuousHydrationExpiration,
+} from './ReactFiberExpirationTime';
 import {requestCurrentSuspenseConfig} from './ReactFiberSuspenseConfig';
 import {
   scheduleRefresh,
+  scheduleRoot,
   setRefreshHandler,
   findHostInstancesForRefresh,
 } from './ReactFiberHotReloading';
@@ -164,9 +179,6 @@ function scheduleRootUpdate(
     update.callback = callback;
   }
 
-  if (revertPassiveEffectsChange) {
-    flushPassiveEffects();
-  }
   enqueueUpdate(current, update);
   scheduleWork(current, expirationTime);
 
@@ -262,10 +274,9 @@ function findHostInstanceWithWarning(
             false,
             '%s is deprecated in StrictMode. ' +
               '%s was passed an instance of %s which is inside StrictMode. ' +
-              'Instead, add a ref directly to the element you want to reference.' +
-              '\n%s' +
-              '\n\nLearn more about using refs safely here:' +
-              '\nhttps://fb.me/react-strict-mode-find-node',
+              'Instead, add a ref directly to the element you want to reference. ' +
+              'Learn more about using refs safely here: ' +
+              'https://fb.me/react-strict-mode-find-node%s',
             methodName,
             methodName,
             componentName,
@@ -276,10 +287,9 @@ function findHostInstanceWithWarning(
             false,
             '%s is deprecated in StrictMode. ' +
               '%s was passed an instance of %s which renders StrictMode children. ' +
-              'Instead, add a ref directly to the element you want to reference.' +
-              '\n%s' +
-              '\n\nLearn more about using refs safely here:' +
-              '\nhttps://fb.me/react-strict-mode-find-node',
+              'Instead, add a ref directly to the element you want to reference. ' +
+              'Learn more about using refs safely here: ' +
+              'https://fb.me/react-strict-mode-find-node%s',
             methodName,
             methodName,
             componentName,
@@ -297,8 +307,9 @@ export function createContainer(
   containerInfo: Container,
   tag: RootTag,
   hydrate: boolean,
+  hydrationCallbacks: null | SuspenseHydrationCallbacks,
 ): OpaqueRoot {
-  return createFiberRoot(containerInfo, tag, hydrate);
+  return createFiberRoot(containerInfo, tag, hydrate, hydrationCallbacks);
 }
 
 export function updateContainer(
@@ -312,6 +323,7 @@ export function updateContainer(
   if (__DEV__) {
     // $FlowExpectedError - jest isn't a global, and isn't recognized outside of tests
     if ('undefined' !== typeof jest) {
+      warnIfUnmockedScheduler(current);
       warnIfNotScopedWithMatchingAct(current);
     }
   }
@@ -344,7 +356,7 @@ export {
   flushControlled,
   flushSync,
   flushPassiveEffects,
-  ReactActingRendererSigil,
+  IsThisRendererActing,
 };
 
 export function getPublicRootInstance(
@@ -362,6 +374,82 @@ export function getPublicRootInstance(
   }
 }
 
+export function attemptSynchronousHydration(fiber: Fiber): void {
+  switch (fiber.tag) {
+    case HostRoot:
+      let root: FiberRoot = fiber.stateNode;
+      if (root.hydrate) {
+        // Flush the first scheduled "update".
+        flushRoot(root, root.firstPendingTime);
+      }
+      break;
+    case SuspenseComponent:
+      flushSync(() => scheduleWork(fiber, Sync));
+      // If we're still blocked after this, we need to increase
+      // the priority of any promises resolving within this
+      // boundary so that they next attempt also has higher pri.
+      let retryExpTime = computeInteractiveExpiration(requestCurrentTime());
+      markRetryTimeIfNotHydrated(fiber, retryExpTime);
+      break;
+  }
+}
+
+function markRetryTimeImpl(fiber: Fiber, retryTime: ExpirationTime) {
+  let suspenseState: null | SuspenseState = fiber.memoizedState;
+  if (suspenseState !== null && suspenseState.dehydrated !== null) {
+    if (suspenseState.retryTime < retryTime) {
+      suspenseState.retryTime = retryTime;
+    }
+  }
+}
+
+// Increases the priority of thennables when they resolve within this boundary.
+function markRetryTimeIfNotHydrated(fiber: Fiber, retryTime: ExpirationTime) {
+  markRetryTimeImpl(fiber, retryTime);
+  let alternate = fiber.alternate;
+  if (alternate) {
+    markRetryTimeImpl(alternate, retryTime);
+  }
+}
+
+export function attemptUserBlockingHydration(fiber: Fiber): void {
+  if (fiber.tag !== SuspenseComponent) {
+    // We ignore HostRoots here because we can't increase
+    // their priority and they should not suspend on I/O,
+    // since you have to wrap anything that might suspend in
+    // Suspense.
+    return;
+  }
+  let expTime = computeInteractiveExpiration(requestCurrentTime());
+  scheduleWork(fiber, expTime);
+  markRetryTimeIfNotHydrated(fiber, expTime);
+}
+
+export function attemptContinuousHydration(fiber: Fiber): void {
+  if (fiber.tag !== SuspenseComponent) {
+    // We ignore HostRoots here because we can't increase
+    // their priority and they should not suspend on I/O,
+    // since you have to wrap anything that might suspend in
+    // Suspense.
+    return;
+  }
+  let expTime = computeContinuousHydrationExpiration(requestCurrentTime());
+  scheduleWork(fiber, expTime);
+  markRetryTimeIfNotHydrated(fiber, expTime);
+}
+
+export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
+  if (fiber.tag !== SuspenseComponent) {
+    // We ignore HostRoots here because we can't increase
+    // their priority other than synchronously flush it.
+    return;
+  }
+  const currentTime = requestCurrentTime();
+  const expTime = computeExpirationForFiber(currentTime, fiber, null);
+  scheduleWork(fiber, expTime);
+  markRetryTimeIfNotHydrated(fiber, expTime);
+}
+
 export {findHostInstance};
 
 export {findHostInstanceWithWarning};
@@ -372,6 +460,9 @@ export function findHostInstanceWithNoPortals(
   const hostFiber = findCurrentHostFiberWithNoPortals(fiber);
   if (hostFiber === null) {
     return null;
+  }
+  if (hostFiber.tag === FundamentalComponent) {
+    return hostFiber.stateNode.instance;
   }
   return hostFiber.stateNode;
 }
@@ -427,10 +518,6 @@ if (__DEV__) {
       id--;
     }
     if (currentHook !== null) {
-      if (revertPassiveEffectsChange) {
-        flushPassiveEffects();
-      }
-
       const newState = copyWithSet(currentHook.memoizedState, path, value);
       currentHook.memoizedState = newState;
       currentHook.baseState = newState;
@@ -448,9 +535,6 @@ if (__DEV__) {
 
   // Support DevTools props for function components, forwardRef, memo, host components, etc.
   overrideProps = (fiber: Fiber, path: Array<string | number>, value: any) => {
-    if (revertPassiveEffectsChange) {
-      flushPassiveEffects();
-    }
     fiber.pendingProps = copyWithSet(fiber.memoizedProps, path, value);
     if (fiber.alternate) {
       fiber.alternate.pendingProps = fiber.pendingProps;
@@ -459,9 +543,6 @@ if (__DEV__) {
   };
 
   scheduleUpdate = (fiber: Fiber) => {
-    if (revertPassiveEffectsChange) {
-      flushPassiveEffects();
-    }
     scheduleWork(fiber, Sync);
   };
 
@@ -498,6 +579,9 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     // React Refresh
     findHostInstancesForRefresh: __DEV__ ? findHostInstancesForRefresh : null,
     scheduleRefresh: __DEV__ ? scheduleRefresh : null,
+    scheduleRoot: __DEV__ ? scheduleRoot : null,
     setRefreshHandler: __DEV__ ? setRefreshHandler : null,
+    // Enables DevTools to append owner stacks to error messages in DEV mode.
+    getCurrentFiber: __DEV__ ? () => ReactCurrentFiberCurrent : null,
   });
 }

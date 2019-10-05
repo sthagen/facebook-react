@@ -7,163 +7,214 @@
  * @flow
  */
 
-import type {Fiber, Dependencies} from './ReactFiber';
+import type {Fiber} from './ReactFiber';
+import type {Container, Instance} from './ReactFiberHostConfig';
 import type {
-  ReactEventComponent,
   ReactEventResponder,
-  ReactEventComponentInstance,
+  ReactEventResponderInstance,
+  ReactEventResponderListener,
 } from 'shared/ReactTypes';
 
 import {
-  HostComponent,
-  HostText,
-  HostPortal,
-  SuspenseComponent,
-  Fragment,
-} from 'shared/ReactWorkTags';
+  mountResponderInstance,
+  unmountResponderInstance,
+} from './ReactFiberHostConfig';
 import {NoWork} from './ReactFiberExpirationTime';
+
+import warning from 'shared/warning';
+import {REACT_RESPONDER_TYPE} from 'shared/ReactSymbols';
+
 import invariant from 'shared/invariant';
+import {HostComponent, HostRoot} from 'shared/ReactWorkTags';
 
-let currentlyRenderingFiber: null | Fiber = null;
-let currentEventComponentInstanceIndex: number = 0;
+const emptyObject = {};
+const isArray = Array.isArray;
 
-export function prepareToReadEventComponents(workInProgress: Fiber): void {
-  currentlyRenderingFiber = workInProgress;
-  currentEventComponentInstanceIndex = 0;
-}
-
-export function updateEventComponentInstance<T, E, C>(
-  eventComponent: ReactEventComponent<T, E, C>,
-  props: Object,
-): void {
-  const responder = eventComponent.responder;
-  invariant(
-    responder.allowEventHooks,
-    'The "%s" event responder cannot be used via the "useEvent" hook.',
-    responder.displayName,
-  );
-  let events;
-  let dependencies: Dependencies | null = ((currentlyRenderingFiber: any): Fiber)
-    .dependencies;
-  if (dependencies === null) {
-    events = [];
-    dependencies = ((currentlyRenderingFiber: any): Fiber).dependencies = {
-      expirationTime: NoWork,
-      firstContext: null,
-      events,
-    };
-  } else {
-    events = dependencies.events;
-    if (events === null) {
-      dependencies.events = events = [];
-    }
-  }
-  if (currentEventComponentInstanceIndex === events.length) {
-    let responderState = null;
-    if (responder.createInitialState !== undefined) {
-      responderState = responder.createInitialState(props);
-    }
-    const eventComponentInstance = createEventComponentInstance(
-      ((currentlyRenderingFiber: any): Fiber),
-      props,
-      responder,
-      null,
-      responderState || {},
-      true,
-    );
-    events.push(eventComponentInstance);
-    currentEventComponentInstanceIndex++;
-  } else {
-    const eventComponentInstance = events[currentEventComponentInstanceIndex++];
-    eventComponentInstance.responder = responder;
-    eventComponentInstance.props = props;
-    eventComponentInstance.currentFiber = ((currentlyRenderingFiber: any): Fiber);
-  }
-}
-
-export function createEventComponentInstance<T, E, C>(
-  currentFiber: Fiber,
-  props: Object,
-  responder: ReactEventResponder<T, E, C>,
-  rootInstance: mixed,
-  state: Object,
-  isHook: boolean,
-): ReactEventComponentInstance<T, E, C> {
+export function createResponderInstance(
+  responder: ReactEventResponder<any, any>,
+  responderProps: Object,
+  responderState: Object,
+  fiber: Fiber,
+): ReactEventResponderInstance<any, any> {
   return {
-    currentFiber,
-    isHook,
-    props,
+    fiber,
+    props: responderProps,
     responder,
     rootEventTypes: null,
-    rootInstance,
-    state,
+    state: responderState,
   };
 }
 
-export function isFiberSuspenseAndTimedOut(fiber: Fiber): boolean {
-  return fiber.tag === SuspenseComponent && fiber.memoizedState !== null;
-}
-
-export function getSuspenseFallbackChild(fiber: Fiber): Fiber | null {
-  return ((((fiber.child: any): Fiber).sibling: any): Fiber).child;
-}
-
-export function isFiberSuspenseTimedOutChild(fiber: Fiber | null): boolean {
-  if (fiber === null) {
-    return false;
+function mountEventResponder(
+  responder: ReactEventResponder<any, any>,
+  responderProps: Object,
+  fiber: Fiber,
+  respondersMap: Map<
+    ReactEventResponder<any, any>,
+    ReactEventResponderInstance<any, any>,
+  >,
+  rootContainerInstance: null | Container,
+) {
+  let responderState = emptyObject;
+  const getInitialState = responder.getInitialState;
+  if (getInitialState !== null) {
+    responderState = getInitialState(responderProps);
   }
-  const parent = fiber.return;
-  if (parent !== null && parent.tag === Fragment) {
-    const grandParent = parent.return;
+  const responderInstance = createResponderInstance(
+    responder,
+    responderProps,
+    responderState,
+    fiber,
+  );
 
-    if (
-      grandParent !== null &&
-      grandParent.tag === SuspenseComponent &&
-      grandParent.stateNode !== null
-    ) {
-      return true;
+  if (!rootContainerInstance) {
+    let node = fiber;
+    while (node !== null) {
+      const tag = node.tag;
+      if (tag === HostComponent) {
+        rootContainerInstance = node.stateNode;
+        break;
+      } else if (tag === HostRoot) {
+        rootContainerInstance = node.stateNode.containerInfo;
+        break;
+      }
+      node = node.return;
     }
   }
-  return false;
+
+  mountResponderInstance(
+    responder,
+    responderInstance,
+    responderProps,
+    responderState,
+    ((rootContainerInstance: any): Instance),
+  );
+  respondersMap.set(responder, responderInstance);
 }
 
-export function getSuspenseFiberFromTimedOutChild(fiber: Fiber): Fiber {
-  return ((((fiber.return: any): Fiber).return: any): Fiber);
+function updateEventListener(
+  listener: ReactEventResponderListener<any, any>,
+  fiber: Fiber,
+  visistedResponders: Set<ReactEventResponder<any, any>>,
+  respondersMap: Map<
+    ReactEventResponder<any, any>,
+    ReactEventResponderInstance<any, any>,
+  >,
+  rootContainerInstance: null | Container,
+): void {
+  let responder;
+  let props;
+
+  if (listener) {
+    responder = listener.responder;
+    props = listener.props;
+  }
+  invariant(
+    responder && responder.$$typeof === REACT_RESPONDER_TYPE,
+    'An invalid value was used as an event listener. Expect one or many event ' +
+      'listeners created via React.unstable_useResponder().',
+  );
+  const listenerProps = ((props: any): Object);
+  if (visistedResponders.has(responder)) {
+    // show warning
+    if (__DEV__) {
+      warning(
+        false,
+        'Duplicate event responder "%s" found in event listeners. ' +
+          'Event listeners passed to elements cannot use the same event responder more than once.',
+        responder.displayName,
+      );
+    }
+    return;
+  }
+  visistedResponders.add(responder);
+  const responderInstance = respondersMap.get(responder);
+
+  if (responderInstance === undefined) {
+    // Mount (happens in either complete or commit phase)
+    mountEventResponder(
+      responder,
+      listenerProps,
+      fiber,
+      respondersMap,
+      rootContainerInstance,
+    );
+  } else {
+    // Update (happens during commit phase only)
+    responderInstance.props = listenerProps;
+    responderInstance.fiber = fiber;
+  }
 }
 
-export function getEventComponentHostChildrenCount(
-  eventComponentFiber: Fiber,
-): ?number {
+export function updateEventListeners(
+  listeners: any,
+  fiber: Fiber,
+  rootContainerInstance: null | Container,
+): void {
+  const visistedResponders = new Set();
+  let dependencies = fiber.dependencies;
+  if (listeners != null) {
+    if (dependencies === null) {
+      dependencies = fiber.dependencies = {
+        expirationTime: NoWork,
+        firstContext: null,
+        responders: new Map(),
+      };
+    }
+    let respondersMap = dependencies.responders;
+    if (respondersMap === null) {
+      respondersMap = new Map();
+    }
+    if (isArray(listeners)) {
+      for (let i = 0, length = listeners.length; i < length; i++) {
+        const listener = listeners[i];
+        updateEventListener(
+          listener,
+          fiber,
+          visistedResponders,
+          respondersMap,
+          rootContainerInstance,
+        );
+      }
+    } else {
+      updateEventListener(
+        listeners,
+        fiber,
+        visistedResponders,
+        respondersMap,
+        rootContainerInstance,
+      );
+    }
+  }
+  if (dependencies !== null) {
+    const respondersMap = dependencies.responders;
+    if (respondersMap !== null) {
+      // Unmount
+      const mountedResponders = Array.from(respondersMap.keys());
+      for (let i = 0, length = mountedResponders.length; i < length; i++) {
+        const mountedResponder = mountedResponders[i];
+        if (!visistedResponders.has(mountedResponder)) {
+          const responderInstance = ((respondersMap.get(
+            mountedResponder,
+          ): any): ReactEventResponderInstance<any, any>);
+          unmountResponderInstance(responderInstance);
+          respondersMap.delete(mountedResponder);
+        }
+      }
+    }
+  }
+}
+
+export function createResponderListener(
+  responder: ReactEventResponder<any, any>,
+  props: Object,
+): ReactEventResponderListener<any, any> {
+  const eventResponderListener = {
+    responder,
+    props,
+  };
   if (__DEV__) {
-    let hostChildrenCount = 0;
-    const getHostChildrenCount = node => {
-      if (isFiberSuspenseAndTimedOut(node)) {
-        const fallbackChild = getSuspenseFallbackChild(node);
-        if (fallbackChild !== null) {
-          getHostChildrenCount(fallbackChild);
-        }
-      } else if (
-        node.tag === HostComponent ||
-        node.tag === HostText ||
-        node.tag === HostPortal
-      ) {
-        hostChildrenCount++;
-      } else {
-        const child = node.child;
-        if (child !== null) {
-          getHostChildrenCount(child);
-        }
-      }
-      const sibling = node.sibling;
-      if (sibling !== null) {
-        getHostChildrenCount(sibling);
-      }
-    };
-
-    if (eventComponentFiber.child !== null) {
-      getHostChildrenCount(eventComponentFiber.child);
-    }
-
-    return hostChildrenCount;
+    Object.freeze(eventResponderListener);
   }
+  return eventResponderListener;
 }

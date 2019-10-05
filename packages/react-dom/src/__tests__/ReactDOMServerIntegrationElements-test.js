@@ -16,17 +16,20 @@ const TEXT_NODE_TYPE = 3;
 let React;
 let ReactDOM;
 let ReactDOMServer;
+let ReactTestUtils;
 
 function initModules() {
   jest.resetModuleRegistry();
   React = require('react');
   ReactDOM = require('react-dom');
   ReactDOMServer = require('react-dom/server');
+  ReactTestUtils = require('react-dom/test-utils');
 
   // Make them available to the helpers.
   return {
     ReactDOM,
     ReactDOMServer,
+    ReactTestUtils,
   };
 }
 
@@ -648,7 +651,7 @@ describe('ReactDOMServerIntegration', () => {
       });
     });
 
-    describe('component hierarchies', async function() {
+    describe('component hierarchies', function() {
       itRenders('single child hierarchies of components', async render => {
         const Component = props => <div>{props.children}</div>;
         let e = await render(

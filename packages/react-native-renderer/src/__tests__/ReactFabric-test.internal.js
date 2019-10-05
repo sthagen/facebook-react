@@ -22,6 +22,10 @@ let NativeMethodsMixin;
 const SET_NATIVE_PROPS_NOT_SUPPORTED_MESSAGE =
   'Warning: setNativeProps is not currently supported in Fabric';
 
+const DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT =
+  "Warning: dispatchCommand was called with a ref that isn't a " +
+  'native component. Use React.forwardRef to get access to the underlying native component';
+
 jest.mock('shared/ReactFeatureFlags', () =>
   require('shared/forks/ReactFeatureFlags.native-oss'),
 );
@@ -252,6 +256,85 @@ describe('ReactFabric', () => {
         withoutStack: true,
       });
       expect(UIManager.updateView).not.toBeCalled();
+    });
+  });
+
+  it('should call dispatchCommand for native refs', () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    [View].forEach(Component => {
+      nativeFabricUIManager.dispatchCommand.mockClear();
+
+      let viewRef;
+      ReactFabric.render(
+        <Component
+          ref={ref => {
+            viewRef = ref;
+          }}
+        />,
+        11,
+      );
+
+      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
+      ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
+      expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledTimes(1);
+      expect(nativeFabricUIManager.dispatchCommand).toHaveBeenCalledWith(
+        expect.any(Object),
+        'updateCommand',
+        [10, 20],
+      );
+    });
+  });
+
+  it('should warn and no-op if calling dispatchCommand on non native refs', () => {
+    const View = createReactNativeComponentClass('RCTView', () => ({
+      validAttributes: {foo: true},
+      uiViewClassName: 'RCTView',
+    }));
+
+    class BasicClass extends React.Component {
+      render() {
+        return <React.Fragment />;
+      }
+    }
+
+    class Subclass extends ReactFabric.NativeComponent {
+      render() {
+        return <View />;
+      }
+    }
+
+    const CreateClass = createReactClass({
+      mixins: [NativeMethodsMixin],
+      render: () => {
+        return <View />;
+      },
+    });
+
+    [BasicClass, Subclass, CreateClass].forEach(Component => {
+      nativeFabricUIManager.dispatchCommand.mockReset();
+
+      let viewRef;
+      ReactFabric.render(
+        <Component
+          ref={ref => {
+            viewRef = ref;
+          }}
+        />,
+        11,
+      );
+
+      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
+      expect(() => {
+        ReactFabric.dispatchCommand(viewRef, 'updateCommand', [10, 20]);
+      }).toWarnDev([DISPATCH_COMMAND_REQUIRES_HOST_COMPONENT], {
+        withoutStack: true,
+      });
+
+      expect(nativeFabricUIManager.dispatchCommand).not.toBeCalled();
     });
   });
 
@@ -802,14 +885,12 @@ describe('ReactFabric', () => {
     expect(() => (match = ReactFabric.findNodeHandle(parent))).toWarnDev([
       'Warning: findNodeHandle is deprecated in StrictMode. ' +
         'findNodeHandle was passed an instance of ContainsStrictModeChild which renders StrictMode children. ' +
-        'Instead, add a ref directly to the element you want to reference.' +
-        '\n' +
+        'Instead, add a ref directly to the element you want to reference. ' +
+        'Learn more about using refs safely here: ' +
+        'https://fb.me/react-strict-mode-find-node' +
         '\n    in RCTView (at **)' +
         '\n    in StrictMode (at **)' +
-        '\n    in ContainsStrictModeChild (at **)' +
-        '\n' +
-        '\nLearn more about using refs safely here:' +
-        '\nhttps://fb.me/react-strict-mode-find-node',
+        '\n    in ContainsStrictModeChild (at **)',
     ]);
     expect(match).toBe(child._nativeTag);
   });
@@ -840,14 +921,12 @@ describe('ReactFabric', () => {
     expect(() => (match = ReactFabric.findNodeHandle(parent))).toWarnDev([
       'Warning: findNodeHandle is deprecated in StrictMode. ' +
         'findNodeHandle was passed an instance of IsInStrictMode which is inside StrictMode. ' +
-        'Instead, add a ref directly to the element you want to reference.' +
-        '\n' +
+        'Instead, add a ref directly to the element you want to reference. ' +
+        'Learn more about using refs safely here: ' +
+        'https://fb.me/react-strict-mode-find-node' +
         '\n    in RCTView (at **)' +
         '\n    in IsInStrictMode (at **)' +
-        '\n    in StrictMode (at **)' +
-        '\n' +
-        '\nLearn more about using refs safely here:' +
-        '\nhttps://fb.me/react-strict-mode-find-node',
+        '\n    in StrictMode (at **)',
     ]);
     expect(match).toBe(child._nativeTag);
   });

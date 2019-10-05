@@ -8,16 +8,13 @@
  */
 
 import type {
+  ReactFundamentalComponentInstance,
   ReactEventResponder,
-  ReactEventComponentInstance,
+  ReactEventResponderInstance,
   EventPriority,
 } from 'shared/ReactTypes';
 
 type AnyNativeEvent = Event | KeyboardEvent | MouseEvent | Touch;
-
-export type ReactDOMEventResponderEventType =
-  | string
-  | {name: string, passive?: boolean};
 
 export type PointerType =
   | ''
@@ -31,58 +28,49 @@ export type ReactDOMResponderEvent = {
   nativeEvent: AnyNativeEvent,
   passive: boolean,
   passiveSupported: boolean,
-  pointerId: null | number,
   pointerType: PointerType,
   target: Element | Document,
   type: string,
 };
 
 export type ReactDOMEventResponder = ReactEventResponder<
-  ReactDOMEventResponderEventType,
   ReactDOMResponderEvent,
   ReactDOMResponderContext,
 >;
 
-export type ReactDOMEventComponentInstance = ReactEventComponentInstance<
-  ReactDOMEventResponderEventType,
+export type ReactDOMEventResponderInstance = ReactEventResponderInstance<
   ReactDOMResponderEvent,
   ReactDOMResponderContext,
+>;
+
+export type ReactDOMFundamentalComponentInstance = ReactFundamentalComponentInstance<
+  any,
+  any,
 >;
 
 export type ReactDOMResponderContext = {
   dispatchEvent: (
-    eventObject: Object,
-    listener: (Object) => void,
+    eventValue: any,
+    listener: (any) => void,
     eventPriority: EventPriority,
   ) => void,
-  isTargetWithinElement: (
+  isTargetWithinNode: (
     childTarget: Element | Document,
     parentTarget: Element | Document,
   ) => boolean,
-  isTargetWithinEventComponent: (Element | Document) => boolean,
-  isTargetWithinEventResponderScope: (Element | Document) => boolean,
-  isEventWithinTouchHitTarget: (event: ReactDOMResponderEvent) => boolean,
-  addRootEventTypes: (
-    rootEventTypes: Array<ReactDOMEventResponderEventType>,
-  ) => void,
-  removeRootEventTypes: (
-    rootEventTypes: Array<ReactDOMEventResponderEventType>,
-  ) => void,
-  hasOwnership: () => boolean,
-  requestGlobalOwnership: () => boolean,
-  releaseOwnership: () => boolean,
-  setTimeout: (func: () => void, timeout: number) => number,
-  clearTimeout: (timerId: number) => void,
-  getFocusableElementsInScope(): Array<HTMLElement>,
+  isTargetWithinResponder: (null | Element | Document) => boolean,
+  isTargetWithinResponderScope: (null | Element | Document) => boolean,
+  addRootEventTypes: (rootEventTypes: Array<string>) => void,
+  removeRootEventTypes: (rootEventTypes: Array<string>) => void,
   getActiveDocument(): Document,
   objectAssign: Function,
-  getEventCurrentTarget(event: ReactDOMResponderEvent): Element,
   getTimeStamp: () => number,
   isTargetWithinHostComponent: (
     target: Element | Document,
     elementType: string,
-    deep: boolean,
   ) => boolean,
-  continueLocalPropagation(): void,
-  isRespondingToHook(): boolean,
+  continuePropagation(): void,
+  // Used for controller components
+  enqueueStateRestore(Element | Document): void,
+  getResponderNode(): Element | null,
 };

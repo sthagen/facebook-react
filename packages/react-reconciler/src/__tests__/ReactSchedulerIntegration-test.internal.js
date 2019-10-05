@@ -55,9 +55,22 @@ describe('ReactSchedulerIntegration', () => {
     }
   }
 
+  it('flush sync has correct priority', () => {
+    function ReadPriority() {
+      Scheduler.unstable_yieldValue(
+        'Priority: ' + getCurrentPriorityAsString(),
+      );
+      return null;
+    }
+    ReactNoop.flushSync(() => ReactNoop.render(<ReadPriority />));
+    expect(Scheduler).toHaveYielded(['Priority: Immediate']);
+  });
+
   it('has correct priority during rendering', () => {
     function ReadPriority() {
-      Scheduler.yieldValue('Priority: ' + getCurrentPriorityAsString());
+      Scheduler.unstable_yieldValue(
+        'Priority: ' + getCurrentPriorityAsString(),
+      );
       return null;
     }
     ReactNoop.render(<ReadPriority />);
@@ -76,17 +89,19 @@ describe('ReactSchedulerIntegration', () => {
 
   it('has correct priority when continuing a render after yielding', () => {
     function ReadPriority() {
-      Scheduler.yieldValue('Priority: ' + getCurrentPriorityAsString());
+      Scheduler.unstable_yieldValue(
+        'Priority: ' + getCurrentPriorityAsString(),
+      );
       return null;
     }
 
     runWithPriority(UserBlockingPriority, () => {
       ReactNoop.render(
-        <React.Fragment>
+        <>
           <ReadPriority />
           <ReadPriority />
           <ReadPriority />
-        </React.Fragment>,
+        </>,
       );
     });
 
@@ -106,9 +121,11 @@ describe('ReactSchedulerIntegration', () => {
   it('layout effects have immediate priority', () => {
     const {useLayoutEffect} = React;
     function ReadPriority() {
-      Scheduler.yieldValue('Render priority: ' + getCurrentPriorityAsString());
+      Scheduler.unstable_yieldValue(
+        'Render priority: ' + getCurrentPriorityAsString(),
+      );
       useLayoutEffect(() => {
-        Scheduler.yieldValue(
+        Scheduler.unstable_yieldValue(
           'Layout priority: ' + getCurrentPriorityAsString(),
         );
       });
@@ -122,37 +139,181 @@ describe('ReactSchedulerIntegration', () => {
     ]);
   });
 
-  it('passive effects have the same priority as render', () => {
+  it('passive effects never have higher than normal priority', async () => {
     const {useEffect} = React;
-    function ReadPriority() {
-      Scheduler.yieldValue('Render priority: ' + getCurrentPriorityAsString());
+    function ReadPriority({step}) {
+      Scheduler.unstable_yieldValue(
+        `Render priority: ${getCurrentPriorityAsString()}`,
+      );
       useEffect(() => {
-        Scheduler.yieldValue(
-          'Passive priority: ' + getCurrentPriorityAsString(),
+        Scheduler.unstable_yieldValue(
+          `Effect priority: ${getCurrentPriorityAsString()}`,
         );
+        return () => {
+          Scheduler.unstable_yieldValue(
+            `Effect clean-up priority: ${getCurrentPriorityAsString()}`,
+          );
+        };
       });
       return null;
     }
 
-    ReactNoop.render(<ReadPriority />);
-    expect(Scheduler).toFlushAndYield([
-      'Render priority: Normal',
-      'Passive priority: Normal',
+    // High priority renders spawn effects at normal priority
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(ImmediatePriority, () => {
+        ReactNoop.render(<ReadPriority />);
+      });
+    });
+    expect(Scheduler).toHaveYielded([
+      'Render priority: Immediate',
+      'Effect priority: Normal',
+    ]);
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(UserBlockingPriority, () => {
+        ReactNoop.render(<ReadPriority />);
+      });
+    });
+    expect(Scheduler).toHaveYielded([
+      'Render priority: UserBlocking',
+      'Effect clean-up priority: Normal',
+      'Effect priority: Normal',
     ]);
 
-    runWithPriority(UserBlockingPriority, () => {
+    // Renders lower than normal priority spawn effects at the same priority
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(IdlePriority, () => {
+        ReactNoop.render(<ReadPriority />);
+      });
+    });
+    expect(Scheduler).toHaveYielded([
+      'Render priority: Idle',
+      'Effect clean-up priority: Idle',
+      'Effect priority: Idle',
+    ]);
+  });
+
+  it('passive effects have correct priority even if they are flushed early', async () => {
+    const {useEffect} = React;
+    function ReadPriority({step}) {
+      Scheduler.unstable_yieldValue(
+        `Render priority [step ${step}]: ${getCurrentPriorityAsString()}`,
+      );
+      useEffect(() => {
+        Scheduler.unstable_yieldValue(
+          `Effect priority [step ${step}]: ${getCurrentPriorityAsString()}`,
+        );
+      });
+      return null;
+    }
+    await ReactNoop.act(async () => {
+      ReactNoop.render(<ReadPriority step={1} />);
+      Scheduler.unstable_flushUntilNextPaint();
+      expect(Scheduler).toHaveYielded(['Render priority [step 1]: Normal']);
+      Scheduler.unstable_runWithPriority(UserBlockingPriority, () => {
+        ReactNoop.render(<ReadPriority step={2} />);
+      });
+    });
+    expect(Scheduler).toHaveYielded([
+      'Effect priority [step 1]: Normal',
+      'Render priority [step 2]: UserBlocking',
+      'Effect priority [step 2]: Normal',
+    ]);
+  });
+
+  it('passive effect clean-up functions have correct priority even when component is deleted', async () => {
+    const {useEffect} = React;
+    function ReadPriority({step}) {
+      useEffect(() => {
+        return () => {
+          Scheduler.unstable_yieldValue(
+            `Effect clean-up priority: ${getCurrentPriorityAsString()}`,
+          );
+        };
+      });
+      return null;
+    }
+
+    await ReactNoop.act(async () => {
       ReactNoop.render(<ReadPriority />);
     });
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(ImmediatePriority, () => {
+        ReactNoop.render(null);
+      });
+    });
+    expect(Scheduler).toHaveYielded(['Effect clean-up priority: Normal']);
 
-    expect(Scheduler).toFlushAndYield([
-      'Render priority: UserBlocking',
-      'Passive priority: UserBlocking',
+    await ReactNoop.act(async () => {
+      ReactNoop.render(<ReadPriority />);
+    });
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(UserBlockingPriority, () => {
+        ReactNoop.render(null);
+      });
+    });
+    expect(Scheduler).toHaveYielded(['Effect clean-up priority: Normal']);
+
+    // Renders lower than normal priority spawn effects at the same priority
+    await ReactNoop.act(async () => {
+      ReactNoop.render(<ReadPriority />);
+    });
+    await ReactNoop.act(async () => {
+      Scheduler.unstable_runWithPriority(IdlePriority, () => {
+        ReactNoop.render(null);
+      });
+    });
+    expect(Scheduler).toHaveYielded(['Effect clean-up priority: Idle']);
+  });
+
+  it('passive effects are called before Normal-pri scheduled in layout effects', async () => {
+    const {useEffect, useLayoutEffect} = React;
+    function Effects({step}) {
+      useLayoutEffect(() => {
+        Scheduler.unstable_yieldValue('Layout Effect');
+        Scheduler.unstable_scheduleCallback(NormalPriority, () =>
+          Scheduler.unstable_yieldValue(
+            'Scheduled Normal Callback from Layout Effect',
+          ),
+        );
+      });
+      useEffect(() => {
+        Scheduler.unstable_yieldValue('Passive Effect');
+      });
+      return null;
+    }
+    function CleanupEffect() {
+      useLayoutEffect(() => () => {
+        Scheduler.unstable_yieldValue('Cleanup Layout Effect');
+        Scheduler.unstable_scheduleCallback(NormalPriority, () =>
+          Scheduler.unstable_yieldValue(
+            'Scheduled Normal Callback from Cleanup Layout Effect',
+          ),
+        );
+      });
+      return null;
+    }
+    await ReactNoop.act(async () => {
+      ReactNoop.render(<CleanupEffect />);
+    });
+    expect(Scheduler).toHaveYielded([]);
+    await ReactNoop.act(async () => {
+      ReactNoop.render(<Effects />);
+    });
+    expect(Scheduler).toHaveYielded([
+      'Cleanup Layout Effect',
+      'Layout Effect',
+      'Passive Effect',
+      // These callbacks should be scheduled after the passive effects.
+      'Scheduled Normal Callback from Cleanup Layout Effect',
+      'Scheduled Normal Callback from Layout Effect',
     ]);
   });
 
   it('after completing a level of work, infers priority of the next batch based on its expiration time', () => {
     function App({label}) {
-      Scheduler.yieldValue(`${label} [${getCurrentPriorityAsString()}]`);
+      Scheduler.unstable_yieldValue(
+        `${label} [${getCurrentPriorityAsString()}]`,
+      );
       return label;
     }
 
@@ -171,20 +332,20 @@ describe('ReactSchedulerIntegration', () => {
 
     const root = ReactNoop.createRoot();
     root.render('Initial');
-    Scheduler.flushAll();
+    Scheduler.unstable_flushAll();
 
-    scheduleCallback(NormalPriority, () => Scheduler.yieldValue('A'));
-    scheduleCallback(NormalPriority, () => Scheduler.yieldValue('B'));
-    scheduleCallback(NormalPriority, () => Scheduler.yieldValue('C'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('A'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('B'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('C'));
 
     // Schedule a React render. React will request a paint after committing it.
     root.render('Update');
 
     // Advance time just to be sure the next tasks have lower priority
-    Scheduler.advanceTime(2000);
+    Scheduler.unstable_advanceTime(2000);
 
-    scheduleCallback(NormalPriority, () => Scheduler.yieldValue('D'));
-    scheduleCallback(NormalPriority, () => Scheduler.yieldValue('E'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('D'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('E'));
 
     // Flush everything up to the next paint. Should yield after the
     // React commit.
@@ -192,6 +353,59 @@ describe('ReactSchedulerIntegration', () => {
     expect(Scheduler).toHaveYielded(['A', 'B', 'C']);
   });
 
-  // TODO
-  it.skip('passive effects have render priority even if they are flushed early', () => {});
+  it('idle updates are not blocked by offscreen work', async () => {
+    function Text({text}) {
+      Scheduler.unstable_yieldValue(text);
+      return text;
+    }
+
+    function App({label}) {
+      return (
+        <>
+          <Text text={`Visible: ` + label} />
+          <div hidden={true}>
+            <Text text={`Hidden: ` + label} />
+          </div>
+        </>
+      );
+    }
+
+    const root = ReactNoop.createRoot();
+    await ReactNoop.act(async () => {
+      root.render(<App label="A" />);
+
+      // Commit the visible content
+      expect(Scheduler).toFlushUntilNextPaint(['Visible: A']);
+      expect(root).toMatchRenderedOutput(
+        <>
+          Visible: A
+          <div hidden={true} />
+        </>,
+      );
+
+      // Before the hidden content has a chance to render, schedule an
+      // idle update
+      runWithPriority(IdlePriority, () => {
+        root.render(<App label="B" />);
+      });
+
+      // The next commit should only include the visible content
+      expect(Scheduler).toFlushUntilNextPaint(['Visible: B']);
+      expect(root).toMatchRenderedOutput(
+        <>
+          Visible: B
+          <div hidden={true} />
+        </>,
+      );
+    });
+
+    // The hidden content commits later
+    expect(Scheduler).toHaveYielded(['Hidden: B']);
+    expect(root).toMatchRenderedOutput(
+      <>
+        Visible: B
+        <div hidden={true}>Hidden: B</div>
+      </>,
+    );
+  });
 });

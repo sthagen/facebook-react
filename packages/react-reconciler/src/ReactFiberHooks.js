@@ -7,18 +7,23 @@
  * @flow
  */
 
-import type {ReactEventComponent, ReactContext} from 'shared/ReactTypes';
+import type {
+  ReactEventResponder,
+  ReactContext,
+  ReactEventResponderListener,
+} from 'shared/ReactTypes';
 import type {SideEffectTag} from 'shared/ReactSideEffectTags';
 import type {Fiber} from './ReactFiber';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {HookEffectTag} from './ReactHookEffectTags';
 import type {SuspenseConfig} from './ReactFiberSuspenseConfig';
+import type {ReactPriorityLevel} from './SchedulerWithReactIntegration';
 
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 
 import {NoWork} from './ReactFiberExpirationTime';
 import {readContext} from './ReactFiberNewContext';
-import {updateEventComponentInstance} from './ReactFiberEvents';
+import {createResponderListener} from './ReactFiberEvents';
 import {
   Update as UpdateEffect,
   Passive as PassiveEffect,
@@ -33,11 +38,12 @@ import {
 import {
   scheduleWork,
   computeExpirationForFiber,
-  flushPassiveEffects,
   requestCurrentTime,
+  warnIfNotCurrentlyActingEffectsInDEV,
   warnIfNotCurrentlyActingUpdatesInDev,
   warnIfNotScopedWithMatchingAct,
   markRenderEventTimeAndConfig,
+  markUnprocessedUpdateTime,
 } from './ReactFiberWorkLoop';
 
 import invariant from 'shared/invariant';
@@ -45,8 +51,8 @@ import warning from 'shared/warning';
 import getComponentName from 'shared/getComponentName';
 import is from 'shared/objectIs';
 import {markWorkInProgressReceivedUpdate} from './ReactFiberBeginWork';
-import {revertPassiveEffectsChange} from 'shared/ReactFeatureFlags';
 import {requestCurrentSuspenseConfig} from './ReactFiberSuspenseConfig';
+import {getCurrentPriorityLevel} from './SchedulerWithReactIntegration';
 
 const {ReactCurrentDispatcher} = ReactSharedInternals;
 
@@ -82,10 +88,10 @@ export type Dispatcher = {
     deps: Array<mixed> | void | null,
   ): void,
   useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void,
-  useEvent<T, E, C>(
-    eventComponent: ReactEventComponent<T, E, C>,
+  useResponder<E, C>(
+    responder: ReactEventResponder<E, C>,
     props: Object,
-  ): void,
+  ): ReactEventResponderListener<E, C>,
 };
 
 type Update<S, A> = {
@@ -95,6 +101,8 @@ type Update<S, A> = {
   eagerReducer: ((S, A) => S) | null,
   eagerState: S | null,
   next: Update<S, A> | null,
+
+  priority?: ReactPriorityLevel,
 };
 
 type UpdateQueue<S, A> = {
@@ -115,7 +123,7 @@ export type HookType =
   | 'useMemo'
   | 'useImperativeHandle'
   | 'useDebugValue'
-  | 'useEvent';
+  | 'useResponder';
 
 let didWarnAboutMismatchedHooksForComponent;
 if (__DEV__) {
@@ -421,6 +429,11 @@ export function renderWithHooks(
     do {
       didScheduleRenderPhaseUpdate = false;
       numberOfReRenders += 1;
+      if (__DEV__) {
+        // Even when hot reloading, allow dependencies to stabilize
+        // after first render to prevent infinite render phase updates.
+        ignorePreviousDependencies = false;
+      }
 
       // Start over from the beginning of the list
       nextCurrentHook = current !== null ? current.memoizedState : null;
@@ -519,6 +532,7 @@ export function resetHooks(): void {
   // This is used to reset the state of this module when a component throws.
   // It's also called inside mountIndeterminateComponent if we determine the
   // component is a module-style component.
+
   renderExpirationTime = NoWork;
   currentlyRenderingFiber = null;
 
@@ -687,7 +701,7 @@ function updateReducer<S, I, A>(
         }
 
         hook.memoizedState = newState;
-        // Don't persist the state accumlated from the render phase updates to
+        // Don't persist the state accumulated from the render phase updates to
         // the base state unless the queue is empty.
         // TODO: Not sure if this is the desired semantics, but it's what we
         // do for gDSFP. I can't remember why.
@@ -743,6 +757,7 @@ function updateReducer<S, I, A>(
         // Update the remaining priority in the queue.
         if (updateExpirationTime > remainingExpirationTime) {
           remainingExpirationTime = updateExpirationTime;
+          markUnprocessedUpdateTime(remainingExpirationTime);
         }
       } else {
         // This update does have sufficient priority.
@@ -898,6 +913,14 @@ function mountEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
+  if (__DEV__) {
+    // $FlowExpectedError - jest isn't a global, and isn't recognized outside of tests
+    if ('undefined' !== typeof jest) {
+      warnIfNotCurrentlyActingEffectsInDEV(
+        ((currentlyRenderingFiber: any): Fiber),
+      );
+    }
+  }
   return mountEffectImpl(
     UpdateEffect | PassiveEffect,
     UnmountPassive | MountPassive,
@@ -910,6 +933,14 @@ function updateEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
+  if (__DEV__) {
+    // $FlowExpectedError - jest isn't a global, and isn't recognized outside of tests
+    if ('undefined' !== typeof jest) {
+      warnIfNotCurrentlyActingEffectsInDEV(
+        ((currentlyRenderingFiber: any): Fiber),
+      );
+    }
+  }
   return updateEffectImpl(
     UpdateEffect | PassiveEffect,
     UnmountPassive | MountPassive,
@@ -1099,7 +1130,7 @@ function dispatchAction<S, A>(
 
   if (__DEV__) {
     warning(
-      arguments.length <= 3,
+      typeof arguments[3] !== 'function',
       "State updates from the useState() and useReducer() Hooks don't support the " +
         'second callback argument. To execute a side effect after ' +
         'rendering, declare it in the component body with useEffect().',
@@ -1123,6 +1154,9 @@ function dispatchAction<S, A>(
       eagerState: null,
       next: null,
     };
+    if (__DEV__) {
+      update.priority = getCurrentPriorityLevel();
+    }
     if (renderPhaseUpdates === null) {
       renderPhaseUpdates = new Map();
     }
@@ -1138,10 +1172,6 @@ function dispatchAction<S, A>(
       lastRenderPhaseUpdate.next = update;
     }
   } else {
-    if (revertPassiveEffectsChange) {
-      flushPassiveEffects();
-    }
-
     const currentTime = requestCurrentTime();
     const suspenseConfig = requestCurrentSuspenseConfig();
     const expirationTime = computeExpirationForFiber(
@@ -1158,6 +1188,10 @@ function dispatchAction<S, A>(
       eagerState: null,
       next: null,
     };
+
+    if (__DEV__) {
+      update.priority = getCurrentPriorityLevel();
+    }
 
     // Append the update to the end of the list.
     const last = queue.last;
@@ -1237,7 +1271,7 @@ export const ContextOnlyDispatcher: Dispatcher = {
   useRef: throwInvalidHookError,
   useState: throwInvalidHookError,
   useDebugValue: throwInvalidHookError,
-  useEvent: updateEventComponentInstance,
+  useResponder: throwInvalidHookError,
 };
 
 const HooksDispatcherOnMount: Dispatcher = {
@@ -1253,7 +1287,7 @@ const HooksDispatcherOnMount: Dispatcher = {
   useRef: mountRef,
   useState: mountState,
   useDebugValue: mountDebugValue,
-  useEvent: updateEventComponentInstance,
+  useResponder: createResponderListener,
 };
 
 const HooksDispatcherOnUpdate: Dispatcher = {
@@ -1269,7 +1303,7 @@ const HooksDispatcherOnUpdate: Dispatcher = {
   useRef: updateRef,
   useState: updateState,
   useDebugValue: updateDebugValue,
-  useEvent: updateEventComponentInstance,
+  useResponder: createResponderListener,
 };
 
 let HooksDispatcherOnMountInDEV: Dispatcher | null = null;
@@ -1399,10 +1433,13 @@ if (__DEV__) {
       mountHookTypesDev();
       return mountDebugValue(value, formatterFn);
     },
-    useEvent<T, E, C>(eventComponent: ReactEventComponent<T, E, C>, props) {
-      currentHookNameInDev = 'useEvent';
+    useResponder<E, C>(
+      responder: ReactEventResponder<E, C>,
+      props,
+    ): ReactEventResponderListener<E, C> {
+      currentHookNameInDev = 'useResponder';
       mountHookTypesDev();
-      updateEventComponentInstance(eventComponent, props);
+      return createResponderListener(responder, props);
     },
   };
 
@@ -1501,10 +1538,13 @@ if (__DEV__) {
       updateHookTypesDev();
       return mountDebugValue(value, formatterFn);
     },
-    useEvent<T, E, C>(eventComponent: ReactEventComponent<T, E, C>, props) {
-      currentHookNameInDev = 'useEvent';
+    useResponder<E, C>(
+      responder: ReactEventResponder<E, C>,
+      props,
+    ): ReactEventResponderListener<E, C> {
+      currentHookNameInDev = 'useResponder';
       updateHookTypesDev();
-      updateEventComponentInstance(eventComponent, props);
+      return createResponderListener(responder, props);
     },
   };
 
@@ -1603,10 +1643,13 @@ if (__DEV__) {
       updateHookTypesDev();
       return updateDebugValue(value, formatterFn);
     },
-    useEvent<T, E, C>(eventComponent: ReactEventComponent<T, E, C>, props) {
-      currentHookNameInDev = 'useEvent';
+    useResponder<E, C>(
+      responder: ReactEventResponder<E, C>,
+      props,
+    ): ReactEventResponderListener<E, C> {
+      currentHookNameInDev = 'useResponder';
       updateHookTypesDev();
-      updateEventComponentInstance(eventComponent, props);
+      return createResponderListener(responder, props);
     },
   };
 
@@ -1716,11 +1759,14 @@ if (__DEV__) {
       mountHookTypesDev();
       return mountDebugValue(value, formatterFn);
     },
-    useEvent<T, E, C>(eventComponent: ReactEventComponent<T, E, C>, props) {
-      currentHookNameInDev = 'useEvent';
+    useResponder<E, C>(
+      responder: ReactEventResponder<E, C>,
+      props,
+    ): ReactEventResponderListener<E, C> {
+      currentHookNameInDev = 'useResponder';
       warnInvalidHookAccess();
       mountHookTypesDev();
-      updateEventComponentInstance(eventComponent, props);
+      return createResponderListener(responder, props);
     },
   };
 
@@ -1830,11 +1876,14 @@ if (__DEV__) {
       updateHookTypesDev();
       return updateDebugValue(value, formatterFn);
     },
-    useEvent<T, E, C>(eventComponent: ReactEventComponent<T, E, C>, props) {
-      currentHookNameInDev = 'useEvent';
+    useResponder<E, C>(
+      responder: ReactEventResponder<E, C>,
+      props,
+    ): ReactEventResponderListener<E, C> {
+      currentHookNameInDev = 'useResponder';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      updateEventComponentInstance(eventComponent, props);
+      return createResponderListener(responder, props);
     },
   };
 }

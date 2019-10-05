@@ -28,7 +28,7 @@ function assertYieldsWereCleared(Scheduler) {
 
 function toFlushAndYield(Scheduler, expectedYields) {
   assertYieldsWereCleared(Scheduler);
-  Scheduler.unstable_flushWithoutYielding();
+  Scheduler.unstable_flushAllWithoutAsserting();
   const actualYields = Scheduler.unstable_clearYields();
   return captureAssertion(() => {
     expect(actualYields).toEqual(expectedYields);
@@ -38,6 +38,15 @@ function toFlushAndYield(Scheduler, expectedYields) {
 function toFlushAndYieldThrough(Scheduler, expectedYields) {
   assertYieldsWereCleared(Scheduler);
   Scheduler.unstable_flushNumberOfYields(expectedYields.length);
+  const actualYields = Scheduler.unstable_clearYields();
+  return captureAssertion(() => {
+    expect(actualYields).toEqual(expectedYields);
+  });
+}
+
+function toFlushUntilNextPaint(Scheduler, expectedYields) {
+  assertYieldsWereCleared(Scheduler);
+  Scheduler.unstable_flushUntilNextPaint();
   const actualYields = Scheduler.unstable_clearYields();
   return captureAssertion(() => {
     expect(actualYields).toEqual(expectedYields);
@@ -68,7 +77,7 @@ function toFlushAndThrow(Scheduler, ...rest) {
   assertYieldsWereCleared(Scheduler);
   return captureAssertion(() => {
     expect(() => {
-      Scheduler.unstable_flushWithoutYielding();
+      Scheduler.unstable_flushAllWithoutAsserting();
     }).toThrow(...rest);
   });
 }
@@ -76,6 +85,7 @@ function toFlushAndThrow(Scheduler, ...rest) {
 module.exports = {
   toFlushAndYield,
   toFlushAndYieldThrough,
+  toFlushUntilNextPaint,
   toFlushWithoutYielding,
   toFlushExpired,
   toHaveYielded,

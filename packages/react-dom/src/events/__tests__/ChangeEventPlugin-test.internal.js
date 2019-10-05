@@ -37,13 +37,7 @@ describe('ChangeEventPlugin', () => {
     ReactFeatureFlags = require('shared/ReactFeatureFlags');
     // TODO pull this into helper method, reduce repetition.
     // mock the browser APIs which are used in schedule:
-    // - requestAnimationFrame should pass the DOMHighResTimeStamp argument
     // - calling 'window.postMessage' should actually fire postmessage handlers
-    global.requestAnimationFrame = function(cb) {
-      return setTimeout(() => {
-        cb(Date.now());
-      });
-    };
     const originalAddEventListener = global.addEventListener;
     let postMessageCallback;
     global.addEventListener = function(eventName, callback, useCapture) {
@@ -521,7 +515,7 @@ describe('ChangeEventPlugin', () => {
       expect(ops).toEqual([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       expect(ops).toEqual(['render: initial']);
       expect(input.value).toBe('initial');
 
@@ -571,7 +565,7 @@ describe('ChangeEventPlugin', () => {
       expect(ops).toEqual([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       expect(ops).toEqual(['render: false']);
       expect(input.checked).toBe(false);
 
@@ -587,7 +581,7 @@ describe('ChangeEventPlugin', () => {
 
       // Now let's make sure we're using the controlled value.
       root.render(<ControlledInput reverse={true} />);
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
 
       ops = [];
 
@@ -630,7 +624,7 @@ describe('ChangeEventPlugin', () => {
       expect(ops).toEqual([]);
       expect(textarea).toBe(undefined);
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       expect(ops).toEqual(['render: initial']);
       expect(textarea.value).toBe('initial');
 
@@ -681,7 +675,7 @@ describe('ChangeEventPlugin', () => {
       expect(ops).toEqual([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       expect(ops).toEqual(['render: initial']);
       expect(input.value).toBe('initial');
 
@@ -732,7 +726,7 @@ describe('ChangeEventPlugin', () => {
       expect(ops).toEqual([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       expect(ops).toEqual(['render: initial']);
       expect(input.value).toBe('initial');
 
@@ -747,7 +741,7 @@ describe('ChangeEventPlugin', () => {
       expect(input.value).toBe('initial');
 
       // Flush callbacks.
-      Scheduler.flushAll();
+      Scheduler.unstable_flushAll();
       // Now the click update has flushed.
       expect(ops).toEqual(['render: ']);
       expect(input.value).toBe('');
@@ -756,8 +750,6 @@ describe('ChangeEventPlugin', () => {
     it('mouse enter/leave should be user-blocking but not discrete', async () => {
       // This is currently behind a feature flag
       jest.resetModules();
-      ReactFeatureFlags = require('shared/ReactFeatureFlags');
-      ReactFeatureFlags.enableUserBlockingEvents = true;
       React = require('react');
       ReactDOM = require('react-dom');
       TestUtils = require('react-dom/test-utils');
@@ -792,7 +784,7 @@ describe('ChangeEventPlugin', () => {
         target.current.dispatchEvent(mouseOverEvent);
 
         // 3s should be enough to expire the updates
-        Scheduler.advanceTime(3000);
+        Scheduler.unstable_advanceTime(3000);
         expect(container.textContent).toEqual('hovered');
       });
     });

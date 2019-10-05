@@ -21,7 +21,7 @@ describe('ReactBatchedMode', () => {
     TextResource = ReactCache.unstable_createResource(([text, ms = 0]) => {
       return new Promise((resolve, reject) =>
         setTimeout(() => {
-          Scheduler.yieldValue(`Promise resolved [${text}]`);
+          Scheduler.unstable_yieldValue(`Promise resolved [${text}]`);
           resolve(text);
         }, ms),
       );
@@ -29,7 +29,7 @@ describe('ReactBatchedMode', () => {
   });
 
   function Text(props) {
-    Scheduler.yieldValue(props.text);
+    Scheduler.unstable_yieldValue(props.text);
     return props.text;
   }
 
@@ -37,13 +37,13 @@ describe('ReactBatchedMode', () => {
     const text = props.text;
     try {
       TextResource.read([props.text, props.ms]);
-      Scheduler.yieldValue(text);
+      Scheduler.unstable_yieldValue(text);
       return props.text;
     } catch (promise) {
       if (typeof promise.then === 'function') {
-        Scheduler.yieldValue(`Suspend! [${text}]`);
+        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
       } else {
-        Scheduler.yieldValue(`Error! [${text}]`);
+        Scheduler.unstable_yieldValue(`Error! [${text}]`);
       }
       throw promise;
     }
@@ -53,11 +53,11 @@ describe('ReactBatchedMode', () => {
     const root = ReactNoop.createSyncRoot();
 
     root.render(
-      <React.Fragment>
+      <>
         <Text text="A" />
         <Text text="B" />
         <Text text="C" />
-      </React.Fragment>,
+      </>,
     );
 
     // Nothing should have rendered yet
@@ -73,7 +73,7 @@ describe('ReactBatchedMode', () => {
 
     function App() {
       useLayoutEffect(() => {
-        Scheduler.yieldValue('Layout effect');
+        Scheduler.unstable_yieldValue('Layout effect');
       });
       return <Text text="Hi" />;
     }
@@ -112,11 +112,11 @@ describe('ReactBatchedMode', () => {
     expect(Scheduler).toHaveYielded(['Promise resolved [B]']);
     expect(Scheduler).toFlushExpired(['A', 'B', 'C']);
     expect(root).toMatchRenderedOutput(
-      <React.Fragment>
+      <>
         <span>A</span>
         <span>B</span>
         <span>C</span>
-      </React.Fragment>,
+      </>,
     );
   });
 
@@ -133,10 +133,10 @@ describe('ReactBatchedMode', () => {
     const foo1 = React.createRef(null);
     const foo2 = React.createRef(null);
     root.render(
-      <React.Fragment>
+      <>
         <Foo label="A" ref={foo1} />
         <Foo label="B" ref={foo2} />
-      </React.Fragment>,
+      </>,
     );
 
     // Mount

@@ -94,27 +94,6 @@ jobs:
       - *run_yarn
       - run: yarn test-prod --maxWorkers=2
 
-  test_source_fire:
-    docker: *docker
-    environment: *environment
-
-    steps:
-      - checkout
-      - *restore_yarn_cache
-      - *run_yarn
-      - run: yarn test-fire --maxWorkers=2
-      - run: yarn test-fire-prod --maxWorkers=2
-
-  test_coverage:
-    docker: *docker
-    environment: *environment
-
-    steps:
-      - checkout
-      - *restore_yarn_cache
-      - *run_yarn
-      - run: ./scripts/circleci/test_coverage.sh
-
   build:
     docker: *docker
     environment: *environment
@@ -179,6 +158,16 @@ jobs:
       - *run_yarn
       - run: yarn test-build --maxWorkers=2
 
+  test_build_devtools:
+    docker: *docker
+    environment: *environment
+    steps:
+      - checkout
+      - attach_workspace: *attach_workspace
+      - *restore_yarn_cache
+      - *run_yarn
+      - run: yarn test-build-devtools --maxWorkers=2
+
   test_dom_fixtures:
     docker: *docker
     environment: *environment
@@ -237,9 +226,6 @@ workflows:
       - test_source_persistent:
           requires:
             - setup
-      - test_source_fire:
-          requires:
-            - setup
       - build:
           requires:
             - setup
@@ -253,6 +239,9 @@ workflows:
           requires:
             - build
       - test_build_prod:
+          requires:
+            - build
+      - test_build_devtools:
           requires:
             - build
       - test_dom_fixtures:
@@ -269,8 +258,5 @@ workflows:
     jobs:
       - setup
       - test_fuzz:
-          requires:
-            - setup
-      - test_coverage:
           requires:
             - setup
