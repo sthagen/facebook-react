@@ -751,8 +751,8 @@ describe('Input event responder', () => {
     });
 
     describe('concurrent mode', () => {
-      it('text input', () => {
-        const root = ReactDOM.unstable_createRoot(container);
+      it.experimental('text input', () => {
+        const root = ReactDOM.createRoot(container);
         let input;
 
         let ops = [];
@@ -811,8 +811,8 @@ describe('Input event responder', () => {
         expect(input.value).toBe('changed [!]');
       });
 
-      it('checkbox input', () => {
-        const root = ReactDOM.unstable_createRoot(container);
+      it.experimental('checkbox input', () => {
+        const root = ReactDOM.createRoot(container);
         let input;
 
         let ops = [];
@@ -886,8 +886,8 @@ describe('Input event responder', () => {
         expect(input.checked).toBe(false);
       });
 
-      it('textarea', () => {
-        const root = ReactDOM.unstable_createRoot(container);
+      it.experimental('textarea', () => {
+        const root = ReactDOM.createRoot(container);
         let textarea;
 
         let ops = [];

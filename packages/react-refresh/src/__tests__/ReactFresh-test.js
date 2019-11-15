@@ -2394,7 +2394,7 @@ describe('ReactFresh', () => {
   });
 
   it('can hot reload offscreen components', () => {
-    if (__DEV__) {
+    if (__DEV__ && __EXPERIMENTAL__) {
       const AppV1 = prepare(() => {
         function Hello() {
           React.useLayoutEffect(() => {
@@ -2421,7 +2421,7 @@ describe('ReactFresh', () => {
         };
       });
 
-      const root = ReactDOM.unstable_createRoot(container);
+      const root = ReactDOM.createRoot(container);
       root.render(<AppV1 offscreen={true} />);
       expect(Scheduler).toFlushAndYieldThrough(['App#layout']);
       const el = container.firstChild;
@@ -2860,6 +2860,42 @@ describe('ReactFresh', () => {
       expect(ReactFreshRuntime.hasUnrecoverableErrors()).toBe(false);
 
       // Check we don't attempt to reverse an intentional unmount.
+      ReactDOM.unmountComponentAtNode(container);
+      expect(container.innerHTML).toBe('');
+      patch(() => {
+        function Hello() {
+          return <h1>Never mind me!</h1>;
+        }
+        $RefreshReg$(Hello, 'Hello');
+      });
+      expect(container.innerHTML).toBe('');
+      expect(ReactFreshRuntime.hasUnrecoverableErrors()).toBe(false);
+
+      // Mount a new container.
+      render(() => {
+        function Hello() {
+          return <h1>Hi</h1>;
+        }
+        $RefreshReg$(Hello, 'Hello');
+
+        return Hello;
+      });
+      expect(container.innerHTML).toBe('<h1>Hi</h1>');
+      expect(ReactFreshRuntime.hasUnrecoverableErrors()).toBe(false);
+
+      // Break again.
+      expect(() => {
+        patch(() => {
+          function Hello() {
+            throw new Error('Oops');
+          }
+          $RefreshReg$(Hello, 'Hello');
+        });
+      }).toThrow('Oops');
+      expect(container.innerHTML).toBe('');
+      expect(ReactFreshRuntime.hasUnrecoverableErrors()).toBe(false);
+
+      // Check we don't attempt to reverse an intentional unmount, even after an error.
       ReactDOM.unmountComponentAtNode(container);
       expect(container.innerHTML).toBe('');
       patch(() => {

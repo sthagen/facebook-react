@@ -6,6 +6,23 @@
   </summary>
 </details>
 
+## 16.12.0 (November 14, 2019)
+
+### React DOM
+
+* Fix passive effects (`useEffect`) not being fired in a multi-root app. ([@acdlite](https://github.com/acdlite) in [#17347](https://github.com/facebook/react/pull/17347))
+
+### React Is
+
+* Fix `lazy` and `memo` types considered elements instead of components ([@bvaughn](https://github.com/bvaughn) in [#17278](https://github.com/facebook/react/pull/17278))
+
+## 16.11.0 (October 22, 2019)
+
+### React DOM
+
+* Fix `mouseenter` handlers from firing twice inside nested React containers. [@yuanoook](https://github.com/yuanoook) in [#16928](https://github.com/facebook/react/pull/16928)
+* Remove `unstable_createRoot` and `unstable_createSyncRoot` experimental APIs. (These are available in the Experimental channel as `createRoot` and `createSyncRoot`.) ([@acdlite](http://github.com/acdlite) in [#17088](https://github.com/facebook/react/pull/17088))
+
 ## 16.10.2 (October 3, 2019)
 
 ### React DOM

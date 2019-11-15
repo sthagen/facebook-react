@@ -23,6 +23,7 @@ import {
   ElementTypeProfiler,
   ElementTypeRoot,
   ElementTypeSuspense,
+  ElementTypeSuspenseList,
 } from 'react-devtools-shared/src/types';
 import {
   getDisplayName,
@@ -91,9 +92,6 @@ type ReactSymbolsType = {
   PROFILER_SYMBOL_STRING: string,
   STRICT_MODE_NUMBER: number,
   STRICT_MODE_SYMBOL_STRING: string,
-  SUSPENSE_NUMBER: number,
-  SUSPENSE_SYMBOL_STRING: string,
-  DEPRECATED_PLACEHOLDER_SYMBOL_STRING: string,
   SCOPE_NUMBER: number,
   SCOPE_SYMBOL_STRING: string,
 };
@@ -129,6 +127,7 @@ type ReactTypeOfWorkType = {|
   Profiler: number,
   SimpleMemoComponent: number,
   SuspenseComponent: number,
+  SuspenseListComponent: number,
   YieldComponent: number,
 |};
 
@@ -170,9 +169,6 @@ export function getInternalReactConstants(
     PROFILER_SYMBOL_STRING: 'Symbol(react.profiler)',
     STRICT_MODE_NUMBER: 0xeacc,
     STRICT_MODE_SYMBOL_STRING: 'Symbol(react.strict_mode)',
-    SUSPENSE_NUMBER: 0xead1,
-    SUSPENSE_SYMBOL_STRING: 'Symbol(react.suspense)',
-    DEPRECATED_PLACEHOLDER_SYMBOL_STRING: 'Symbol(react.placeholder)',
     SCOPE_NUMBER: 0xead7,
     SCOPE_SYMBOL_STRING: 'Symbol(react.scope)',
   };
@@ -227,6 +223,7 @@ export function getInternalReactConstants(
       Profiler: 12,
       SimpleMemoComponent: 15,
       SuspenseComponent: 13,
+      SuspenseListComponent: 19, // Experimental
       YieldComponent: -1, // Removed
     };
   } else if (gte(version, '16.4.3-alpha')) {
@@ -252,6 +249,7 @@ export function getInternalReactConstants(
       Profiler: 15,
       SimpleMemoComponent: -1, // Doesn't exist yet
       SuspenseComponent: 16,
+      SuspenseListComponent: -1, // Doesn't exist yet
       YieldComponent: -1, // Removed
     };
   } else {
@@ -277,6 +275,7 @@ export function getInternalReactConstants(
       Profiler: 15,
       SimpleMemoComponent: -1, // Doesn't exist yet
       SuspenseComponent: 16,
+      SuspenseListComponent: -1, // Doesn't exist yet
       YieldComponent: 9,
     };
   }
@@ -307,6 +306,8 @@ export function getInternalReactConstants(
     Fragment,
     MemoComponent,
     SimpleMemoComponent,
+    SuspenseComponent,
+    SuspenseListComponent,
   } = ReactTypeOfWork;
 
   const {
@@ -319,26 +320,38 @@ export function getInternalReactConstants(
     CONTEXT_CONSUMER_SYMBOL_STRING,
     STRICT_MODE_NUMBER,
     STRICT_MODE_SYMBOL_STRING,
-    SUSPENSE_NUMBER,
-    SUSPENSE_SYMBOL_STRING,
-    DEPRECATED_PLACEHOLDER_SYMBOL_STRING,
     PROFILER_NUMBER,
     PROFILER_SYMBOL_STRING,
     SCOPE_NUMBER,
     SCOPE_SYMBOL_STRING,
+    FORWARD_REF_NUMBER,
+    FORWARD_REF_SYMBOL_STRING,
+    MEMO_NUMBER,
+    MEMO_SYMBOL_STRING,
   } = ReactSymbols;
+
+  function resolveFiberType(type: any) {
+    const typeSymbol = getTypeSymbol(type);
+    switch (typeSymbol) {
+      case MEMO_NUMBER:
+      case MEMO_SYMBOL_STRING:
+        // recursively resolving memo type in case of memo(forwardRef(Component))
+        return resolveFiberType(type.type);
+      case FORWARD_REF_NUMBER:
+      case FORWARD_REF_SYMBOL_STRING:
+        return type.render;
+      default:
+        return type;
+    }
+  }
 
   // NOTICE Keep in sync with shouldFilterFiber() and other get*ForFiber methods
   function getDisplayNameForFiber(fiber: Fiber): string | null {
     const {elementType, type, tag} = fiber;
 
-    // This is to support lazy components with a Promise as the type.
-    // see https://github.com/facebook/react/pull/13397
     let resolvedType = type;
     if (typeof type === 'object' && type !== null) {
-      if (typeof type.then === 'function') {
-        resolvedType = type._reactResult;
-      }
+      resolvedType = resolveFiberType(type);
     }
 
     let resolvedContext: any = null;
@@ -352,8 +365,7 @@ export function getInternalReactConstants(
         return getDisplayName(resolvedType);
       case ForwardRef:
         return (
-          resolvedType.displayName ||
-          getDisplayName(resolvedType.render, 'Anonymous')
+          resolvedType.displayName || getDisplayName(resolvedType, 'Anonymous')
         );
       case HostRoot:
         return null;
@@ -368,8 +380,12 @@ export function getInternalReactConstants(
         if (elementType.displayName) {
           return elementType.displayName;
         } else {
-          return getDisplayName(type, 'Anonymous');
+          return getDisplayName(resolvedType, 'Anonymous');
         }
+      case SuspenseComponent:
+        return 'Suspense';
+      case SuspenseListComponent:
+        return 'SuspenseList';
       default:
         const typeSymbol = getTypeSymbol(type);
 
@@ -398,10 +414,6 @@ export function getInternalReactConstants(
           case STRICT_MODE_NUMBER:
           case STRICT_MODE_SYMBOL_STRING:
             return null;
-          case SUSPENSE_NUMBER:
-          case SUSPENSE_SYMBOL_STRING:
-          case DEPRECATED_PLACEHOLDER_SYMBOL_STRING:
-            return 'Suspense';
           case PROFILER_NUMBER:
           case PROFILER_SYMBOL_STRING:
             return `Profiler(${fiber.memoizedProps.id})`;
@@ -457,6 +469,7 @@ export function attach(
     MemoComponent,
     SimpleMemoComponent,
     SuspenseComponent,
+    SuspenseListComponent,
   } = ReactTypeOfWork;
   const {
     ImmediatePriority,
@@ -478,9 +491,6 @@ export function attach(
     PROFILER_SYMBOL_STRING,
     STRICT_MODE_NUMBER,
     STRICT_MODE_SYMBOL_STRING,
-    SUSPENSE_NUMBER,
-    SUSPENSE_SYMBOL_STRING,
-    DEPRECATED_PLACEHOLDER_SYMBOL_STRING,
   } = ReactSymbols;
 
   const {
@@ -711,6 +721,10 @@ export function attach(
       case MemoComponent:
       case SimpleMemoComponent:
         return ElementTypeMemo;
+      case SuspenseComponent:
+        return ElementTypeSuspense;
+      case SuspenseListComponent:
+        return ElementTypeSuspenseList;
       default:
         const typeSymbol = getTypeSymbol(type);
 
@@ -728,10 +742,6 @@ export function attach(
           case STRICT_MODE_NUMBER:
           case STRICT_MODE_SYMBOL_STRING:
             return ElementTypeOtherOrUnknown;
-          case SUSPENSE_NUMBER:
-          case SUSPENSE_SYMBOL_STRING:
-          case DEPRECATED_PLACEHOLDER_SYMBOL_STRING:
-            return ElementTypeSuspense;
           case PROFILER_NUMBER:
           case PROFILER_SYMBOL_STRING:
             return ElementTypeProfiler;
@@ -1161,7 +1171,12 @@ export function attach(
         : 0;
 
       let displayNameStringID = getStringID(displayName);
-      let keyStringID = getStringID(key);
+
+      // This check is a guard to handle a React element that has been modified
+      // in such a way as to bypass the default stringification of the "key" property.
+      let keyString = key === null ? null : '' + key;
+      let keyStringID = getStringID(keyString);
+
       pushOperation(TREE_OPERATION_ADD);
       pushOperation(id);
       pushOperation(elementType);
@@ -1642,6 +1657,7 @@ export function attach(
         }
       }
     }
+
     if (shouldIncludeInTree) {
       const isProfilingSupported = nextFiber.hasOwnProperty('treeBaseDuration');
       if (isProfilingSupported) {
@@ -1741,6 +1757,14 @@ export function attach(
     const current = root.current;
     const alternate = current.alternate;
 
+    // Certain types of updates bail out at the root without doing any actual render work.
+    // React should probably not call the DevTools commit hook in this case,
+    // but if it does- we can detect it and filter them out from the profiler.
+    const didBailoutAtRoot =
+      alternate !== null &&
+      alternate.expirationTime === 0 &&
+      alternate.childExpirationTime === 0;
+
     currentRootID = getFiberID(getPrimaryFiber(current));
 
     // Before the traversals, remember to start tracking
@@ -1757,7 +1781,7 @@ export function attach(
     // where some v16 renderers support profiling and others don't.
     const isProfilingSupported = root.memoizedInteractions != null;
 
-    if (isProfiling && isProfilingSupported) {
+    if (isProfiling && isProfilingSupported && !didBailoutAtRoot) {
       // If profiling is active, store commit time and duration, and the current interactions.
       // The frontend may request this information after profiling has stopped.
       currentCommitProfilingMetadata = {
@@ -1801,7 +1825,7 @@ export function attach(
       mountFiberRecursively(current, null, false, false);
     }
 
-    if (isProfiling && isProfilingSupported) {
+    if (isProfiling && isProfilingSupported && !didBailoutAtRoot) {
       const commitProfilingMetadata = ((rootToCommitProfilingMetadataMap: any): CommitProfilingMetadataMap).get(
         currentRootID,
       );
