@@ -11,9 +11,9 @@ aliases:
     restore_cache:
       name: Restore node_modules cache
       keys:
-        - v1-node-{{ arch }}-{{ .Branch }}-{{ checksum "yarn.lock" }}
-        - v1-node-{{ arch }}-{{ .Branch }}-
-        - v1-node-{{ arch }}-
+        - v2-node-{{ arch }}-{{ .Branch }}-{{ checksum "yarn.lock" }}
+        - v2-node-{{ arch }}-{{ .Branch }}-
+        - v2-node-{{ arch }}-
   - &run_yarn
     run:
       name: Install Packages
@@ -62,7 +62,7 @@ jobs:
       - *run_yarn
       - save_cache:
           name: Save node_modules cache
-          key: v1-node-{{ arch }}-{{ .Branch }}-{{ checksum "yarn.lock" }}
+          key: v2-node-{{ arch }}-{{ .Branch }}-{{ checksum "yarn.lock" }}
           paths:
             - ~/.cache/yarn
 
@@ -141,6 +141,18 @@ jobs:
             RELEASE_CHANNEL: stable
           command: yarn test-prod --maxWorkers=2
 
+  test_source_prod_experimental:
+    docker: *docker
+    environment: *environment
+    steps:
+      - checkout
+      - *restore_yarn_cache
+      - *run_yarn
+      - run:
+          environment:
+            RELEASE_CHANNEL: experimental
+          command: yarn test-prod --maxWorkers=2
+
   build:
     docker: *docker
     environment: *environment
@@ -192,6 +204,22 @@ jobs:
             - react-native
             - dist
             - sizes/*.json
+
+  build_devtools_and_process_artifacts:
+    docker: *docker
+    environment: *environment
+    parallelism: 20
+    steps:
+      - checkout
+      - attach_workspace: *attach_workspace
+      - *restore_yarn_cache
+      - *run_yarn
+      - run:
+          environment:
+            RELEASE_CHANNEL: experimental
+          command: ./scripts/circleci/pack_and_store_devtools_artifacts.sh
+      - store_artifacts:
+          path: ./build/devtools.tgz
 
   # These jobs are named differently so we can distinguish the stable and
   # and experimental artifacts
@@ -267,7 +295,7 @@ jobs:
             RELEASE_CHANNEL: experimental
           command: yarn test-build --maxWorkers=2
 
-  test_build_devtools:
+  test_devtools:
     docker: *docker
     environment: *environment
     steps:
@@ -277,8 +305,8 @@ jobs:
       - *run_yarn
       - run:
           environment:
-            RELEASE_CHANNEL: stable
-          command: yarn test-build --maxWorkers=2
+            RELEASE_CHANNEL: experimental
+          command: yarn test-build-devtools --maxWorkers=2
 
   test_dom_fixtures:
     docker: *docker
@@ -374,9 +402,6 @@ workflows:
       - test_build_prod:
           requires:
             - build
-      - test_build_devtools:
-          requires:
-            - build
       - test_dom_fixtures:
           requires:
             - build
@@ -385,6 +410,9 @@ workflows:
     jobs:
       - setup
       - test_source_experimental:
+          requires:
+            - setup
+      - test_source_prod_experimental:
           requires:
             - setup
       - build_experimental:
@@ -403,6 +431,12 @@ workflows:
           requires:
             - build_experimental
       - lint_build:
+          requires:
+            - build_experimental
+      - test_devtools:
+          requires:
+            - build_experimental
+      - build_devtools_and_process_artifacts:
           requires:
             - build_experimental
 

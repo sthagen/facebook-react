@@ -11,9 +11,10 @@ module.exports = [
     shortName: 'dom',
     entryPoints: [
       'react-dom',
+      'react-dom/testing',
       'react-dom/unstable-fizz.node',
-      'react-dom/unstable-flight-server.node',
-      'react-dom/unstable-flight-client',
+      'react-flight-dom-webpack/server.node',
+      'react-flight-dom-webpack',
     ],
     isFlowTyped: true,
     isServerSupported: true,
@@ -22,8 +23,8 @@ module.exports = [
     shortName: 'dom-browser',
     entryPoints: [
       'react-dom/unstable-fizz.browser',
-      'react-dom/unstable-flight-server.browser',
-      'react-dom/unstable-flight-client',
+      'react-flight-dom-webpack/server.browser',
+      'react-flight-dom-webpack',
     ],
     isFlowTyped: true,
     isServerSupported: true,

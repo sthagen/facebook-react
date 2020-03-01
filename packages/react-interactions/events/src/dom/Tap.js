@@ -14,7 +14,7 @@ import type {
 } from 'shared/ReactDOMTypes';
 import type {ReactEventResponderListener} from 'shared/ReactTypes';
 
-import React from 'react';
+import * as React from 'react';
 import {
   buttonsEnum,
   dispatchDiscreteEvent,
@@ -520,10 +520,14 @@ const responderImpl = {
           }
 
           const activate = shouldActivate(event);
-          const activateAuxiliary = isAuxiliary(nativeEvent.buttons, event);
+          const buttons =
+            nativeEvent.button === 1
+              ? buttonsEnum.auxiliary
+              : nativeEvent.buttons;
+          const activateAuxiliary = isAuxiliary(buttons, event);
 
           if (activate || activateAuxiliary) {
-            state.buttons = nativeEvent.buttons;
+            state.buttons = buttons;
             state.pointerType = event.pointerType;
             state.responderTarget = context.getResponderNode();
             addRootEventTypes(rootEventTypes, context, state);
@@ -708,11 +712,11 @@ const responderImpl = {
   },
 };
 
-export const TapResponder = React.unstable_createResponder(
+export const TapResponder = React.DEPRECATED_createResponder(
   'Tap',
   responderImpl,
 );
 
 export function useTap(props: TapProps): ReactEventResponderListener<any, any> {
-  return React.unstable_useResponder(TapResponder, props);
+  return React.DEPRECATED_useResponder(TapResponder, props);
 }
