@@ -13,6 +13,7 @@ import type {EventSystemFlags} from 'legacy-events/EventSystemFlags';
 import type {Fiber} from 'react-reconciler/src/ReactFiber';
 import type {PluginModule} from 'legacy-events/PluginModuleType';
 import type {ReactSyntheticEvent} from 'legacy-events/ReactSyntheticEventType';
+import type {ReactDOMListener} from 'shared/ReactDOMTypes';
 
 import {registrationNameDependencies} from 'legacy-events/EventPluginRegistry';
 import {batchedEventUpdates} from 'legacy-events/ReactGenericBatching';
@@ -21,7 +22,7 @@ import {plugins} from 'legacy-events/EventPluginRegistry';
 
 import {HostRoot, HostPortal} from 'shared/ReactWorkTags';
 
-import {trapEventForPluginEventSystem} from './ReactDOMEventListener';
+import {addTrappedEventListener} from './ReactDOMEventListener';
 import getEventTarget from './getEventTarget';
 import {getListenerMapForElement} from './DOMEventListenerMap';
 import {
@@ -149,11 +150,7 @@ export function listenToTopLevelEvent(
 ): void {
   if (!listenerMap.has(topLevelType)) {
     const isCapturePhase = capturePhaseEvents.has(topLevelType);
-    trapEventForPluginEventSystem(
-      rootContainerElement,
-      topLevelType,
-      isCapturePhase,
-    );
+    addTrappedEventListener(rootContainerElement, topLevelType, isCapturePhase);
     listenerMap.set(topLevelType, null);
   }
 }
@@ -196,7 +193,7 @@ function willDeferLaterForFBLegacyPrimer(nativeEvent: any): boolean {
     if (node.tagName === 'A' && validFBLegacyPrimerRels.has(node.rel)) {
       const legacyFBSupport = true;
       const isCapture = nativeEvent.eventPhase === 1;
-      trapEventForPluginEventSystem(
+      addTrappedEventListener(
         document,
         ((type: any): DOMTopLevelEventType),
         isCapture,
@@ -299,4 +296,12 @@ export function dispatchEventForPluginEventSystem(
       rootContainer,
     ),
   );
+}
+
+export function attachElementListener(listener: ReactDOMListener): void {
+  // TODO
+}
+
+export function detachElementListener(listener: ReactDOMListener): void {
+  // TODO
 }
