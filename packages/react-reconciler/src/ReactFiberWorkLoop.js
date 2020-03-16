@@ -199,14 +199,13 @@ const {
 
 type ExecutionContext = number;
 
-const NoContext = /*                    */ 0b0000000;
-const BatchedContext = /*               */ 0b0000001;
-const EventContext = /*                 */ 0b0000010;
-const DiscreteEventContext = /*         */ 0b0000100;
-const LegacyUnbatchedContext = /*       */ 0b0001000;
-const RenderContext = /*                */ 0b0010000;
-const CommitContext = /*                */ 0b0100000;
-const PassiveEffectContext = /*         */ 0b1000000;
+const NoContext = /*                    */ 0b000000;
+const BatchedContext = /*               */ 0b000001;
+const EventContext = /*                 */ 0b000010;
+const DiscreteEventContext = /*         */ 0b000100;
+const LegacyUnbatchedContext = /*       */ 0b001000;
+const RenderContext = /*                */ 0b010000;
+const CommitContext = /*                */ 0b100000;
 
 type RootExitStatus = 0 | 1 | 2 | 3 | 4 | 5;
 const RootIncomplete = 0;
@@ -298,6 +297,10 @@ let spawnedWorkDuringRender: null | Array<ExpirationTime> = null;
 // we want all updates of like priority that occur within the same event to
 // receive the same expiration time. Otherwise we get tearing.
 let currentEventTime: ExpirationTime = NoWork;
+
+// Dev only flag that tracks if passive effects are currently being flushed.
+// We warn about state updates for unmounted components differently in this case.
+let isFlushingPassiveEffects = false;
 
 export function getWorkInProgressRoot(): FiberRoot | null {
   return workInProgressRoot;
@@ -2282,9 +2285,13 @@ function flushPassiveEffectsImpl() {
     (executionContext & (RenderContext | CommitContext)) === NoContext,
     'Cannot flush passive effects while already rendering.',
   );
+
+  if (__DEV__) {
+    isFlushingPassiveEffects = true;
+  }
+
   const prevExecutionContext = executionContext;
   executionContext |= CommitContext;
-  executionContext |= PassiveEffectContext;
   const prevInteractions = pushInteractions(root);
 
   if (runAllPassiveEffectDestroysBeforeCreates) {
@@ -2437,6 +2444,10 @@ function flushPassiveEffectsImpl() {
   if (enableSchedulerTracing) {
     popInteractions(((prevInteractions: any): Set<Interaction>));
     finishPendingInteractions(root, expirationTime);
+  }
+
+  if (__DEV__) {
+    isFlushingPassiveEffects = false;
   }
 
   executionContext = prevExecutionContext;
@@ -2816,7 +2827,7 @@ function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
     }
 
     // If we are currently flushing passive effects, change the warning text.
-    if ((executionContext & PassiveEffectContext) !== NoContext) {
+    if (isFlushingPassiveEffects) {
       console.error(
         "Can't perform a React state update from within a useEffect cleanup function. " +
           'To fix, move state updates to the useEffect() body in %s.%s',
@@ -2909,6 +2920,11 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
 }
 
 let didWarnAboutUpdateInRender = false;
+let didWarnAboutUpdateInRenderForAnotherComponent;
+if (__DEV__) {
+  didWarnAboutUpdateInRenderForAnotherComponent = new Set();
+}
+
 function warnAboutRenderPhaseUpdatesInDEV(fiber) {
   if (__DEV__) {
     if ((executionContext & RenderContext) !== NoContext) {
@@ -2916,10 +2932,24 @@ function warnAboutRenderPhaseUpdatesInDEV(fiber) {
         case FunctionComponent:
         case ForwardRef:
         case SimpleMemoComponent: {
-          console.error(
-            'Cannot update a component from inside the function body of a ' +
-              'different component.',
-          );
+          const renderingComponentName =
+            (workInProgress && getComponentName(workInProgress.type)) ||
+            'Unknown';
+          const setStateComponentName =
+            getComponentName(fiber.type) || 'Unknown';
+          const dedupeKey =
+            renderingComponentName + ' ' + setStateComponentName;
+          if (!didWarnAboutUpdateInRenderForAnotherComponent.has(dedupeKey)) {
+            didWarnAboutUpdateInRenderForAnotherComponent.add(dedupeKey);
+            console.error(
+              'Cannot update a component (`%s`) from inside the function body of a ' +
+                'different component (`%s`). To locate the bad setState() call inside `%s`, ' +
+                'follow the stack trace as described in https://fb.me/setstate-in-render',
+              setStateComponentName,
+              renderingComponentName,
+              renderingComponentName,
+            );
+          }
           break;
         }
         case ClassComponent: {
