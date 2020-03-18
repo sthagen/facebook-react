@@ -542,7 +542,7 @@ describe('ReactCompositeComponent', () => {
   });
 
   it('should warn when shouldComponentUpdate() returns undefined', () => {
-    class Component extends React.Component {
+    class ClassComponent extends React.Component {
       state = {bogus: false};
 
       shouldComponentUpdate() {
@@ -554,10 +554,10 @@ describe('ReactCompositeComponent', () => {
       }
     }
 
-    const instance = ReactTestUtils.renderIntoDocument(<Component />);
+    const instance = ReactTestUtils.renderIntoDocument(<ClassComponent />);
 
     expect(() => instance.setState({bogus: true})).toErrorDev(
-      'Warning: Component.shouldComponentUpdate(): Returned undefined instead of a ' +
+      'Warning: ClassComponent.shouldComponentUpdate(): Returned undefined instead of a ' +
         'boolean value. Make sure to return true or false.',
     );
   });
@@ -1748,5 +1748,115 @@ describe('ReactCompositeComponent', () => {
     const container = document.createElement('div');
     ReactDOM.render(<Shadow />, container);
     expect(container.firstChild.tagName).toBe('DIV');
+  });
+
+  it('should not warn on updating function component from componentWillMount', () => {
+    let _setState;
+    function A() {
+      _setState = React.useState()[1];
+      return null;
+    }
+    class B extends React.Component {
+      UNSAFE_componentWillMount() {
+        _setState({});
+      }
+      render() {
+        return null;
+      }
+    }
+    function Parent() {
+      return (
+        <div>
+          <A />
+          <B />
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    ReactDOM.render(<Parent />, container);
+  });
+
+  it('should not warn on updating function component from componentWillUpdate', () => {
+    let _setState;
+    function A() {
+      _setState = React.useState()[1];
+      return null;
+    }
+    class B extends React.Component {
+      UNSAFE_componentWillUpdate() {
+        _setState({});
+      }
+      render() {
+        return null;
+      }
+    }
+    function Parent() {
+      return (
+        <div>
+          <A />
+          <B />
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    ReactDOM.render(<Parent />, container);
+    ReactDOM.render(<Parent />, container);
+  });
+
+  it('should not warn on updating function component from componentWillReceiveProps', () => {
+    let _setState;
+    function A() {
+      _setState = React.useState()[1];
+      return null;
+    }
+    class B extends React.Component {
+      UNSAFE_componentWillReceiveProps() {
+        _setState({});
+      }
+      render() {
+        return null;
+      }
+    }
+    function Parent() {
+      return (
+        <div>
+          <A />
+          <B />
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    ReactDOM.render(<Parent />, container);
+    ReactDOM.render(<Parent />, container);
+  });
+
+  it('should warn on updating function component from render', () => {
+    let _setState;
+    function A() {
+      _setState = React.useState()[1];
+      return null;
+    }
+    class B extends React.Component {
+      render() {
+        _setState({});
+        return null;
+      }
+    }
+    function Parent() {
+      return (
+        <div>
+          <A />
+          <B />
+        </div>
+      );
+    }
+    const container = document.createElement('div');
+    expect(() => {
+      ReactDOM.render(<Parent />, container);
+    }).toErrorDev(
+      'Cannot update a component (`A`) while rendering a different component (`B`)',
+    );
+    // Dedupe.
+    ReactDOM.render(<Parent />, container);
   });
 });
