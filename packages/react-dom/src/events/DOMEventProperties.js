@@ -12,7 +12,10 @@ import type {
   TopLevelType,
   DOMTopLevelEventType,
 } from 'legacy-events/TopLevelEventTypes';
-import type {DispatchConfig} from 'legacy-events/ReactSyntheticEventType';
+import type {
+  DispatchConfig,
+  CustomDispatchConfig,
+} from 'legacy-events/ReactSyntheticEventType';
 
 import * as DOMTopLevelEventTypes from './DOMTopLevelEventTypes';
 import {
@@ -31,7 +34,7 @@ export const simpleEventPluginEventTypes = {};
 
 export const topLevelEventsToDispatchConfig: Map<
   TopLevelType,
-  DispatchConfig,
+  DispatchConfig | CustomDispatchConfig,
 > = new Map();
 
 const eventPriorities = new Map();
@@ -224,8 +227,10 @@ export function getEventPriorityForPluginSystem(
   return priority === undefined ? ContinuousEvent : priority;
 }
 
-export function getEventPriorityForListenerSystem(type: string): EventPriority {
-  const priority = eventPriorities.get(((type: any): TopLevelType));
+export function getEventPriorityForListenerSystem(
+  type: DOMTopLevelEventType,
+): EventPriority {
+  const priority = eventPriorities.get(type);
   if (priority !== undefined) {
     return priority;
   }

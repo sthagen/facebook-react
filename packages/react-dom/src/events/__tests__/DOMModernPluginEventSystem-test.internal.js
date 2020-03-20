@@ -15,10 +15,35 @@ let ReactDOM;
 let ReactDOMServer;
 let Scheduler;
 
-function dispatchClickEvent(element) {
+function dispatchEvent(element, type) {
   const event = document.createEvent('Event');
-  event.initEvent('click', true, true);
+  event.initEvent(type, true, true);
   element.dispatchEvent(event);
+}
+
+function dispatchClickEvent(element) {
+  dispatchEvent(element, 'click');
+}
+
+let eventListenersToClear = [];
+
+function startNativeEventListenerClearDown() {
+  const nativeWindowEventListener = window.addEventListener;
+  window.addEventListener = function(...params) {
+    eventListenersToClear.push({target: window, params});
+    return nativeWindowEventListener.apply(this, params);
+  };
+  const nativeDocumentEventListener = document.addEventListener;
+  document.addEventListener = function(...params) {
+    eventListenersToClear.push({target: document, params});
+    return nativeDocumentEventListener.apply(this, params);
+  };
+}
+
+function endNativeEventListenerClearDown() {
+  eventListenersToClear.forEach(({target, params}) => {
+    target.removeEventListener(...params);
+  });
 }
 
 describe('DOMModernPluginEventSystem', () => {
@@ -41,11 +66,13 @@ describe('DOMModernPluginEventSystem', () => {
           ReactDOMServer = require('react-dom/server');
           container = document.createElement('div');
           document.body.appendChild(container);
+          startNativeEventListenerClearDown();
         });
 
         afterEach(() => {
           document.body.removeChild(container);
           container = null;
+          endNativeEventListenerClearDown();
         });
 
         it('handle propagation of click events', () => {
@@ -1324,14 +1351,18 @@ describe('DOMModernPluginEventSystem', () => {
             expect(log[0]).toEqual(['capture', buttonElement]);
             expect(log[1]).toEqual(['bubble', buttonElement]);
 
+            log.length = 0;
+            onClick.mockClear();
+            onClickCapture.mockClear();
+
             let divElement = divRef.current;
             dispatchClickEvent(divElement);
-            expect(onClick).toHaveBeenCalledTimes(3);
-            expect(onClickCapture).toHaveBeenCalledTimes(3);
-            expect(log[2]).toEqual(['capture', buttonElement]);
-            expect(log[3]).toEqual(['capture', divElement]);
-            expect(log[4]).toEqual(['bubble', divElement]);
-            expect(log[5]).toEqual(['bubble', buttonElement]);
+            expect(onClick).toHaveBeenCalledTimes(2);
+            expect(onClickCapture).toHaveBeenCalledTimes(2);
+            expect(log[0]).toEqual(['capture', buttonElement]);
+            expect(log[1]).toEqual(['capture', divElement]);
+            expect(log[2]).toEqual(['bubble', divElement]);
+            expect(log[3]).toEqual(['bubble', buttonElement]);
           });
 
           it('handle propagation of click events mixed with onClick events', () => {
@@ -1781,6 +1812,332 @@ describe('DOMModernPluginEventSystem', () => {
             button = button2Ref.current;
             dispatchClickEvent(button);
             expect(clickEvent).toHaveBeenCalledTimes(1);
+          });
+
+          it('should correctly work for a basic "click" window listener', () => {
+            const log = [];
+            const clickEvent = jest.fn(event => {
+              log.push({
+                eventPhase: event.eventPhase,
+                type: event.type,
+                currentTarget: event.currentTarget,
+                target: event.target,
+              });
+            });
+
+            function Test() {
+              const click = ReactDOM.unstable_useEvent('click');
+
+              React.useEffect(() => {
+                click.setListener(window, clickEvent);
+              });
+
+              return <button>Click anything!</button>;
+            }
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            expect(container.innerHTML).toBe(
+              '<button>Click anything!</button>',
+            );
+
+            // Clicking outside the button should trigger the event callback
+            dispatchClickEvent(document.body);
+            expect(log[0]).toEqual({
+              eventPhase: 3,
+              type: 'click',
+              currentTarget: window,
+              target: document.body,
+            });
+
+            // Unmounting the container and clicking should not work
+            ReactDOM.render(null, container);
+            Scheduler.unstable_flushAll();
+
+            dispatchClickEvent(document.body);
+            expect(clickEvent).toBeCalledTimes(1);
+
+            // Re-rendering and clicking the body should work again
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            dispatchClickEvent(document.body);
+            expect(clickEvent).toBeCalledTimes(2);
+          });
+
+          it('handle propagation of click events on the window', () => {
+            const buttonRef = React.createRef();
+            const divRef = React.createRef();
+            const log = [];
+            const onClick = jest.fn(e => log.push(['bubble', e.currentTarget]));
+            const onClickCapture = jest.fn(e =>
+              log.push(['capture', e.currentTarget]),
+            );
+
+            function Test() {
+              const click = ReactDOM.unstable_useEvent('click');
+              const clickCapture = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+
+              React.useEffect(() => {
+                click.setListener(window, onClick);
+                clickCapture.setListener(window, onClickCapture);
+                click.setListener(buttonRef.current, onClick);
+                clickCapture.setListener(buttonRef.current, onClickCapture);
+                click.setListener(divRef.current, onClick);
+                clickCapture.setListener(divRef.current, onClickCapture);
+              });
+
+              return (
+                <button ref={buttonRef}>
+                  <div ref={divRef}>Click me!</div>
+                </button>
+              );
+            }
+
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            let buttonElement = buttonRef.current;
+            dispatchClickEvent(buttonElement);
+            expect(onClick).toHaveBeenCalledTimes(2);
+            expect(onClickCapture).toHaveBeenCalledTimes(2);
+            expect(log[0]).toEqual(['capture', window]);
+            expect(log[1]).toEqual(['capture', buttonElement]);
+            expect(log[2]).toEqual(['bubble', buttonElement]);
+            expect(log[3]).toEqual(['bubble', window]);
+
+            log.length = 0;
+            onClick.mockClear();
+            onClickCapture.mockClear();
+
+            let divElement = divRef.current;
+            dispatchClickEvent(divElement);
+            expect(onClick).toHaveBeenCalledTimes(3);
+            expect(onClickCapture).toHaveBeenCalledTimes(3);
+            expect(log[0]).toEqual(['capture', window]);
+            expect(log[1]).toEqual(['capture', buttonElement]);
+            expect(log[2]).toEqual(['capture', divElement]);
+            expect(log[3]).toEqual(['bubble', divElement]);
+            expect(log[4]).toEqual(['bubble', buttonElement]);
+            expect(log[5]).toEqual(['bubble', window]);
+          });
+
+          it('should correctly handle stopPropagation for mixed listeners', () => {
+            const buttonRef = React.createRef();
+            const rootListerner1 = jest.fn(e => e.stopPropagation());
+            const rootListerner2 = jest.fn();
+            const targetListerner1 = jest.fn();
+            const targetListerner2 = jest.fn();
+
+            function Test() {
+              const click1 = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+              const click2 = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+              const click3 = ReactDOM.unstable_useEvent('click');
+              const click4 = ReactDOM.unstable_useEvent('click');
+
+              React.useEffect(() => {
+                click1.setListener(window, rootListerner1);
+                click2.setListener(buttonRef.current, targetListerner1);
+                click3.setListener(window, rootListerner2);
+                click4.setListener(buttonRef.current, targetListerner2);
+              });
+
+              return <button ref={buttonRef}>Click me!</button>;
+            }
+
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            let buttonElement = buttonRef.current;
+            dispatchClickEvent(buttonElement);
+            expect(rootListerner1).toHaveBeenCalledTimes(1);
+            expect(targetListerner1).toHaveBeenCalledTimes(0);
+            expect(targetListerner2).toHaveBeenCalledTimes(0);
+            expect(rootListerner2).toHaveBeenCalledTimes(0);
+          });
+
+          it('should correctly handle stopPropagation for delegated listeners', () => {
+            const buttonRef = React.createRef();
+            const rootListerner1 = jest.fn(e => e.stopPropagation());
+            const rootListerner2 = jest.fn();
+            const rootListerner3 = jest.fn(e => e.stopPropagation());
+            const rootListerner4 = jest.fn();
+
+            function Test() {
+              const click1 = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+              const click2 = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+              const click3 = ReactDOM.unstable_useEvent('click');
+              const click4 = ReactDOM.unstable_useEvent('click');
+
+              React.useEffect(() => {
+                click1.setListener(window, rootListerner1);
+                click2.setListener(window, rootListerner2);
+                click3.setListener(window, rootListerner3);
+                click4.setListener(window, rootListerner4);
+              });
+
+              return <button ref={buttonRef}>Click me!</button>;
+            }
+
+            ReactDOM.render(<Test />, container);
+
+            Scheduler.unstable_flushAll();
+
+            let buttonElement = buttonRef.current;
+            dispatchClickEvent(buttonElement);
+            expect(rootListerner1).toHaveBeenCalledTimes(1);
+            expect(rootListerner2).toHaveBeenCalledTimes(1);
+            expect(rootListerner3).toHaveBeenCalledTimes(0);
+            expect(rootListerner4).toHaveBeenCalledTimes(0);
+          });
+
+          it('handle propagation of click events on the window and document', () => {
+            const buttonRef = React.createRef();
+            const divRef = React.createRef();
+            const log = [];
+            const onClick = jest.fn(e => log.push(['bubble', e.currentTarget]));
+            const onClickCapture = jest.fn(e =>
+              log.push(['capture', e.currentTarget]),
+            );
+
+            function Test() {
+              const click = ReactDOM.unstable_useEvent('click');
+              const clickCapture = ReactDOM.unstable_useEvent('click', {
+                capture: true,
+              });
+
+              React.useEffect(() => {
+                click.setListener(window, onClick);
+                clickCapture.setListener(window, onClickCapture);
+                click.setListener(document, onClick);
+                clickCapture.setListener(document, onClickCapture);
+                click.setListener(buttonRef.current, onClick);
+                clickCapture.setListener(buttonRef.current, onClickCapture);
+                click.setListener(divRef.current, onClick);
+                clickCapture.setListener(divRef.current, onClickCapture);
+              });
+
+              return (
+                <button ref={buttonRef}>
+                  <div ref={divRef}>Click me!</div>
+                </button>
+              );
+            }
+
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            let buttonElement = buttonRef.current;
+            dispatchClickEvent(buttonElement);
+            expect(onClick).toHaveBeenCalledTimes(3);
+            expect(onClickCapture).toHaveBeenCalledTimes(3);
+            expect(log[0]).toEqual(['capture', window]);
+            expect(log[1]).toEqual(['capture', document]);
+            expect(log[2]).toEqual(['capture', buttonElement]);
+            expect(log[3]).toEqual(['bubble', buttonElement]);
+            expect(log[4]).toEqual(['bubble', document]);
+            expect(log[5]).toEqual(['bubble', window]);
+
+            log.length = 0;
+            onClick.mockClear();
+            onClickCapture.mockClear();
+
+            let divElement = divRef.current;
+            dispatchClickEvent(divElement);
+            expect(onClick).toHaveBeenCalledTimes(4);
+            expect(onClickCapture).toHaveBeenCalledTimes(4);
+            expect(log[0]).toEqual(['capture', window]);
+            expect(log[1]).toEqual(['capture', document]);
+            expect(log[2]).toEqual(['capture', buttonElement]);
+            expect(log[3]).toEqual(['capture', divElement]);
+            expect(log[4]).toEqual(['bubble', divElement]);
+            expect(log[5]).toEqual(['bubble', buttonElement]);
+            expect(log[6]).toEqual(['bubble', document]);
+            expect(log[7]).toEqual(['bubble', window]);
+          });
+
+          it('handles propagation of custom user events', () => {
+            const buttonRef = React.createRef();
+            const divRef = React.createRef();
+            const log = [];
+            const onCustomEvent = jest.fn(e =>
+              log.push(['bubble', e.currentTarget]),
+            );
+            const onCustomEventCapture = jest.fn(e =>
+              log.push(['capture', e.currentTarget]),
+            );
+
+            function Test() {
+              let customEventHandle;
+
+              // Test that we get a warning when we don't provide an explicit priortiy
+              expect(() => {
+                customEventHandle = ReactDOM.unstable_useEvent('custom-event');
+              }).toWarnDev(
+                'Warning: The event "type" provided to useEvent() does not have a known priority type. ' +
+                  'It is recommended to provide a "priority" option to specify a priority.',
+              );
+
+              customEventHandle = ReactDOM.unstable_useEvent('custom-event', {
+                priority: 0, // Discrete
+              });
+
+              const customCaptureHandle = ReactDOM.unstable_useEvent(
+                'custom-event',
+                {
+                  capture: true,
+                  priority: 0, // Discrete
+                },
+              );
+
+              React.useEffect(() => {
+                customEventHandle.setListener(buttonRef.current, onCustomEvent);
+                customCaptureHandle.setListener(
+                  buttonRef.current,
+                  onCustomEventCapture,
+                );
+                customEventHandle.setListener(divRef.current, onCustomEvent);
+                customCaptureHandle.setListener(
+                  divRef.current,
+                  onCustomEventCapture,
+                );
+              });
+
+              return (
+                <button ref={buttonRef}>
+                  <div ref={divRef}>Click me!</div>
+                </button>
+              );
+            }
+
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            let buttonElement = buttonRef.current;
+            dispatchEvent(buttonElement, 'custom-event');
+            expect(onCustomEvent).toHaveBeenCalledTimes(1);
+            expect(onCustomEventCapture).toHaveBeenCalledTimes(1);
+            expect(log[0]).toEqual(['capture', buttonElement]);
+            expect(log[1]).toEqual(['bubble', buttonElement]);
+
+            let divElement = divRef.current;
+            dispatchEvent(divElement, 'custom-event');
+            expect(onCustomEvent).toHaveBeenCalledTimes(3);
+            expect(onCustomEventCapture).toHaveBeenCalledTimes(3);
+            expect(log[2]).toEqual(['capture', buttonElement]);
+            expect(log[3]).toEqual(['capture', divElement]);
+            expect(log[4]).toEqual(['bubble', divElement]);
+            expect(log[5]).toEqual(['bubble', buttonElement]);
           });
         });
       },

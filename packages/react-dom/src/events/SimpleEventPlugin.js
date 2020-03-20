@@ -83,6 +83,7 @@ const SimpleEventPlugin: PluginModule<MouseEvent> = {
     nativeEvent: MouseEvent,
     nativeEventTarget: null | EventTarget,
     eventSystemFlags: EventSystemFlags,
+    targetContainer?: null | EventTarget,
   ): null | ReactSyntheticEvent {
     const dispatchConfig = topLevelEventsToDispatchConfig.get(topLevelType);
     if (!dispatchConfig) {
@@ -172,7 +173,10 @@ const SimpleEventPlugin: PluginModule<MouseEvent> = {
         break;
       default:
         if (__DEV__) {
-          if (knownHTMLTopLevelTypes.indexOf(topLevelType) === -1) {
+          if (
+            knownHTMLTopLevelTypes.indexOf(topLevelType) === -1 &&
+            dispatchConfig.customEvent !== true
+          ) {
             console.error(
               'SimpleEventPlugin: Unhandled event type, `%s`. This warning ' +
                 'is likely caused by a bug in React. Please file an issue.',
@@ -191,7 +195,7 @@ const SimpleEventPlugin: PluginModule<MouseEvent> = {
       nativeEvent,
       nativeEventTarget,
     );
-    accumulateTwoPhaseListeners(event, true);
+    accumulateTwoPhaseListeners(event, true, eventSystemFlags, targetContainer);
     return event;
   },
 };

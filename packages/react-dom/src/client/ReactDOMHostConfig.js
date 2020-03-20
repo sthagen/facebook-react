@@ -7,7 +7,6 @@
  * @flow
  */
 
-import type {DOMTopLevelEventType} from 'legacy-events/TopLevelEventTypes';
 import type {RootType} from './ReactDOMRoot';
 
 import {
@@ -76,11 +75,13 @@ import {
   IS_PASSIVE,
 } from 'legacy-events/EventSystemFlags';
 import {
-  attachElementListener,
-  detachElementListener,
-  isDOMDocument,
-  isDOMElement,
+  isManagedDOMElement,
+  isValidEventTarget,
   listenToTopLevelEvent,
+  detachListenerFromManagedDOMElement,
+  attachListenerFromManagedDOMElement,
+  detachTargetEventListener,
+  attachTargetEventListener,
 } from '../events/DOMModernPluginEventSystem';
 import {getListenerMapForElement} from '../events/DOMEventListenerMap';
 
@@ -1112,7 +1113,7 @@ export function registerEvent(
   // Add the event listener to the target container (falling back to
   // the target if we didn't find one).
   listenToTopLevelEvent(
-    ((type: any): DOMTopLevelEventType),
+    type,
     rootContainerInstance,
     listenerMap,
     passive,
@@ -1123,12 +1124,10 @@ export function registerEvent(
 export function mountEventListener(listener: ReactDOMListener): void {
   if (enableUseEventAPI) {
     const {target} = listener;
-    if (target === window) {
-      // TODO (useEvent)
-    } else if (isDOMDocument(target)) {
-      // TODO (useEvent)
-    } else if (isDOMElement(target)) {
-      attachElementListener(listener);
+    if (isManagedDOMElement(target)) {
+      attachListenerFromManagedDOMElement(listener);
+    } else {
+      attachTargetEventListener(listener);
     }
   }
 }
@@ -1136,12 +1135,10 @@ export function mountEventListener(listener: ReactDOMListener): void {
 export function unmountEventListener(listener: ReactDOMListener): void {
   if (enableUseEventAPI) {
     const {target} = listener;
-    if (target === window) {
-      // TODO (useEvent)
-    } else if (isDOMDocument(target)) {
-      // TODO (useEvent)
-    } else if (isDOMElement(target)) {
-      detachElementListener(listener);
+    if (isManagedDOMElement(target)) {
+      detachListenerFromManagedDOMElement(listener);
+    } else {
+      detachTargetEventListener(listener);
     }
   }
 }
@@ -1153,10 +1150,7 @@ export function validateEventListenerTarget(
   if (enableUseEventAPI) {
     if (
       target != null &&
-      (target === window ||
-        isDOMDocument(target) ||
-        (isDOMElement(target) &&
-          getClosestInstanceFromNode(((target: any): Element))))
+      (isManagedDOMElement(target) || isValidEventTarget(target))
     ) {
       if (listener == null || typeof listener === 'function') {
         return true;
@@ -1170,11 +1164,8 @@ export function validateEventListenerTarget(
     }
     if (__DEV__) {
       console.warn(
-        'Event listener method setListener() from useEvent() hook requires the first argument to be either:' +
-          '\n\n' +
-          '1. A valid DOM node that was rendered and managed by React\n' +
-          '2. The "window" object\n' +
-          '3. The "document" object',
+        'Event listener method setListener() from useEvent() hook requires the first argument to be ' +
+          'a valid DOM EventTarget. If using a ref, ensure the current value is not null.',
       );
     }
   }
