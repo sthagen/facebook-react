@@ -7,6 +7,7 @@
  * @flow
  */
 
+import type {Wakeable} from 'shared/ReactTypes';
 import type {Fiber} from './ReactFiber';
 import type {FiberRoot} from './ReactFiberRoot';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
@@ -20,7 +21,6 @@ import {
   warnAboutDeprecatedLifecycles,
   deferPassiveEffectCleanupDuringUnmount,
   runAllPassiveEffectDestroysBeforeCreates,
-  enableUserTimingAPI,
   enableSuspenseServerRenderer,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
   enableProfilerTimer,
@@ -160,28 +160,12 @@ import {
 import getComponentName from 'shared/getComponentName';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings';
 import {
+  current as currentDebugFiberInDEV,
   isRendering as ReactCurrentDebugFiberIsRenderingInDEV,
   resetCurrentFiber as resetCurrentDebugFiberInDEV,
   setCurrentFiber as setCurrentDebugFiberInDEV,
   getStackByFiberInDevAndProd,
 } from './ReactCurrentFiber';
-import {
-  recordEffect,
-  recordScheduleUpdate,
-  startWorkTimer,
-  stopWorkTimer,
-  stopFailedWorkTimer,
-  startWorkLoopTimer,
-  stopWorkLoopTimer,
-  startCommitTimer,
-  stopCommitTimer,
-  startCommitSnapshotEffectsTimer,
-  stopCommitSnapshotEffectsTimer,
-  startCommitHostEffectsTimer,
-  stopCommitHostEffectsTimer,
-  startCommitLifeCyclesTimer,
-  stopCommitLifeCyclesTimer,
-} from './ReactDebugFiberPerf';
 import {
   invokeGuardedCallback,
   hasCaughtError,
@@ -214,13 +198,6 @@ const RootErrored = 2;
 const RootSuspended = 3;
 const RootSuspendedWithDelay = 4;
 const RootCompleted = 5;
-
-export type Thenable = {
-  then(resolve: () => mixed, reject?: () => mixed): Thenable | void,
-  // Special flag to opt out of tracing interactions across a Suspense boundary.
-  __reactDoNotTraceInteractions?: boolean,
-  ...
-};
 
 // Describes where we are in the React execution stack
 let executionContext: ExecutionContext = NoContext;
@@ -279,8 +256,6 @@ let rootWithNestedUpdates: FiberRoot | null = null;
 
 const NESTED_PASSIVE_UPDATE_LIMIT = 50;
 let nestedPassiveUpdateCount: number = 0;
-
-let interruptedBy: Fiber | null = null;
 
 // Marks the need to reschedule pending interactions at these expiration times
 // during the commit phase. This enables them to be traced across components
@@ -401,9 +376,6 @@ export function scheduleUpdateOnFiber(
     warnAboutUpdateOnUnmountedFiberInDEV(fiber);
     return;
   }
-
-  checkForInterruption(fiber, expirationTime);
-  recordScheduleUpdate();
 
   // TODO: computeExpirationForFiber also reads the priority. Pass the
   // priority as an argument to that function and this one.
@@ -1415,7 +1387,6 @@ function renderRootSync(root, expirationTime) {
   }
 
   const prevInteractions = pushInteractions(root);
-  startWorkLoopTimer(workInProgress);
   do {
     try {
       workLoopSync();
@@ -1440,8 +1411,6 @@ function renderRootSync(root, expirationTime) {
         'bug in React. Please file an issue.',
     );
   }
-
-  stopFinishedWorkLoopTimer();
 
   // Set this to null to indicate there's no in-progress render.
   workInProgressRoot = null;
@@ -1471,7 +1440,6 @@ function renderRootConcurrent(root, expirationTime) {
   }
 
   const prevInteractions = pushInteractions(root);
-  startWorkLoopTimer(workInProgress);
   do {
     try {
       workLoopConcurrent();
@@ -1491,12 +1459,9 @@ function renderRootConcurrent(root, expirationTime) {
   // Check if the tree has completed.
   if (workInProgress !== null) {
     // Still work remaining.
-    stopInterruptedWorkLoopTimer();
     return RootIncomplete;
   } else {
     // Completed the tree.
-    stopFinishedWorkLoopTimer();
-
     // Set this to null to indicate there's no in-progress render.
     workInProgressRoot = null;
 
@@ -1518,8 +1483,6 @@ function performUnitOfWork(unitOfWork: Fiber): Fiber | null {
   // nothing should rely on this, but relying on it here means that we don't
   // need an additional field on the work in progress.
   const current = unitOfWork.alternate;
-
-  startWorkTimer(unitOfWork);
   setCurrentDebugFiberInDEV(unitOfWork);
 
   let next;
@@ -1568,7 +1531,6 @@ function completeUnitOfWork(unitOfWork: Fiber): Fiber | null {
         // Update render duration assuming we didn't error.
         stopProfilerTimerIfRunningAndRecordDelta(workInProgress, false);
       }
-      stopWorkTimer(workInProgress);
       resetCurrentDebugFiberInDEV();
       resetChildExpirationTime(workInProgress);
 
@@ -1645,13 +1607,9 @@ function completeUnitOfWork(unitOfWork: Fiber): Fiber | null {
         // back here again.
         // Since we're restarting, remove anything that is not a host effect
         // from the effect tag.
-        // TODO: The name stopFailedWorkTimer is misleading because Suspense
-        // also captures and restarts.
-        stopFailedWorkTimer(workInProgress);
         next.effectTag &= HostEffectMask;
         return next;
       }
-      stopWorkTimer(workInProgress);
 
       if (returnFiber !== null) {
         // Mark the parent fiber as incomplete and clear its effect list.
@@ -1797,8 +1755,6 @@ function commitRootImpl(root, renderPriorityLevel) {
   root.callbackPriority = NoPriority;
   root.nextKnownPendingLevel = NoWork;
 
-  startCommitTimer();
-
   // Update the first and last pending times on this root. The new first
   // pending time is whatever is left on the root fiber.
   const remainingExpirationTimeBeforeCommit = getRemainingExpirationTime(
@@ -1854,7 +1810,6 @@ function commitRootImpl(root, renderPriorityLevel) {
     // The first phase a "before mutation" phase. We use this phase to read the
     // state of the host tree right before we mutate it. This is where
     // getSnapshotBeforeUpdate is called.
-    startCommitSnapshotEffectsTimer();
     prepareForCommit(root.containerInfo);
     nextEffect = firstEffect;
     do {
@@ -1876,7 +1831,6 @@ function commitRootImpl(root, renderPriorityLevel) {
         }
       }
     } while (nextEffect !== null);
-    stopCommitSnapshotEffectsTimer();
 
     if (enableProfilerTimer) {
       // Mark the current commit time to be shared by all Profilers in this
@@ -1885,7 +1839,6 @@ function commitRootImpl(root, renderPriorityLevel) {
     }
 
     // The next phase is the mutation phase, where we mutate the host tree.
-    startCommitHostEffectsTimer();
     nextEffect = firstEffect;
     do {
       if (__DEV__) {
@@ -1912,7 +1865,6 @@ function commitRootImpl(root, renderPriorityLevel) {
         }
       }
     } while (nextEffect !== null);
-    stopCommitHostEffectsTimer();
     resetAfterCommit(root.containerInfo);
 
     // The work-in-progress tree is now the current tree. This must come after
@@ -1924,7 +1876,6 @@ function commitRootImpl(root, renderPriorityLevel) {
     // The next phase is the layout phase, where we call effects that read
     // the host tree after it's been mutated. The idiomatic use case for this is
     // layout, but class component lifecycles also fire here for legacy reasons.
-    startCommitLifeCyclesTimer();
     nextEffect = firstEffect;
     do {
       if (__DEV__) {
@@ -1951,7 +1902,6 @@ function commitRootImpl(root, renderPriorityLevel) {
         }
       }
     } while (nextEffect !== null);
-    stopCommitLifeCyclesTimer();
 
     nextEffect = null;
 
@@ -1969,18 +1919,10 @@ function commitRootImpl(root, renderPriorityLevel) {
     // Measure these anyway so the flamegraph explicitly shows that there were
     // no effects.
     // TODO: Maybe there's a better way to report this.
-    startCommitSnapshotEffectsTimer();
-    stopCommitSnapshotEffectsTimer();
     if (enableProfilerTimer) {
       recordCommitTime();
     }
-    startCommitHostEffectsTimer();
-    stopCommitHostEffectsTimer();
-    startCommitLifeCyclesTimer();
-    stopCommitLifeCyclesTimer();
   }
-
-  stopCommitTimer();
 
   const rootDidHavePassiveEffects = rootDoesHavePassiveEffects;
 
@@ -2080,7 +2022,6 @@ function commitBeforeMutationEffects() {
     const effectTag = nextEffect.effectTag;
     if ((effectTag & Snapshot) !== NoEffect) {
       setCurrentDebugFiberInDEV(nextEffect);
-      recordEffect();
 
       const current = nextEffect.alternate;
       commitBeforeMutationEffectOnFiber(current, nextEffect);
@@ -2171,9 +2112,6 @@ function commitMutationEffects(root: FiberRoot, renderPriorityLevel) {
       }
     }
 
-    // TODO: Only record a mutation effect if primaryEffectTag is non-zero.
-    recordEffect();
-
     resetCurrentDebugFiberInDEV();
     nextEffect = nextEffect.nextEffect;
   }
@@ -2190,7 +2128,6 @@ function commitLayoutEffects(
     const effectTag = nextEffect.effectTag;
 
     if (effectTag & (Update | Callback)) {
-      recordEffect();
       const current = nextEffect.alternate;
       commitLayoutEffectOnFiber(
         root,
@@ -2201,7 +2138,6 @@ function commitLayoutEffects(
     }
 
     if (effectTag & Ref) {
-      recordEffect();
       commitAttachRef(nextEffect);
     }
 
@@ -2543,14 +2479,14 @@ export function captureCommitPhaseError(sourceFiber: Fiber, error: mixed) {
 
 export function pingSuspendedRoot(
   root: FiberRoot,
-  thenable: Thenable,
+  wakeable: Wakeable,
   suspendedTime: ExpirationTime,
 ) {
   const pingCache = root.pingCache;
   if (pingCache !== null) {
-    // The thenable resolved, so we no longer need to memoize, because it will
+    // The wakeable resolved, so we no longer need to memoize, because it will
     // never be thrown again.
-    pingCache.delete(thenable);
+    pingCache.delete(wakeable);
   }
 
   if (workInProgressRoot === root && renderExpirationTime === suspendedTime) {
@@ -2636,9 +2572,9 @@ export function retryDehydratedSuspenseBoundary(boundaryFiber: Fiber) {
   retryTimedOutBoundary(boundaryFiber, retryTime);
 }
 
-export function resolveRetryThenable(boundaryFiber: Fiber, thenable: Thenable) {
+export function resolveRetryWakeable(boundaryFiber: Fiber, wakeable: Wakeable) {
   let retryTime = NoWork; // Default
-  let retryCache: WeakSet<Thenable> | Set<Thenable> | null;
+  let retryCache: WeakSet<Wakeable> | Set<Wakeable> | null;
   if (enableSuspenseServerRenderer) {
     switch (boundaryFiber.tag) {
       case SuspenseComponent:
@@ -2663,9 +2599,9 @@ export function resolveRetryThenable(boundaryFiber: Fiber, thenable: Thenable) {
   }
 
   if (retryCache !== null) {
-    // The thenable resolved, so we no longer need to memoize, because it will
+    // The wakeable resolved, so we no longer need to memoize, because it will
     // never be thrown again.
-    retryCache.delete(thenable);
+    retryCache.delete(wakeable);
   }
 
   retryTimedOutBoundary(boundaryFiber, retryTime);
@@ -2760,32 +2696,6 @@ function flushRenderPhaseStrictModeWarningsInDEV() {
   }
 }
 
-function stopFinishedWorkLoopTimer() {
-  const didCompleteRoot = true;
-  stopWorkLoopTimer(interruptedBy, didCompleteRoot);
-  interruptedBy = null;
-}
-
-function stopInterruptedWorkLoopTimer() {
-  // TODO: Track which fiber caused the interruption.
-  const didCompleteRoot = false;
-  stopWorkLoopTimer(interruptedBy, didCompleteRoot);
-  interruptedBy = null;
-}
-
-function checkForInterruption(
-  fiberThatReceivedUpdate: Fiber,
-  updateExpirationTime: ExpirationTime,
-) {
-  if (
-    enableUserTimingAPI &&
-    workInProgressRoot !== null &&
-    updateExpirationTime > renderExpirationTime
-  ) {
-    interruptedBy = fiberThatReceivedUpdate;
-  }
-}
-
 let didWarnStateUpdateForUnmountedComponent: Set<string> | null = null;
 function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
   if (__DEV__) {
@@ -2828,14 +2738,36 @@ function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
 
     // If we are currently flushing passive effects, change the warning text.
     if (isFlushingPassiveEffects) {
-      console.error(
-        "Can't perform a React state update from within a useEffect cleanup function. " +
-          'To fix, move state updates to the useEffect() body in %s.%s',
-        tag === ClassComponent
-          ? 'the componentWillUnmount method'
-          : 'a useEffect cleanup function',
-        getStackByFiberInDevAndProd(fiber),
-      );
+      // React can't directly detect a memory leak, but there are some clues that warn about one.
+      // One of these clues is when an unmounted React component tries to update its state.
+      // For example, if a component forgets to remove an event listener when unmounting,
+      // that listener may be called later and try to update state, at which point React would warn about the potential leak.
+      //
+      // Warning signals like this are more useful if they're strong.
+      // For this reason, it's good to always avoid updating state from inside of an effect's cleanup function.
+      // Even when you know there is no potential leak, React has no way to know and so it will warn anyway.
+      // In most cases we suggest moving state updates to the useEffect() body instead.
+      // This works so long as the component is updating its own state (or the state of a descendant).
+      //
+      // However this will not work when a component updates its parent state in a cleanup function.
+      // If such a component is unmounted but its parent remains mounted, the state will be out of sync.
+      // For this reason, we avoid showing the warning if a component is updating an ancestor.
+      let currentTargetFiber = fiber;
+      while (currentTargetFiber !== null) {
+        // currentDebugFiberInDEV owns the effect destroy function currently being invoked.
+        if (
+          currentDebugFiberInDEV === currentTargetFiber ||
+          currentDebugFiberInDEV === currentTargetFiber.alternate
+        ) {
+          console.error(
+            "Can't perform a React state update from within a useEffect cleanup function. " +
+              'To fix, move state updates to the useEffect() body.%s',
+            getStackByFiberInDevAndProd(((currentDebugFiberInDEV: any): Fiber)),
+          );
+          break;
+        }
+        currentTargetFiber = currentTargetFiber.return;
+      }
     } else {
       console.error(
         "Can't perform a React state update on an unmounted component. This " +

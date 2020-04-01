@@ -7,13 +7,10 @@
  * @flow
  */
 
-import invariant from 'shared/invariant';
-
 import typeof * as FeatureFlagsType from 'shared/ReactFeatureFlags';
 import typeof * as ExportsType from './ReactFeatureFlags.test-renderer.www';
 
 export const debugRenderPhaseSideEffectsForStrictMode = false;
-export const enableUserTimingAPI = __DEV__;
 export const warnAboutDeprecatedLifecycles = true;
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = false;
 export const enableProfilerTimer = __PROFILE__;
@@ -29,7 +26,7 @@ export const disableInputAttributeSyncing = false;
 export const enableDeprecatedFlareAPI = true;
 export const enableFundamentalAPI = false;
 export const enableScopeAPI = true;
-export const enableUseEventAPI = false;
+export const enableUseEventAPI = true;
 export const warnAboutUnmockedScheduler = true;
 export const flushSuspenseFallbacksInTests = true;
 export const enableSuspenseCallback = true;
@@ -39,11 +36,10 @@ export const disableLegacyContext = false;
 export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
 export const enableTrustedTypesIntegration = false;
 export const disableTextareaChildren = false;
-export const disableMapsAsChildren = false;
 export const disableModulePatternComponents = false;
 export const warnUnstableRenderSubtreeIntoContainer = false;
-export const deferPassiveEffectCleanupDuringUnmount = false;
-export const runAllPassiveEffectDestroysBeforeCreates = false;
+export const deferPassiveEffectCleanupDuringUnmount = true;
+export const runAllPassiveEffectDestroysBeforeCreates = true;
 export const enableModernEventSystem = false;
 export const warnAboutSpreadingKeyToJSX = false;
 export const enableLegacyFBSupport = false;
@@ -52,11 +48,6 @@ export const enableLegacyFBSupport = false;
 export const throwEarlyForMysteriousError = false;
 
 export const enableNewReconciler = false;
-
-// Only used in www builds.
-export function addUserTimingListener() {
-  invariant(false, 'Not implemented.');
-}
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

@@ -31,7 +31,6 @@ import invariant from 'shared/invariant';
 import {
   enableProfilerTimer,
   enableFundamentalAPI,
-  enableUserTimingAPI,
   enableScopeAPI,
   enableBlocksAPI,
   throwEarlyForMysteriousError,
@@ -324,14 +323,9 @@ function FiberNode(
     this.treeBaseDuration = 0;
   }
 
-  // This is normally DEV-only except www when it adds listeners.
-  // TODO: remove the User Timing integration in favor of Root Events.
-  if (enableUserTimingAPI) {
-    this._debugID = debugCounter++;
-    this._debugIsCurrentlyTiming = false;
-  }
-
   if (__DEV__) {
+    // This isn't directly used but is handy for debugging internals:
+    this._debugID = debugCounter++;
     this._debugSource = null;
     this._debugOwner = null;
     this._debugNeedsRemount = false;
@@ -419,9 +413,7 @@ export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
 
     if (__DEV__) {
       // DEV-only fields
-      if (enableUserTimingAPI) {
-        workInProgress._debugID = current._debugID;
-      }
+      workInProgress._debugID = current._debugID;
       workInProgress._debugSource = current._debugSource;
       workInProgress._debugOwner = current._debugOwner;
       workInProgress._debugHookTypes = current._debugHookTypes;
@@ -549,6 +541,8 @@ export function resetWorkInProgress(
     workInProgress.updateQueue = null;
 
     workInProgress.dependencies = null;
+
+    workInProgress.stateNode = null;
 
     if (enableProfilerTimer) {
       // Note: We don't reset the actualTime counts. It's useful to accumulate
@@ -968,10 +962,7 @@ export function assignFiberPropertiesInDEV(
     target.selfBaseDuration = source.selfBaseDuration;
     target.treeBaseDuration = source.treeBaseDuration;
   }
-  if (enableUserTimingAPI) {
-    target._debugID = source._debugID;
-    target._debugIsCurrentlyTiming = source._debugIsCurrentlyTiming;
-  }
+  target._debugID = source._debugID;
   target._debugSource = source._debugSource;
   target._debugOwner = source._debugOwner;
   target._debugNeedsRemount = source._debugNeedsRemount;

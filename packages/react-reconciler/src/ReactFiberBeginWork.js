@@ -79,7 +79,6 @@ import {
   getCurrentFiberOwnerNameInDevOrNull,
   setIsRendering,
 } from './ReactCurrentFiber';
-import {startWorkTimer, cancelWorkTimer} from './ReactDebugFiberPerf';
 import {
   resolveFunctionForHotReloading,
   resolveForwardRefForHotReloading,
@@ -179,6 +178,7 @@ import {
   scheduleUpdateOnFiber,
   renderDidSuspendDelayIfPossible,
   markUnprocessedUpdateTime,
+  getWorkInProgressRoot,
 } from './ReactFiberWorkLoop';
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
@@ -320,17 +320,14 @@ function updateForwardRef(
       debugRenderPhaseSideEffectsForStrictMode &&
       workInProgress.mode & StrictMode
     ) {
-      // Only double-render components with Hooks
-      if (workInProgress.memoizedState !== null) {
-        nextChildren = renderWithHooks(
-          current,
-          workInProgress,
-          render,
-          nextProps,
-          ref,
-          renderExpirationTime,
-        );
-      }
+      nextChildren = renderWithHooks(
+        current,
+        workInProgress,
+        render,
+        nextProps,
+        ref,
+        renderExpirationTime,
+      );
     }
     setIsRendering(false);
   } else {
@@ -661,17 +658,14 @@ function updateFunctionComponent(
       debugRenderPhaseSideEffectsForStrictMode &&
       workInProgress.mode & StrictMode
     ) {
-      // Only double-render components with Hooks
-      if (workInProgress.memoizedState !== null) {
-        nextChildren = renderWithHooks(
-          current,
-          workInProgress,
-          Component,
-          nextProps,
-          context,
-          renderExpirationTime,
-        );
-      }
+      nextChildren = renderWithHooks(
+        current,
+        workInProgress,
+        Component,
+        nextProps,
+        context,
+        renderExpirationTime,
+      );
     }
     setIsRendering(false);
   } else {
@@ -737,17 +731,14 @@ function updateBlock<Props, Data>(
       debugRenderPhaseSideEffectsForStrictMode &&
       workInProgress.mode & StrictMode
     ) {
-      // Only double-render components with Hooks
-      if (workInProgress.memoizedState !== null) {
-        nextChildren = renderWithHooks(
-          current,
-          workInProgress,
-          render,
-          nextProps,
-          data,
-          renderExpirationTime,
-        );
-      }
+      nextChildren = renderWithHooks(
+        current,
+        workInProgress,
+        render,
+        nextProps,
+        data,
+        renderExpirationTime,
+      );
     }
     setIsRendering(false);
   } else {
@@ -1136,9 +1127,6 @@ function mountLazyComponent(
   }
 
   const props = workInProgress.pendingProps;
-  // We can't start a User Timing measurement with correct label yet.
-  // Cancel and resume right after we know the tag.
-  cancelWorkTimer(workInProgress);
   let lazyComponent: LazyComponentType<any, any> = elementType;
   let payload = lazyComponent._payload;
   let init = lazyComponent._init;
@@ -1146,7 +1134,6 @@ function mountLazyComponent(
   // Store the unwrapped component in the type.
   workInProgress.type = Component;
   const resolvedTag = (workInProgress.tag = resolveLazyComponentTag(Component));
-  startWorkTimer(workInProgress);
   const resolvedProps = resolveDefaultProps(Component, props);
   let child;
   switch (resolvedTag) {
@@ -1470,17 +1457,14 @@ function mountIndeterminateComponent(
         debugRenderPhaseSideEffectsForStrictMode &&
         workInProgress.mode & StrictMode
       ) {
-        // Only double-render components with Hooks
-        if (workInProgress.memoizedState !== null) {
-          value = renderWithHooks(
-            null,
-            workInProgress,
-            Component,
-            props,
-            context,
-            renderExpirationTime,
-          );
-        }
+        value = renderWithHooks(
+          null,
+          workInProgress,
+          Component,
+          props,
+          context,
+          renderExpirationTime,
+        );
       }
     }
     reconcileChildren(null, workInProgress, value, renderExpirationTime);
@@ -1569,25 +1553,119 @@ function validateFunctionComponentInDev(workInProgress: Fiber, Component: any) {
   }
 }
 
-const SUSPENDED_MARKER: SuspenseState = {
-  dehydrated: null,
-  retryTime: NoWork,
-};
+function mountSuspenseState(
+  renderExpirationTime: ExpirationTime,
+): SuspenseState {
+  return {
+    dehydrated: null,
+    baseTime: renderExpirationTime,
+    retryTime: NoWork,
+  };
+}
+
+function updateSuspenseState(
+  prevSuspenseState: SuspenseState,
+  renderExpirationTime: ExpirationTime,
+): SuspenseState {
+  const prevSuspendedTime = prevSuspenseState.baseTime;
+  return {
+    dehydrated: null,
+    baseTime:
+      // Choose whichever time is inclusive of the other one. This represents
+      // the union of all the levels that suspended.
+      prevSuspendedTime !== NoWork && prevSuspendedTime < renderExpirationTime
+        ? prevSuspendedTime
+        : renderExpirationTime,
+    retryTime: NoWork,
+  };
+}
 
 function shouldRemainOnFallback(
   suspenseContext: SuspenseContext,
   current: null | Fiber,
   workInProgress: Fiber,
+  renderExpirationTime: ExpirationTime,
 ) {
-  // If the context is telling us that we should show a fallback, and we're not
-  // already showing content, then we should show the fallback instead.
-  return (
-    hasSuspenseContext(
-      suspenseContext,
-      (ForceSuspenseFallback: SuspenseContext),
-    ) &&
-    (current === null || current.memoizedState !== null)
+  // If we're already showing a fallback, there are cases where we need to
+  // remain on that fallback regardless of whether the content has resolved.
+  // For example, SuspenseList coordinates when nested content appears.
+  if (current !== null) {
+    const suspenseState: SuspenseState = current.memoizedState;
+    if (suspenseState !== null) {
+      // Currently showing a fallback. If the current render includes
+      // the level that triggered the fallback, we must continue showing it,
+      // regardless of what the Suspense context says.
+      const baseTime = suspenseState.baseTime;
+      if (baseTime !== NoWork && baseTime < renderExpirationTime) {
+        return true;
+      }
+      // Otherwise, fall through to check the Suspense context.
+    } else {
+      // Currently showing content. Don't hide it, even if ForceSuspenseFallack
+      // is true. More precise name might be "ForceRemainSuspenseFallback".
+      // Note: This is a factoring smell. Can't remain on a fallback if there's
+      // no fallback to remain on.
+      return false;
+    }
+  }
+  // Not currently showing content. Consult the Suspense context.
+  return hasSuspenseContext(
+    suspenseContext,
+    (ForceSuspenseFallback: SuspenseContext),
   );
+}
+
+function getRemainingWorkInPrimaryTree(
+  current: Fiber,
+  workInProgress: Fiber,
+  currentPrimaryChildFragment: Fiber | null,
+  renderExpirationTime,
+) {
+  const currentParentOfPrimaryChildren =
+    currentPrimaryChildFragment !== null
+      ? currentPrimaryChildFragment
+      : current;
+  const currentChildExpirationTime =
+    currentParentOfPrimaryChildren.childExpirationTime;
+
+  const currentSuspenseState: SuspenseState = current.memoizedState;
+  if (currentSuspenseState !== null) {
+    // This boundary already timed out. Check if this render includes the level
+    // that previously suspended.
+    const baseTime = currentSuspenseState.baseTime;
+    if (
+      baseTime !== NoWork &&
+      baseTime < renderExpirationTime &&
+      baseTime > currentChildExpirationTime
+    ) {
+      // There's pending work at a lower level that might now be unblocked.
+      return baseTime;
+    }
+  }
+
+  if (currentChildExpirationTime < renderExpirationTime) {
+    // The highest priority remaining work is not part of this render. So the
+    // remaining work has not changed.
+    return currentChildExpirationTime;
+  }
+
+  if ((workInProgress.mode & BlockingMode) !== NoMode) {
+    // The highest priority remaining work is part of this render. Since we only
+    // keep track of the highest level, we don't know if there's a lower
+    // priority level scheduled. As a compromise, we'll render at the lowest
+    // known level in the entire tree, since that will include everything.
+    // TODO: If expirationTime were a bitmask where each bit represents a
+    // separate task thread, this would be: currentChildBits & ~renderBits
+    const root = getWorkInProgressRoot();
+    if (root !== null) {
+      const lastPendingTime = root.lastPendingTime;
+      if (lastPendingTime < renderExpirationTime) {
+        return lastPendingTime;
+      }
+    }
+  }
+  // In legacy mode, there's no work left.
+  return NoWork;
 }
 
 function updateSuspenseComponent(
@@ -1612,7 +1690,12 @@ function updateSuspenseComponent(
 
   if (
     didSuspend ||
-    shouldRemainOnFallback(suspenseContext, current, workInProgress)
+    shouldRemainOnFallback(
+      suspenseContext,
+      current,
+      workInProgress,
+      renderExpirationTime,
+    )
   ) {
     // Something in this boundary's subtree already suspended. Switch to
     // rendering the fallback children.
@@ -1728,7 +1811,7 @@ function updateSuspenseComponent(
       primaryChildFragment.sibling = fallbackChildFragment;
       // Skip the primary children, and continue working on the
       // fallback children.
-      workInProgress.memoizedState = SUSPENDED_MARKER;
+      workInProgress.memoizedState = mountSuspenseState(renderExpirationTime);
       workInProgress.child = primaryChildFragment;
       return fallbackChildFragment;
     } else {
@@ -1831,9 +1914,16 @@ function updateSuspenseComponent(
             fallbackChildFragment.return = workInProgress;
             primaryChildFragment.sibling = fallbackChildFragment;
             fallbackChildFragment.effectTag |= Placement;
-            primaryChildFragment.childExpirationTime = NoWork;
-
-            workInProgress.memoizedState = SUSPENDED_MARKER;
+            primaryChildFragment.childExpirationTime = getRemainingWorkInPrimaryTree(
+              current,
+              workInProgress,
+              null,
+              renderExpirationTime,
+            );
+            workInProgress.memoizedState = updateSuspenseState(
+              current.memoizedState,
+              renderExpirationTime,
+            );
             workInProgress.child = primaryChildFragment;
 
             // Skip the primary children, and continue working on the
@@ -1895,10 +1985,18 @@ function updateSuspenseComponent(
         );
         fallbackChildFragment.return = workInProgress;
         primaryChildFragment.sibling = fallbackChildFragment;
-        primaryChildFragment.childExpirationTime = NoWork;
+        primaryChildFragment.childExpirationTime = getRemainingWorkInPrimaryTree(
+          current,
+          workInProgress,
+          currentPrimaryChildFragment,
+          renderExpirationTime,
+        );
         // Skip the primary children, and continue working on the
         // fallback children.
-        workInProgress.memoizedState = SUSPENDED_MARKER;
+        workInProgress.memoizedState = updateSuspenseState(
+          current.memoizedState,
+          renderExpirationTime,
+        );
         workInProgress.child = primaryChildFragment;
         return fallbackChildFragment;
       } else {
@@ -1989,10 +2087,15 @@ function updateSuspenseComponent(
         fallbackChildFragment.return = workInProgress;
         primaryChildFragment.sibling = fallbackChildFragment;
         fallbackChildFragment.effectTag |= Placement;
-        primaryChildFragment.childExpirationTime = NoWork;
+        primaryChildFragment.childExpirationTime = getRemainingWorkInPrimaryTree(
+          current,
+          workInProgress,
+          null,
+          renderExpirationTime,
+        );
         // Skip the primary children, and continue working on the
         // fallback children.
-        workInProgress.memoizedState = SUSPENDED_MARKER;
+        workInProgress.memoizedState = mountSuspenseState(renderExpirationTime);
         workInProgress.child = primaryChildFragment;
         return fallbackChildFragment;
       } else {
@@ -2778,8 +2881,6 @@ function bailoutOnAlreadyFinishedWork(
   workInProgress: Fiber,
   renderExpirationTime: ExpirationTime,
 ): Fiber | null {
-  cancelWorkTimer(workInProgress);
-
   if (current !== null) {
     // Reuse previous dependencies
     workInProgress.dependencies = current.dependencies;
@@ -3006,6 +3107,42 @@ function beginWork(
                 renderExpirationTime,
               );
             } else {
+              // The primary child fragment does not have pending work marked
+              // on it...
+
+              // ...usually. There's an unfortunate edge case where the fragment
+              // fiber is not part of the return path of the children, so when
+              // an update happens, the fragment doesn't get marked during
+              // setState. This is something we should consider addressing when
+              // we refactor the Fiber data structure. (There's a test with more
+              // details; to find it, comment out the following block and see
+              // which one fails.)
+              //
+              // As a workaround, we need to recompute the `childExpirationTime`
+              // by bubbling it up from the next level of children. This is
+              // based on similar logic in `resetChildExpirationTime`.
+              let primaryChild = primaryChildFragment.child;
+              while (primaryChild !== null) {
+                const childUpdateExpirationTime = primaryChild.expirationTime;
+                const childChildExpirationTime =
+                  primaryChild.childExpirationTime;
+                if (
+                  (childUpdateExpirationTime !== NoWork &&
+                    childUpdateExpirationTime >= renderExpirationTime) ||
+                  (childChildExpirationTime !== NoWork &&
+                    childChildExpirationTime >= renderExpirationTime)
+                ) {
+                  // Found a child with an update with sufficient priority.
+                  // Use the normal path to render the primary children again.
+                  return updateSuspenseComponent(
+                    current,
+                    workInProgress,
+                    renderExpirationTime,
+                  );
+                }
+                primaryChild = primaryChild.sibling;
+              }
+
               pushSuspenseContext(
                 workInProgress,
                 setDefaultShallowSuspenseContext(suspenseStackCursor.current),
@@ -3068,6 +3205,7 @@ function beginWork(
             // update in the past but didn't complete it.
             renderState.rendering = null;
             renderState.tail = null;
+            renderState.lastEffect = null;
           }
           pushSuspenseContext(workInProgress, suspenseStackCursor.current);
 

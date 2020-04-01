@@ -9,10 +9,13 @@
 
 'use strict';
 
+import {createEventTarget} from 'dom-event-testing-library';
+
 let React;
 let ReactFeatureFlags;
 let ReactDOM;
 let ReactDOMServer;
+let ReactTestUtils;
 let Scheduler;
 
 function dispatchEvent(element, type) {
@@ -64,6 +67,7 @@ describe('DOMModernPluginEventSystem', () => {
           ReactDOM = require('react-dom');
           Scheduler = require('scheduler');
           ReactDOMServer = require('react-dom/server');
+          ReactTestUtils = require('react-dom/test-utils');
           container = document.createElement('div');
           document.body.appendChild(container);
           startNativeEventListenerClearDown();
@@ -1092,6 +1096,7 @@ describe('DOMModernPluginEventSystem', () => {
             ReactDOM = require('react-dom');
             Scheduler = require('scheduler');
             ReactDOMServer = require('react-dom/server');
+            ReactTestUtils = require('react-dom/test-utils');
           });
 
           if (!__EXPERIMENTAL__) {
@@ -1310,6 +1315,28 @@ describe('DOMModernPluginEventSystem', () => {
             divElement = divRef.current;
             dispatchClickEvent(divElement);
             expect(clickEvent).toBeCalledTimes(0);
+          });
+
+          it('should handle the target being a text node', () => {
+            const clickEvent = jest.fn();
+            const buttonRef = React.createRef();
+
+            function Test() {
+              const click = ReactDOM.unstable_useEvent('click');
+
+              React.useEffect(() => {
+                click.setListener(buttonRef.current, clickEvent);
+              });
+
+              return <button ref={buttonRef}>Click me!</button>;
+            }
+
+            ReactDOM.render(<Test />, container);
+            Scheduler.unstable_flushAll();
+
+            let textNode = buttonRef.current.firstChild;
+            dispatchClickEvent(textNode);
+            expect(clickEvent).toBeCalledTimes(1);
           });
 
           it('handle propagation of click events', () => {
@@ -2138,6 +2165,353 @@ describe('DOMModernPluginEventSystem', () => {
             expect(log[3]).toEqual(['capture', divElement]);
             expect(log[4]).toEqual(['bubble', divElement]);
             expect(log[5]).toEqual(['bubble', buttonElement]);
+          });
+
+          it('beforeblur and afterblur are called after a focused element is unmounted', () => {
+            const log = [];
+            // We have to persist here because we want to read relatedTarget later.
+            const onAfterBlur = jest.fn(e => {
+              e.persist();
+              log.push(e.type);
+            });
+            const onBeforeBlur = jest.fn(e => log.push(e.type));
+            const innerRef = React.createRef();
+            const innerRef2 = React.createRef();
+
+            const Component = ({show}) => {
+              const ref = React.useRef(null);
+              const afterBlurHandle = ReactDOM.unstable_useEvent('afterblur');
+              const beforeBlurHandle = ReactDOM.unstable_useEvent('beforeblur');
+
+              React.useEffect(() => {
+                afterBlurHandle.setListener(document, onAfterBlur);
+                beforeBlurHandle.setListener(ref.current, onBeforeBlur);
+              });
+
+              return (
+                <div ref={ref}>
+                  {show && <input ref={innerRef} />}
+                  <div ref={innerRef2} />
+                </div>
+              );
+            };
+
+            ReactDOM.render(<Component show={true} />, container);
+            Scheduler.unstable_flushAll();
+
+            const inner = innerRef.current;
+            const target = createEventTarget(inner);
+            target.focus();
+            expect(onBeforeBlur).toHaveBeenCalledTimes(0);
+            expect(onAfterBlur).toHaveBeenCalledTimes(0);
+
+            ReactDOM.render(<Component show={false} />, container);
+            Scheduler.unstable_flushAll();
+
+            expect(onBeforeBlur).toHaveBeenCalledTimes(1);
+            expect(onAfterBlur).toHaveBeenCalledTimes(1);
+            expect(onAfterBlur).toHaveBeenCalledWith(
+              expect.objectContaining({relatedTarget: inner}),
+            );
+            expect(log).toEqual(['beforeblur', 'afterblur']);
+          });
+
+          it('beforeblur and afterblur are called after a nested focused element is unmounted', () => {
+            const log = [];
+            // We have to persist here because we want to read relatedTarget later.
+            const onAfterBlur = jest.fn(e => {
+              e.persist();
+              log.push(e.type);
+            });
+            const onBeforeBlur = jest.fn(e => log.push(e.type));
+            const innerRef = React.createRef();
+            const innerRef2 = React.createRef();
+
+            const Component = ({show}) => {
+              const ref = React.useRef(null);
+              const afterBlurHandle = ReactDOM.unstable_useEvent('afterblur');
+              const beforeBlurHandle = ReactDOM.unstable_useEvent('beforeblur');
+
+              React.useEffect(() => {
+                afterBlurHandle.setListener(document, onAfterBlur);
+                beforeBlurHandle.setListener(ref.current, onBeforeBlur);
+              });
+
+              return (
+                <div ref={ref}>
+                  {show && (
+                    <div>
+                      <input ref={innerRef} />
+                    </div>
+                  )}
+                  <div ref={innerRef2} />
+                </div>
+              );
+            };
+
+            ReactDOM.render(<Component show={true} />, container);
+            Scheduler.unstable_flushAll();
+
+            const inner = innerRef.current;
+            const target = createEventTarget(inner);
+            target.focus();
+            expect(onBeforeBlur).toHaveBeenCalledTimes(0);
+            expect(onAfterBlur).toHaveBeenCalledTimes(0);
+
+            ReactDOM.render(<Component show={false} />, container);
+            Scheduler.unstable_flushAll();
+
+            expect(onBeforeBlur).toHaveBeenCalledTimes(1);
+            expect(onAfterBlur).toHaveBeenCalledTimes(1);
+            expect(onAfterBlur).toHaveBeenCalledWith(
+              expect.objectContaining({relatedTarget: inner}),
+            );
+            expect(log).toEqual(['beforeblur', 'afterblur']);
+          });
+
+          it.experimental(
+            'beforeblur and afterblur are called after a focused element is suspended',
+            () => {
+              const log = [];
+              // We have to persist here because we want to read relatedTarget later.
+              const onAfterBlur = jest.fn(e => {
+                e.persist();
+                log.push(e.type);
+              });
+              const onBeforeBlur = jest.fn(e => log.push(e.type));
+              const innerRef = React.createRef();
+              const Suspense = React.Suspense;
+              let suspend = false;
+              let resolve;
+              let promise = new Promise(
+                resolvePromise => (resolve = resolvePromise),
+              );
+
+              function Child() {
+                if (suspend) {
+                  throw promise;
+                } else {
+                  return <input ref={innerRef} />;
+                }
+              }
+
+              const Component = () => {
+                const ref = React.useRef(null);
+                const afterBlurHandle = ReactDOM.unstable_useEvent('afterblur');
+                const beforeBlurHandle = ReactDOM.unstable_useEvent(
+                  'beforeblur',
+                );
+
+                React.useEffect(() => {
+                  afterBlurHandle.setListener(document, onAfterBlur);
+                  beforeBlurHandle.setListener(ref.current, onBeforeBlur);
+                });
+
+                return (
+                  <div ref={ref}>
+                    <Suspense fallback="Loading...">
+                      <Child />
+                    </Suspense>
+                  </div>
+                );
+              };
+
+              const container2 = document.createElement('div');
+              document.body.appendChild(container2);
+
+              let root = ReactDOM.createRoot(container2);
+
+              ReactTestUtils.act(() => {
+                root.render(<Component />);
+              });
+              jest.runAllTimers();
+
+              const inner = innerRef.current;
+              const target = createEventTarget(inner);
+              target.focus();
+              expect(onBeforeBlur).toHaveBeenCalledTimes(0);
+              expect(onAfterBlur).toHaveBeenCalledTimes(0);
+
+              suspend = true;
+              ReactTestUtils.act(() => {
+                root.render(<Component />);
+              });
+              jest.runAllTimers();
+
+              expect(onBeforeBlur).toHaveBeenCalledTimes(1);
+              expect(onAfterBlur).toHaveBeenCalledTimes(1);
+              expect(onAfterBlur).toHaveBeenCalledWith(
+                expect.objectContaining({relatedTarget: inner}),
+              );
+              resolve();
+              expect(log).toEqual(['beforeblur', 'afterblur']);
+
+              document.body.removeChild(container2);
+            },
+          );
+
+          describe('Compatibility with Scopes API', () => {
+            beforeEach(() => {
+              jest.resetModules();
+              ReactFeatureFlags = require('shared/ReactFeatureFlags');
+              ReactFeatureFlags.enableModernEventSystem = true;
+              ReactFeatureFlags.enableUseEventAPI = true;
+              ReactFeatureFlags.enableScopeAPI = true;
+
+              React = require('react');
+              ReactDOM = require('react-dom');
+              Scheduler = require('scheduler');
+              ReactDOMServer = require('react-dom/server');
+            });
+
+            it('handle propagation of click events on a scope', () => {
+              const buttonRef = React.createRef();
+              const log = [];
+              const onClick = jest.fn(e =>
+                log.push(['bubble', e.currentTarget]),
+              );
+              const onClickCapture = jest.fn(e =>
+                log.push(['capture', e.currentTarget]),
+              );
+              const TestScope = React.unstable_createScope();
+
+              function Test() {
+                const click = ReactDOM.unstable_useEvent('click');
+                const clickCapture = ReactDOM.unstable_useEvent('click', {
+                  capture: true,
+                });
+                const scopeRef = React.useRef(null);
+
+                React.useEffect(() => {
+                  click.setListener(scopeRef.current, onClick);
+                  clickCapture.setListener(scopeRef.current, onClickCapture);
+                });
+
+                return (
+                  <TestScope ref={scopeRef}>
+                    <button ref={buttonRef} />
+                  </TestScope>
+                );
+              }
+
+              ReactDOM.render(<Test />, container);
+              Scheduler.unstable_flushAll();
+
+              const buttonElement = buttonRef.current;
+              dispatchClickEvent(buttonElement);
+
+              expect(onClick).toHaveBeenCalledTimes(1);
+              expect(onClickCapture).toHaveBeenCalledTimes(1);
+              expect(log).toEqual([
+                ['capture', buttonElement],
+                ['bubble', buttonElement],
+              ]);
+            });
+
+            it('handle mixed propagation of click events on a scope', () => {
+              const buttonRef = React.createRef();
+              const divRef = React.createRef();
+              const log = [];
+              const onClick = jest.fn(e =>
+                log.push(['bubble', e.currentTarget]),
+              );
+              const onClickCapture = jest.fn(e =>
+                log.push(['capture', e.currentTarget]),
+              );
+              const TestScope = React.unstable_createScope();
+
+              function Test() {
+                const click = ReactDOM.unstable_useEvent('click');
+                const clickCapture = ReactDOM.unstable_useEvent('click', {
+                  capture: true,
+                });
+                const scopeRef = React.useRef(null);
+
+                React.useEffect(() => {
+                  click.setListener(scopeRef.current, onClick);
+                  clickCapture.setListener(scopeRef.current, onClickCapture);
+                  click.setListener(buttonRef.current, onClick);
+                  clickCapture.setListener(buttonRef.current, onClickCapture);
+                });
+
+                return (
+                  <TestScope ref={scopeRef}>
+                    <button ref={buttonRef}>
+                      <div
+                        ref={divRef}
+                        onClick={onClick}
+                        onClickCapture={onClickCapture}>
+                        Click me!
+                      </div>
+                    </button>
+                  </TestScope>
+                );
+              }
+
+              ReactDOM.render(<Test />, container);
+              Scheduler.unstable_flushAll();
+
+              const buttonElement = buttonRef.current;
+              dispatchClickEvent(buttonElement);
+
+              expect(onClick).toHaveBeenCalledTimes(2);
+              expect(onClickCapture).toHaveBeenCalledTimes(2);
+              expect(log).toEqual([
+                ['capture', buttonElement],
+                ['capture', buttonElement],
+                ['bubble', buttonElement],
+                ['bubble', buttonElement],
+              ]);
+
+              log.length = 0;
+              onClick.mockClear();
+              onClickCapture.mockClear();
+
+              const divElement = divRef.current;
+              dispatchClickEvent(divElement);
+
+              expect(onClick).toHaveBeenCalledTimes(3);
+              expect(onClickCapture).toHaveBeenCalledTimes(3);
+              expect(log).toEqual([
+                ['capture', buttonElement],
+                ['capture', buttonElement],
+                ['capture', divElement],
+                ['bubble', divElement],
+                ['bubble', buttonElement],
+                ['bubble', buttonElement],
+              ]);
+            });
+
+            it('should not handle the target being a dangling text node within a scope', () => {
+              const clickEvent = jest.fn();
+              const buttonRef = React.createRef();
+
+              const TestScope = React.unstable_createScope();
+
+              function Test() {
+                const click = ReactDOM.unstable_useEvent('click');
+                const scopeRef = React.useRef(null);
+
+                React.useEffect(() => {
+                  click.setListener(scopeRef.current, clickEvent);
+                });
+
+                return (
+                  <button ref={buttonRef}>
+                    <TestScope ref={scopeRef}>Click me!</TestScope>
+                  </button>
+                );
+              }
+
+              ReactDOM.render(<Test />, container);
+              Scheduler.unstable_flushAll();
+
+              let textNode = buttonRef.current.firstChild;
+              dispatchClickEvent(textNode);
+              // This should not work, as the target instance will be the
+              // <button>, which is actually outside the scope.
+              expect(clickEvent).toBeCalledTimes(0);
+            });
           });
         });
       },

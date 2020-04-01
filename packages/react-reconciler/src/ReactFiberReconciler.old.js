@@ -16,8 +16,9 @@ import type {
   Container,
   PublicInstance,
 } from './ReactFiberHostConfig';
+import type {RendererInspectionConfig} from './ReactFiberHostConfig';
 import {FundamentalComponent} from './ReactWorkTags';
-import type {ReactNodeList} from 'shared/ReactTypes';
+import type {ReactNodeList, Thenable} from 'shared/ReactTypes';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
 import type {
   SuspenseHydrationCallbacks,
@@ -107,10 +108,7 @@ type DevToolsConfig = {|
   // Note: this actually *does* depend on Fiber internal fields.
   // Used by "inspect clicked DOM element" in React DevTools.
   findFiberByHostInstance?: (instance: Instance | TextInstance) => Fiber | null,
-  // Used by RN in-app inspector.
-  // This API is unfortunately RN-specific.
-  // TODO: Change it to accept Fiber instead and type it properly.
-  getInspectorDataForViewTag?: (tag: number) => Object,
+  rendererConfig?: RendererInspectionConfig,
 |};
 
 let didWarnAboutNestedUpdates;
@@ -516,7 +514,7 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     bundleType: devToolsConfig.bundleType,
     version: devToolsConfig.version,
     rendererPackageName: devToolsConfig.rendererPackageName,
-    getInspectorDataForViewTag: devToolsConfig.getInspectorDataForViewTag,
+    rendererConfig: devToolsConfig.rendererConfig,
     overrideHookState,
     overrideProps,
     setSuspenseHandler,
@@ -582,7 +580,7 @@ let actingUpdatesScopeDepth = 0;
 let didWarnAboutUsingActInProd = false;
 
 // eslint-disable-next-line no-inner-declarations
-export function act(callback: () => Thenable) {
+export function act(callback: () => Thenable<mixed>): Thenable<void> {
   if (!__DEV__) {
     if (didWarnAboutUsingActInProd === false) {
       didWarnAboutUsingActInProd = true;
@@ -656,7 +654,7 @@ export function act(callback: () => Thenable) {
     // effects and  microtasks in a loop until flushPassiveEffects() === false,
     // and cleans up
     return {
-      then(resolve: () => void, reject: (?Error) => void) {
+      then(resolve, reject) {
         called = true;
         result.then(
           () => {
@@ -716,7 +714,7 @@ export function act(callback: () => Thenable) {
 
     // in the sync case, the returned thenable only warns *if* await-ed
     return {
-      then(resolve: () => void) {
+      then(resolve) {
         if (__DEV__) {
           console.error(
             'Do not await the result of calling act(...) with sync logic, it is not a Promise.',
