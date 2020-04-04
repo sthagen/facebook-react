@@ -18,7 +18,6 @@ import type {
 import type {Fiber} from './ReactFiber';
 import type {FiberRoot} from './ReactFiberRoot';
 import type {ExpirationTime} from './ReactFiberExpirationTime';
-import type {CapturedValue, CapturedError} from './ReactCapturedValue';
 import type {SuspenseState} from './ReactFiberSuspenseComponent';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks';
 import type {Wakeable} from 'shared/ReactTypes';
@@ -75,7 +74,6 @@ import invariant from 'shared/invariant';
 
 import {onCommitUnmount} from './ReactFiberDevToolsHook';
 import {getStackByFiberInDevAndProd} from './ReactCurrentFiber';
-import {logCapturedError} from './ReactFiberErrorLogger';
 import {resolveDefaultProps} from './ReactFiberLazyComponent';
 import {
   getCommitTime,
@@ -142,43 +140,6 @@ if (__DEV__) {
 }
 
 const PossiblyWeakSet = typeof WeakSet === 'function' ? WeakSet : Set;
-
-export function logError(boundary: Fiber, errorInfo: CapturedValue<mixed>) {
-  const source = errorInfo.source;
-  let stack = errorInfo.stack;
-  if (stack === null && source !== null) {
-    stack = getStackByFiberInDevAndProd(source);
-  }
-
-  const capturedError: CapturedError = {
-    componentName: source !== null ? getComponentName(source.type) : null,
-    componentStack: stack !== null ? stack : '',
-    error: errorInfo.value,
-    errorBoundary: null,
-    errorBoundaryName: null,
-    errorBoundaryFound: false,
-    willRetry: false,
-  };
-
-  if (boundary !== null && boundary.tag === ClassComponent) {
-    capturedError.errorBoundary = boundary.stateNode;
-    capturedError.errorBoundaryName = getComponentName(boundary.type);
-    capturedError.errorBoundaryFound = true;
-    capturedError.willRetry = true;
-  }
-
-  try {
-    logCapturedError(capturedError);
-  } catch (e) {
-    // This method must not throw, or React internal state will get messed up.
-    // If console.error is overridden, or logCapturedError() shows a dialog that throws,
-    // we want to report this error outside of the normal stack as a last resort.
-    // https://github.com/facebook/react/issues/13188
-    setTimeout(() => {
-      throw e;
-    });
-  }
-}
 
 const callComponentWillUnmountWithTimer = function(current, instance) {
   instance.props = current.memoizedProps;
@@ -347,7 +308,7 @@ function commitBeforeMutationLifeCycles(
 
 function commitHookEffectListUnmount(tag: number, finishedWork: Fiber) {
   const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
-  let lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
+  const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
   if (lastEffect !== null) {
     const firstEffect = lastEffect.next;
     let effect = firstEffect;
@@ -367,7 +328,7 @@ function commitHookEffectListUnmount(tag: number, finishedWork: Fiber) {
 
 function commitHookEffectListMount(tag: number, finishedWork: Fiber) {
   const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
-  let lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
+  const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
   if (lastEffect !== null) {
     const firstEffect = lastEffect.next;
     let effect = firstEffect;
@@ -419,7 +380,7 @@ function commitHookEffectListMount(tag: number, finishedWork: Fiber) {
 function schedulePassiveEffects(finishedWork: Fiber) {
   if (runAllPassiveEffectDestroysBeforeCreates) {
     const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
-    let lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
+    const lastEffect = updateQueue !== null ? updateQueue.lastEffect : null;
     if (lastEffect !== null) {
       const firstEffect = lastEffect.next;
       let effect = firstEffect;
@@ -1755,7 +1716,7 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
 }
 
 function commitSuspenseComponent(finishedWork: Fiber) {
-  let newState: SuspenseState | null = finishedWork.memoizedState;
+  const newState: SuspenseState | null = finishedWork.memoizedState;
 
   let newDidTimeout;
   let primaryChildParent = finishedWork;

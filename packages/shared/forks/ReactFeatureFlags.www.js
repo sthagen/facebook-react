@@ -16,9 +16,9 @@ const dynamicFeatureFlags: DynamicFeatureFlags = require('ReactFeatureFlags');
 
 export const {
   debugRenderPhaseSideEffectsForStrictMode,
+  disableModulePatternComponents,
   disableInputAttributeSyncing,
   enableTrustedTypesIntegration,
-  warnAboutShorthandPropertyCollision,
   disableSchedulerTimeoutBasedOnReactExpirationTime,
   warnAboutSpreadingKeyToJSX,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
@@ -64,8 +64,6 @@ export const enableSuspenseCallback = true;
 export const flushSuspenseFallbacksInTests = true;
 
 export const disableTextareaChildren = __EXPERIMENTAL__;
-
-export const disableModulePatternComponents = __EXPERIMENTAL__;
 
 export const warnUnstableRenderSubtreeIntoContainer = false;
 

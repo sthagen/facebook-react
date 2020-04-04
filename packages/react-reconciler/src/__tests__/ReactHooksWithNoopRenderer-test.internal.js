@@ -187,41 +187,43 @@ describe('ReactHooksWithNoopRenderer', () => {
     expect(Scheduler).toFlushAndYield([10]);
   });
 
-  it('throws inside module-style components', () => {
-    function Counter() {
-      return {
-        render() {
-          const [count] = useState(0);
-          return <Text text={this.props.label + ': ' + count} />;
-        },
-      };
-    }
-    ReactNoop.render(<Counter />);
-    expect(() =>
-      expect(Scheduler).toFlushAndThrow(
-        'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen ' +
-          'for one of the following reasons:\n' +
-          '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
-          '2. You might be breaking the Rules of Hooks\n' +
-          '3. You might have more than one copy of React in the same app\n' +
-          'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
-      ),
-    ).toErrorDev(
-      'Warning: The <Counter /> component appears to be a function component that returns a class instance. ' +
-        'Change Counter to a class that extends React.Component instead. ' +
-        "If you can't use a class try assigning the prototype on the function as a workaround. " +
-        '`Counter.prototype = React.Component.prototype`. ' +
-        "Don't use an arrow function since it cannot be called with `new` by React.",
-    );
+  if (!require('shared/ReactFeatureFlags').disableModulePatternComponents) {
+    it('throws inside module-style components', () => {
+      function Counter() {
+        return {
+          render() {
+            const [count] = useState(0);
+            return <Text text={this.props.label + ': ' + count} />;
+          },
+        };
+      }
+      ReactNoop.render(<Counter />);
+      expect(() =>
+        expect(Scheduler).toFlushAndThrow(
+          'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen ' +
+            'for one of the following reasons:\n' +
+            '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+            '2. You might be breaking the Rules of Hooks\n' +
+            '3. You might have more than one copy of React in the same app\n' +
+            'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
+        ),
+      ).toErrorDev(
+        'Warning: The <Counter /> component appears to be a function component that returns a class instance. ' +
+          'Change Counter to a class that extends React.Component instead. ' +
+          "If you can't use a class try assigning the prototype on the function as a workaround. " +
+          '`Counter.prototype = React.Component.prototype`. ' +
+          "Don't use an arrow function since it cannot be called with `new` by React.",
+      );
 
-    // Confirm that a subsequent hook works properly.
-    function GoodCounter(props) {
-      const [count] = useState(props.initialCount);
-      return <Text text={count} />;
-    }
-    ReactNoop.render(<GoodCounter initialCount={10} />);
-    expect(Scheduler).toFlushAndYield([10]);
-  });
+      // Confirm that a subsequent hook works properly.
+      function GoodCounter(props) {
+        const [count] = useState(props.initialCount);
+        return <Text text={count} />;
+      }
+      ReactNoop.render(<GoodCounter initialCount={10} />);
+      expect(Scheduler).toFlushAndYield([10]);
+    });
+  }
 
   it('throws when called outside the render phase', () => {
     expect(() => useState(0)).toThrow(
@@ -297,7 +299,7 @@ describe('ReactHooksWithNoopRenderer', () => {
     });
 
     it('returns the same updater function every time', () => {
-      let updaters = [];
+      const updaters = [];
       function Counter() {
         const [count, updateCount] = useState(0);
         updaters.push(updateCount);
@@ -401,8 +403,8 @@ describe('ReactHooksWithNoopRenderer', () => {
   describe('updates during the render phase', () => {
     it('restarts the render function and applies the new updates on top', () => {
       function ScrollView({row: newRow}) {
-        let [isScrollingDown, setIsScrollingDown] = useState(false);
-        let [row, setRow] = useState(null);
+        const [isScrollingDown, setIsScrollingDown] = useState(false);
+        const [row, setRow] = useState(null);
 
         if (row !== newRow) {
           // Row changed since last render. Update isScrollingDown.
@@ -495,7 +497,7 @@ describe('ReactHooksWithNoopRenderer', () => {
 
     it('keeps restarting until there are no more new updates', () => {
       function Counter({row: newRow}) {
-        let [count, setCount] = useState(0);
+        const [count, setCount] = useState(0);
         if (count < 3) {
           setCount(count + 1);
         }
@@ -516,7 +518,7 @@ describe('ReactHooksWithNoopRenderer', () => {
 
     it('updates multiple times within same render function', () => {
       function Counter({row: newRow}) {
-        let [count, setCount] = useState(0);
+        const [count, setCount] = useState(0);
         if (count < 12) {
           setCount(c => c + 1);
           setCount(c => c + 1);
@@ -541,7 +543,7 @@ describe('ReactHooksWithNoopRenderer', () => {
 
     it('throws after too many iterations', () => {
       function Counter({row: newRow}) {
-        let [count, setCount] = useState(0);
+        const [count, setCount] = useState(0);
         setCount(count + 1);
         Scheduler.unstable_yieldValue('Render: ' + count);
         return <Text text={count} />;
@@ -558,7 +560,7 @@ describe('ReactHooksWithNoopRenderer', () => {
         return action === 'increment' ? state + 1 : state;
       }
       function Counter({row: newRow}) {
-        let [count, dispatch] = useReducer(reducer, 0);
+        const [count, dispatch] = useReducer(reducer, 0);
         if (count < 3) {
           dispatch('increment');
         }
@@ -599,8 +601,8 @@ describe('ReactHooksWithNoopRenderer', () => {
       }
 
       function Counter({row: newRow}, ref) {
-        let [reducer, setReducer] = useState(() => reducerA);
-        let [count, dispatch] = useReducer(reducer, 0);
+        const [reducer, setReducer] = useState(() => reducerA);
+        const [count, dispatch] = useReducer(reducer, 0);
         useImperativeHandle(ref, () => ({dispatch}));
         if (count < 20) {
           dispatch('increment');
@@ -656,8 +658,8 @@ describe('ReactHooksWithNoopRenderer', () => {
       }
 
       function Bar({signal: newSignal}) {
-        let [counter, setCounter] = useState(0);
-        let [signal, setSignal] = useState(true);
+        const [counter, setCounter] = useState(0);
+        const [signal, setSignal] = useState(true);
 
         // Increment a counter every time the signal changes
         if (signal !== newSignal) {
@@ -701,7 +703,7 @@ describe('ReactHooksWithNoopRenderer', () => {
 
       let setLabel;
       function Bar({signal: newSignal}) {
-        let [counter, setCounter] = useState(0);
+        const [counter, setCounter] = useState(0);
 
         if (counter === 1) {
           // We're suspending during a render that includes render phase
@@ -710,7 +712,7 @@ describe('ReactHooksWithNoopRenderer', () => {
           throw thenable;
         }
 
-        let [signal, setSignal] = useState(true);
+        const [signal, setSignal] = useState(true);
 
         // Increment a counter every time the signal changes
         if (signal !== newSignal) {
@@ -718,7 +720,7 @@ describe('ReactHooksWithNoopRenderer', () => {
           setSignal(newSignal);
         }
 
-        let [label, _setLabel] = useState('A');
+        const [label, _setLabel] = useState('A');
         setLabel = _setLabel;
 
         return <Text text={`${label}:${counter}`} />;
@@ -752,8 +754,8 @@ describe('ReactHooksWithNoopRenderer', () => {
     it.experimental('calling startTransition inside render phase', async () => {
       let startTransition;
       function App() {
-        let [counter, setCounter] = useState(0);
-        let [_startTransition] = useTransition();
+        const [counter, setCounter] = useState(0);
+        const [_startTransition] = useTransition();
         startTransition = _startTransition;
 
         if (counter === 0) {
@@ -935,7 +937,7 @@ describe('ReactHooksWithNoopRenderer', () => {
         }, []);
         return <Text text="Passive" />;
       }
-      let passive = <PassiveEffect key="p" />;
+      const passive = <PassiveEffect key="p" />;
       act(() => {
         ReactNoop.render([<LayoutEffect key="l" />, passive]);
         expect(Scheduler).toFlushAndYieldThrough([
@@ -965,7 +967,7 @@ describe('ReactHooksWithNoopRenderer', () => {
         return <Text text="Passive" />;
       }
       function LayoutEffect(props) {
-        let [count, setCount] = useState(0);
+        const [count, setCount] = useState(0);
         useLayoutEffect(() => {
           // Scheduling work shouldn't interfere with the queued passive effect
           if (count === 0) {
@@ -1305,7 +1307,49 @@ describe('ReactHooksWithNoopRenderer', () => {
         });
       });
 
-      it('shows a warning when a component updates its own state from within passive unmount function', () => {
+      it('still warns if there are updates after pending passive unmount effects have been flushed', () => {
+        let updaterFunction;
+
+        function Component() {
+          Scheduler.unstable_yieldValue('Component');
+          const [state, setState] = React.useState(false);
+          updaterFunction = setState;
+          React.useEffect(() => {
+            Scheduler.unstable_yieldValue('passive create');
+            return () => {
+              Scheduler.unstable_yieldValue('passive destroy');
+            };
+          }, []);
+          return state;
+        }
+
+        act(() => {
+          ReactNoop.renderToRootWithID(<Component />, 'root', () =>
+            Scheduler.unstable_yieldValue('Sync effect'),
+          );
+        });
+        expect(Scheduler).toHaveYielded([
+          'Component',
+          'Sync effect',
+          'passive create',
+        ]);
+
+        ReactNoop.unmountRootWithID('root');
+        expect(Scheduler).toFlushAndYield(['passive destroy']);
+
+        act(() => {
+          expect(() => {
+            updaterFunction(true);
+          }).toErrorDev(
+            "Warning: Can't perform a React state update on an unmounted component. " +
+              'This is a no-op, but it indicates a memory leak in your application. ' +
+              'To fix, cancel all subscriptions and asynchronous tasks in a useEffect cleanup function.\n' +
+              '    in Component (at **)',
+          );
+        });
+      });
+
+      it('does not show a warning when a component updates its own state from within passive unmount function', () => {
         function Component() {
           Scheduler.unstable_yieldValue('Component');
           const [didLoad, setDidLoad] = React.useState(false);
@@ -1331,17 +1375,11 @@ describe('ReactHooksWithNoopRenderer', () => {
 
           // Unmount but don't process pending passive destroy function
           ReactNoop.unmountRootWithID('root');
-          expect(() => {
-            expect(Scheduler).toFlushAndYield(['passive destroy']);
-          }).toErrorDev(
-            "Warning: Can't perform a React state update from within a useEffect cleanup function. " +
-              'To fix, move state updates to the useEffect() body.\n' +
-              '    in Component (at **)',
-          );
+          expect(Scheduler).toFlushAndYield(['passive destroy']);
         });
       });
 
-      it('shows a warning when a component updates a childs state from within passive unmount function', () => {
+      it('does not show a warning when a component updates a childs state from within passive unmount function', () => {
         function Parent() {
           Scheduler.unstable_yieldValue('Parent');
           const updaterRef = React.useRef(null);
@@ -1376,13 +1414,7 @@ describe('ReactHooksWithNoopRenderer', () => {
 
           // Unmount but don't process pending passive destroy function
           ReactNoop.unmountRootWithID('root');
-          expect(() => {
-            expect(Scheduler).toFlushAndYield(['Parent passive destroy']);
-          }).toErrorDev(
-            "Warning: Can't perform a React state update from within a useEffect cleanup function. " +
-              'To fix, move state updates to the useEffect() body.\n' +
-              '    in Parent (at **)',
-          );
+          expect(Scheduler).toFlushAndYield(['Parent passive destroy']);
         });
       });
 

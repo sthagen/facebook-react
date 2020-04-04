@@ -14,9 +14,10 @@ import type {
 import type {ReactSyntheticEvent} from 'legacy-events/ReactSyntheticEventType';
 import type {Fiber} from 'react-reconciler/src/ReactFiber';
 import type {PluginModule} from 'legacy-events/PluginModuleType';
-import type {EventSystemFlags} from 'legacy-events/EventSystemFlags';
+import type {EventSystemFlags} from './EventSystemFlags';
 
 import SyntheticEvent from 'legacy-events/SyntheticEvent';
+import {IS_TARGET_PHASE_ONLY} from './EventSystemFlags';
 
 import * as DOMTopLevelEventTypes from './DOMTopLevelEventTypes';
 import {
@@ -38,7 +39,7 @@ import SyntheticWheelEvent from './SyntheticWheelEvent';
 import getEventCharCode from './getEventCharCode';
 import accumulateTwoPhaseListeners from './accumulateTwoPhaseListeners';
 import accumulateEventTargetListeners from './accumulateEventTargetListeners';
-import {IS_TARGET_EVENT_ONLY} from 'legacy-events/EventSystemFlags';
+
 import {enableUseEventAPI} from 'shared/ReactFeatureFlags';
 
 // Only used in DEV for exhaustiveness validation.
@@ -85,7 +86,7 @@ const SimpleEventPlugin: PluginModule<MouseEvent> = {
     targetInst: null | Fiber,
     nativeEvent: MouseEvent,
     nativeEventTarget: null | EventTarget,
-    eventSystemFlags: EventSystemFlags,
+    eventSystemFlags?: EventSystemFlags,
     targetContainer?: null | EventTarget,
   ): null | ReactSyntheticEvent {
     const dispatchConfig = topLevelEventsToDispatchConfig.get(topLevelType);
@@ -210,7 +211,7 @@ const SimpleEventPlugin: PluginModule<MouseEvent> = {
     if (
       enableUseEventAPI &&
       eventSystemFlags !== undefined &&
-      eventSystemFlags & IS_TARGET_EVENT_ONLY &&
+      eventSystemFlags & IS_TARGET_PHASE_ONLY &&
       targetContainer != null
     ) {
       accumulateEventTargetListeners(event, targetContainer);

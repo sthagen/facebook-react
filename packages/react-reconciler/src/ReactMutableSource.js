@@ -17,8 +17,8 @@ import {NoWork} from './ReactFiberExpirationTime';
 // Work in progress version numbers only apply to a single render,
 // and should be reset before starting a new render.
 // This tracks which mutable sources need to be reset after a render.
-let workInProgressPrimarySources: Array<MutableSource<any>> = [];
-let workInProgressSecondarySources: Array<MutableSource<any>> = [];
+const workInProgressPrimarySources: Array<MutableSource<any>> = [];
+const workInProgressSecondarySources: Array<MutableSource<any>> = [];
 
 let rendererSigil;
 if (__DEV__) {
@@ -30,20 +30,28 @@ export function clearPendingUpdates(
   root: FiberRoot,
   expirationTime: ExpirationTime,
 ): void {
-  if (root.mutableSourcePendingUpdateTime <= expirationTime) {
-    root.mutableSourcePendingUpdateTime = NoWork;
+  if (expirationTime <= root.mutableSourceLastPendingUpdateTime) {
+    // All updates for this source have been processed.
+    root.mutableSourceLastPendingUpdateTime = NoWork;
   }
 }
 
-export function getPendingExpirationTime(root: FiberRoot): ExpirationTime {
-  return root.mutableSourcePendingUpdateTime;
+export function getLastPendingExpirationTime(root: FiberRoot): ExpirationTime {
+  return root.mutableSourceLastPendingUpdateTime;
 }
 
 export function setPendingExpirationTime(
   root: FiberRoot,
   expirationTime: ExpirationTime,
 ): void {
-  root.mutableSourcePendingUpdateTime = expirationTime;
+  const mutableSourceLastPendingUpdateTime =
+    root.mutableSourceLastPendingUpdateTime;
+  if (
+    mutableSourceLastPendingUpdateTime === NoWork ||
+    expirationTime < mutableSourceLastPendingUpdateTime
+  ) {
+    root.mutableSourceLastPendingUpdateTime = expirationTime;
+  }
 }
 
 export function markSourceAsDirty(mutableSource: MutableSource<any>): void {
