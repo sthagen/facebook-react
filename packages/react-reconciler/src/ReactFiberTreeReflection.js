@@ -7,9 +7,9 @@
  * @flow
  */
 
-import type {Fiber} from './ReactFiber';
+import type {Fiber} from './ReactInternalTypes';
 import type {Container, SuspenseInstance} from './ReactFiberHostConfig';
-import type {SuspenseState} from './ReactFiberSuspenseComponent';
+import type {SuspenseState} from './ReactFiberSuspenseComponent.old';
 
 import invariant from 'shared/invariant';
 
@@ -25,7 +25,7 @@ import {
   FundamentalComponent,
   SuspenseComponent,
 } from './ReactWorkTags';
-import {NoEffect, Placement, Hydrating} from './ReactSideEffectTags';
+import {NoEffect, Placement, Hydrating, Deletion} from './ReactSideEffectTags';
 import {enableFundamentalAPI} from 'shared/ReactFeatureFlags';
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
@@ -331,4 +331,31 @@ export function findCurrentHostFiberWithNoPortals(parent: Fiber): Fiber | null {
   // Flow needs the return null here, but ESLint complains about it.
   // eslint-disable-next-line no-unreachable
   return null;
+}
+
+export function isFiberSuspenseAndTimedOut(fiber: Fiber): boolean {
+  const memoizedState = fiber.memoizedState;
+  return (
+    fiber.tag === SuspenseComponent &&
+    memoizedState !== null &&
+    memoizedState.dehydrated === null
+  );
+}
+
+// This is only safe to call in the commit phase when the return tree is consistent.
+// It should not be used anywhere else. See PR #18609 for details.
+export function isFiberInsideHiddenOrRemovedTree(fiber: Fiber): boolean {
+  let node = fiber;
+  let lastChild = null;
+  while (node !== null) {
+    if (
+      node.effectTag & Deletion ||
+      (isFiberSuspenseAndTimedOut(node) && node.child === lastChild)
+    ) {
+      return true;
+    }
+    lastChild = node;
+    node = node.return;
+  }
+  return false;
 }
