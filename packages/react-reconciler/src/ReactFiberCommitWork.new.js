@@ -17,7 +17,7 @@ import type {
 } from './ReactFiberHostConfig';
 import type {Fiber} from './ReactInternalTypes';
 import type {FiberRoot} from './ReactInternalTypes';
-import type {ExpirationTimeOpaque} from './ReactFiberExpirationTime.new';
+import type {Lanes} from './ReactFiberLane';
 import type {SuspenseState} from './ReactFiberSuspenseComponent.new';
 import type {UpdateQueue} from './ReactUpdateQueue.new';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks.new';
@@ -57,6 +57,7 @@ import {
   ScopeComponent,
   Block,
   OffscreenComponent,
+  LegacyHiddenComponent,
 } from './ReactWorkTags';
 import {
   invokeGuardedCallback,
@@ -113,6 +114,9 @@ import {
   commitHydratedContainer,
   commitHydratedSuspenseInstance,
   beforeRemoveInstance,
+  clearContainer,
+  prepareScopeUpdate,
+  prepareScopeUnmount,
 } from './ReactFiberHostConfig';
 import {
   captureCommitPhaseError,
@@ -295,7 +299,15 @@ function commitBeforeMutationLifeCycles(
       }
       return;
     }
-    case HostRoot:
+    case HostRoot: {
+      if (supportsMutation) {
+        if (finishedWork.effectTag & Snapshot) {
+          const root = finishedWork.stateNode;
+          clearContainer(root.containerInfo);
+        }
+      }
+      return;
+    }
     case HostComponent:
     case HostText:
     case HostPortal:
@@ -504,7 +516,7 @@ function commitLifeCycles(
   finishedRoot: FiberRoot,
   current: Fiber | null,
   finishedWork: Fiber,
-  committedExpirationTime: ExpirationTimeOpaque,
+  committedLanes: Lanes,
 ): void {
   switch (finishedWork.tag) {
     case FunctionComponent:
@@ -808,6 +820,7 @@ function commitLifeCycles(
     case FundamentalComponent:
     case ScopeComponent:
     case OffscreenComponent:
+    case LegacyHiddenComponent:
       return;
   }
   invariant(
@@ -838,7 +851,8 @@ function hideOrUnhideAllChildren(finishedWork, isHidden) {
           unhideTextInstance(instance, node.memoizedProps);
         }
       } else if (
-        node.tag === OffscreenComponent &&
+        (node.tag === OffscreenComponent ||
+          node.tag === LegacyHiddenComponent) &&
         (node.memoizedState: OffscreenState) !== null &&
         node !== finishedWork
       ) {
@@ -878,7 +892,7 @@ function commitAttachRef(finishedWork: Fiber) {
     }
     // Moved outside to ensure DCE works with this flag
     if (enableScopeAPI && finishedWork.tag === ScopeComponent) {
-      instanceToUse = instance.methods;
+      instanceToUse = instance;
     }
     if (typeof ref === 'function') {
       ref(instanceToUse);
@@ -1053,10 +1067,12 @@ function commitUnmount(
       return;
     }
     case ScopeComponent: {
-      if (enableDeprecatedFlareAPI) {
-        unmountDeprecatedResponderListeners(current);
-      }
       if (enableScopeAPI) {
+        if (enableDeprecatedFlareAPI) {
+          unmountDeprecatedResponderListeners(current);
+        }
+        const scopeInstance = current.stateNode;
+        prepareScopeUnmount(scopeInstance);
         safelyDetachRef(current);
       }
       return;
@@ -1583,7 +1599,8 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
         }
         break;
       }
-      case OffscreenComponent: {
+      case OffscreenComponent:
+      case LegacyHiddenComponent: {
         return;
       }
     }
@@ -1708,7 +1725,6 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
     case ScopeComponent: {
       if (enableScopeAPI) {
         const scopeInstance = finishedWork.stateNode;
-        scopeInstance.fiber = finishedWork;
         if (enableDeprecatedFlareAPI) {
           const newProps = finishedWork.memoizedProps;
           const oldProps = current !== null ? current.memoizedProps : newProps;
@@ -1718,11 +1734,13 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
             updateDeprecatedEventListeners(nextListeners, finishedWork, null);
           }
         }
+        prepareScopeUpdate(scopeInstance, finishedWork);
         return;
       }
       break;
     }
-    case OffscreenComponent: {
+    case OffscreenComponent:
+    case LegacyHiddenComponent: {
       const newState: OffscreenState | null = finishedWork.memoizedState;
       const isHidden = newState !== null;
       hideOrUnhideAllChildren(finishedWork, isHidden);

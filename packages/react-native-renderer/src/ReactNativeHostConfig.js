@@ -87,6 +87,7 @@ function recursivelyUncacheFiberNode(node: Instance | TextInstance) {
 
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
 
 export function appendInitialChild(
   parentInstance: Instance,
@@ -480,6 +481,11 @@ export function unhideInstance(instance: Instance, props: Props): void {
     viewConfig.uiViewClassName,
     updatePayload,
   );
+}
+
+export function clearContainer(container: Container): void {
+  // TODO Implement this for React Native
+  // UIManager does not expose a "remove all" type method.
 }
 
 export function unhideTextInstance(

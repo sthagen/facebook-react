@@ -243,6 +243,7 @@ function applyTextProps(instance, props, prevProps = {}) {
 
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
 
 export function appendInitialChild(parentInstance, child) {
   if (typeof child === 'string') {
@@ -425,6 +426,10 @@ export function unhideInstance(instance, props) {
 
 export function unhideTextInstance(textInstance, text): void {
   // Noop
+}
+
+export function clearContainer(container) {
+  // TODO Implement this
 }
 
 export function DEPRECATED_mountResponderInstance(

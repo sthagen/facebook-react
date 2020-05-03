@@ -456,27 +456,31 @@ export function scheduleUpdateOnFiber(
       }
     }
   } else {
-    ensureRootIsScheduled(root);
-    schedulePendingInteractions(root, expirationTime);
-  }
-
-  if (
-    (executionContext & DiscreteEventContext) !== NoContext &&
-    // Only updates at user-blocking priority or greater are considered
-    // discrete, even inside a discrete event.
-    (priorityLevel === UserBlockingPriority ||
-      priorityLevel === ImmediatePriority)
-  ) {
-    // This is the result of a discrete event. Track the lowest priority
-    // discrete update per root so we can flush them early, if needed.
-    if (rootsWithPendingDiscreteUpdates === null) {
-      rootsWithPendingDiscreteUpdates = new Map([[root, expirationTime]]);
-    } else {
-      const lastDiscreteTime = rootsWithPendingDiscreteUpdates.get(root);
-      if (lastDiscreteTime === undefined || lastDiscreteTime > expirationTime) {
-        rootsWithPendingDiscreteUpdates.set(root, expirationTime);
+    // Schedule a discrete update but only if it's not Sync.
+    if (
+      (executionContext & DiscreteEventContext) !== NoContext &&
+      // Only updates at user-blocking priority or greater are considered
+      // discrete, even inside a discrete event.
+      (priorityLevel === UserBlockingPriority ||
+        priorityLevel === ImmediatePriority)
+    ) {
+      // This is the result of a discrete event. Track the lowest priority
+      // discrete update per root so we can flush them early, if needed.
+      if (rootsWithPendingDiscreteUpdates === null) {
+        rootsWithPendingDiscreteUpdates = new Map([[root, expirationTime]]);
+      } else {
+        const lastDiscreteTime = rootsWithPendingDiscreteUpdates.get(root);
+        if (
+          lastDiscreteTime === undefined ||
+          lastDiscreteTime > expirationTime
+        ) {
+          rootsWithPendingDiscreteUpdates.set(root, expirationTime);
+        }
       }
     }
+    // Schedule other updates after in case the callback is sync.
+    ensureRootIsScheduled(root);
+    schedulePendingInteractions(root, expirationTime);
   }
 }
 
@@ -1080,9 +1084,9 @@ function flushPendingDiscreteUpdates() {
       markRootExpiredAtTime(root, expirationTime);
       ensureRootIsScheduled(root);
     });
-    // Now flush the immediate queue.
-    flushSyncCallbackQueue();
   }
+  // Now flush the immediate queue.
+  flushSyncCallbackQueue();
 }
 
 export function batchedUpdates<A, R>(fn: A => R, a: A): R {
@@ -1150,14 +1154,17 @@ export function unbatchedUpdates<A, R>(fn: (a: A) => R, a: A): R {
 }
 
 export function flushSync<A, R>(fn: A => R, a: A): R {
-  if ((executionContext & (RenderContext | CommitContext)) !== NoContext) {
-    invariant(
-      false,
-      'flushSync was called from inside a lifecycle method. It cannot be ' +
-        'called when React is already rendering.',
-    );
-  }
   const prevExecutionContext = executionContext;
+  if ((prevExecutionContext & (RenderContext | CommitContext)) !== NoContext) {
+    if (__DEV__) {
+      console.error(
+        'flushSync was called from inside a lifecycle method. React cannot ' +
+          'flush when React is already rendering. Consider moving this call to ' +
+          'a scheduler task or micro task.',
+      );
+    }
+    return fn(a);
+  }
   executionContext |= BatchedContext;
   try {
     return runWithPriority(ImmediatePriority, fn.bind(null, a));

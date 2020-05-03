@@ -12,9 +12,9 @@ import type {DOMTopLevelEventType} from 'legacy-events/TopLevelEventTypes';
 import type {
   ElementListenerMap,
   ElementListenerMapEntry,
-} from '../events/DOMEventListenerMap';
+} from '../client/ReactDOMComponentTree';
 import type {EventSystemFlags} from './EventSystemFlags';
-import type {EventPriority, ReactScopeMethods} from 'shared/ReactTypes';
+import type {EventPriority} from 'shared/ReactTypes';
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
 import type {PluginModule} from 'legacy-events/PluginModuleType';
 import type {ReactSyntheticEvent} from 'legacy-events/ReactSyntheticEventType';
@@ -36,7 +36,6 @@ import {
 } from 'react-reconciler/src/ReactWorkTags';
 
 import getEventTarget from './getEventTarget';
-import {getListenerMapForElement} from './DOMEventListenerMap';
 import {
   TOP_FOCUS,
   TOP_LOAD,
@@ -74,7 +73,10 @@ import {
   TOP_SELECTION_CHANGE,
   getRawEventName,
 } from './DOMTopLevelEventTypes';
-import {getClosestInstanceFromNode} from '../client/ReactDOMComponentTree';
+import {
+  getClosestInstanceFromNode,
+  getEventListenerMap,
+} from '../client/ReactDOMComponentTree';
 import {COMMENT_NODE} from '../shared/HTMLNodeType';
 import {batchedEventUpdates} from './ReactDOMUpdateBatching';
 import getListener from './getListener';
@@ -237,7 +239,7 @@ export function listenToTopLevelEvent(
   // triggered on the document directly.
   if (topLevelType === TOP_SELECTION_CHANGE) {
     targetContainer = (targetContainer: any).ownerDocument || targetContainer;
-    listenerMap = getListenerMapForElement(targetContainer);
+    listenerMap = getEventListenerMap(targetContainer);
   }
   const listenerEntry: ElementListenerMapEntry | void = listenerMap.get(
     topLevelType,
@@ -262,7 +264,7 @@ export function listenToEvent(
   registrationName: string,
   rootContainerElement: Element,
 ): void {
-  const listenerMap = getListenerMapForElement(rootContainerElement);
+  const listenerMap = getEventListenerMap(rootContainerElement);
   const dependencies = registrationNameDependencies[registrationName];
 
   for (let i = 0; i < dependencies.length; i++) {
@@ -377,22 +379,6 @@ function isMatchingRootContainer(
     (grandContainer.nodeType === COMMENT_NODE &&
       grandContainer.parentNode === targetContainer)
   );
-}
-
-export function isManagedDOMElement(
-  target: EventTarget | ReactScopeMethods,
-): boolean {
-  return getClosestInstanceFromNode(((target: any): Node)) !== null;
-}
-
-export function isValidEventTarget(
-  target: EventTarget | ReactScopeMethods,
-): boolean {
-  return typeof (target: Object).addEventListener === 'function';
-}
-
-export function isReactScope(target: EventTarget | ReactScopeMethods): boolean {
-  return typeof (target: Object).getChildContextValues === 'function';
 }
 
 export function dispatchEventForPluginEventSystem(

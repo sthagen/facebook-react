@@ -82,9 +82,7 @@ const bundles = [
       NODE_DEV,
       NODE_PROD,
       NODE_PROFILING,
-      FB_WWW_DEV,
-      FB_WWW_PROD,
-      FB_WWW_PROFILING,
+      // TODO: use on WWW.
     ],
     moduleType: ISOMORPHIC,
     entry: 'react/jsx-runtime',
@@ -106,6 +104,40 @@ const bundles = [
     entry: 'react/jsx-dev-runtime',
     global: 'JSXDEVRuntime',
     externals: ['react'],
+  },
+
+  /******* React Cache (experimental, new) *******/
+  {
+    bundleTypes: [NODE_DEV, NODE_PROD, NODE_PROFILING],
+    moduleType: ISOMORPHIC,
+    entry: 'react/unstable-cache',
+    global: 'ReactCache',
+    externals: ['react'],
+  },
+
+  /******* React Data (experimental, new) *******/
+  {
+    bundleTypes: [NODE_DEV, NODE_PROD, NODE_PROFILING],
+    moduleType: ISOMORPHIC,
+    entry: 'react-data',
+    global: 'ReactData',
+    externals: ['react'],
+  },
+
+  /******* React Data Fetch (experimental, new) *******/
+  {
+    bundleTypes: [
+      NODE_DEV,
+      NODE_PROD,
+      NODE_PROFILING,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+      FB_WWW_PROFILING,
+    ],
+    moduleType: ISOMORPHIC,
+    entry: 'react-data/fetch',
+    global: 'ReactDataFetch',
+    externals: ['react', 'react-data'],
   },
 
   /******* React DOM *******/
@@ -149,7 +181,7 @@ const bundles = [
   /******* React DOM - www - Testing *******/
   {
     moduleType: RENDERER,
-    bundleTypes: [FB_WWW_DEV, FB_WWW_PROD, FB_WWW_PROFILING],
+    bundleTypes: [FB_WWW_DEV, FB_WWW_PROD],
     entry: 'react-dom/testing',
     global: 'ReactDOMTesting',
     externals: ['react'],
@@ -529,19 +561,14 @@ const bundles = [
     externals: [],
   },
 
-  /******* React Cache (experimental) *******/
+  /******* React Cache (experimental, old) *******/
   {
-    bundleTypes: [
-      FB_WWW_DEV,
-      FB_WWW_PROD,
-      NODE_DEV,
-      NODE_PROD,
-      UMD_DEV,
-      UMD_PROD,
-    ],
+    // This is only used by our own tests.
+    // We can delete it later.
+    bundleTypes: [NODE_DEV, NODE_PROD],
     moduleType: ISOMORPHIC,
     entry: 'react-cache',
-    global: 'ReactCache',
+    global: 'ReactCacheOld',
     externals: ['react', 'scheduler'],
   },
 

@@ -8,7 +8,7 @@
  */
 
 import type {Fiber} from './ReactInternalTypes';
-import type {ExpirationTimeOpaque} from './ReactFiberExpirationTime.new';
+import type {Lanes} from './ReactFiberLane';
 import type {
   ReactFundamentalComponentInstance,
   ReactScopeInstance,
@@ -56,9 +56,16 @@ import {
   ScopeComponent,
   Block,
   OffscreenComponent,
+  LegacyHiddenComponent,
 } from './ReactWorkTags';
 import {NoMode, BlockingMode} from './ReactTypeOfMode';
-import {Ref, Update, NoEffect, DidCapture} from './ReactSideEffectTags';
+import {
+  Ref,
+  Update,
+  NoEffect,
+  DidCapture,
+  Snapshot,
+} from './ReactSideEffectTags';
 import invariant from 'shared/invariant';
 
 import {
@@ -80,6 +87,7 @@ import {
   cloneFundamentalInstance,
   shouldUpdateFundamentalComponent,
   preparePortalMount,
+  prepareScopeUpdate,
 } from './ReactFiberHostConfig';
 import {
   getRootHostContainer,
@@ -125,12 +133,13 @@ import {
   renderDidSuspend,
   renderDidSuspendDelayIfPossible,
   renderHasNotSuspendedYet,
+  popRenderLanes,
 } from './ReactFiberWorkLoop.new';
 import {createFundamentalStateInstance} from './ReactFiberFundamental.new';
-import {Never, isSameOrHigherPriority} from './ReactFiberExpirationTime.new';
+import {OffscreenLane} from './ReactFiberLane';
 import {resetChildFibers} from './ReactChildFiber.new';
 import {updateDeprecatedEventListeners} from './ReactFiberDeprecatedEvents.new';
-import {createScopeMethods} from './ReactFiberScope.new';
+import {createScopeInstance} from './ReactFiberScope.new';
 
 function markUpdate(workInProgress: Fiber) {
   // Tag the fiber with an update effect. This turns a Placement into
@@ -635,7 +644,7 @@ function cutOffTailIfNeeded(
 function completeWork(
   current: Fiber | null,
   workInProgress: Fiber,
-  renderExpirationTime: ExpirationTimeOpaque,
+  renderLanes: Lanes,
 ): Fiber | null {
   const newProps = workInProgress.pendingProps;
 
@@ -675,6 +684,12 @@ function completeWork(
           // If we hydrated, then we'll need to schedule an update for
           // the commit side-effects on the root.
           markUpdate(workInProgress);
+        } else if (!fiberRoot.hydrate) {
+          // Schedule an effect to clear this container at the start of the next commit.
+          // This handles the case of React rendering into a container with previous children.
+          // It's also safe to do for updates too, because current.child would only be null
+          // if the previous render was null (so the the container would already be empty).
+          workInProgress.effectTag |= Snapshot;
         }
       }
       updateHostContainer(workInProgress);
@@ -842,7 +857,7 @@ function completeWork(
             );
             prepareToHydrateHostSuspenseInstance(workInProgress);
             if (enableSchedulerTracing) {
-              markSpawnedWork((Never: ExpirationTimeOpaque));
+              markSpawnedWork(OffscreenLane);
             }
             return null;
           } else {
@@ -867,7 +882,7 @@ function completeWork(
 
       if ((workInProgress.effectTag & DidCapture) !== NoEffect) {
         // Something suspended. Re-render with the fallback children.
-        workInProgress.expirationTime_opaque = renderExpirationTime;
+        workInProgress.lanes = renderLanes;
         // Do not reset the effect list.
         return workInProgress;
       }
@@ -1036,7 +1051,7 @@ function completeWork(
                 }
                 workInProgress.lastEffect = renderState.lastEffect;
                 // Reset the child fibers to their original state.
-                resetChildFibers(workInProgress, renderExpirationTime);
+                resetChildFibers(workInProgress, renderLanes);
 
                 // Set up the Suspense Context to force suspense and immediately
                 // rerender the children.
@@ -1096,10 +1111,7 @@ function completeWork(
             // the expiration.
             now() * 2 - renderState.renderingStartTime >
               renderState.tailExpiration &&
-            !isSameOrHigherPriority(
-              (Never: ExpirationTimeOpaque),
-              renderExpirationTime,
-            )
+            renderLanes !== OffscreenLane
           ) {
             // We have now passed our CPU deadline and we'll just give up further
             // attempts to render the main content and only render fallbacks.
@@ -1114,9 +1126,9 @@ function completeWork(
             // them, then they really have the same priority as this render.
             // So we'll pick it back up the very next render pass once we've had
             // an opportunity to yield for paint.
-            workInProgress.expirationTime_opaque = renderExpirationTime;
+            workInProgress.lanes = renderLanes;
             if (enableSchedulerTracing) {
-              markSpawnedWork(renderExpirationTime);
+              markSpawnedWork(renderLanes);
             }
           }
         }
@@ -1233,13 +1245,8 @@ function completeWork(
     case ScopeComponent: {
       if (enableScopeAPI) {
         if (current === null) {
-          const type = workInProgress.type;
-          const scopeInstance: ReactScopeInstance = {
-            fiber: workInProgress,
-            methods: null,
-          };
+          const scopeInstance: ReactScopeInstance = createScopeInstance();
           workInProgress.stateNode = scopeInstance;
-          scopeInstance.methods = createScopeMethods(type, scopeInstance);
           if (enableDeprecatedFlareAPI) {
             const listeners = newProps.DEPRECATED_flareListeners;
             if (listeners != null) {
@@ -1251,6 +1258,7 @@ function completeWork(
               );
             }
           }
+          prepareScopeUpdate(scopeInstance, workInProgress);
           if (workInProgress.ref !== null) {
             markRef(workInProgress);
             markUpdate(workInProgress);
@@ -1284,7 +1292,9 @@ function completeWork(
         return null;
       }
       break;
-    case OffscreenComponent: {
+    case OffscreenComponent:
+    case LegacyHiddenComponent: {
+      popRenderLanes(workInProgress);
       if (current !== null) {
         const nextState: OffscreenState | null = workInProgress.memoizedState;
         const prevState: OffscreenState | null = current.memoizedState;

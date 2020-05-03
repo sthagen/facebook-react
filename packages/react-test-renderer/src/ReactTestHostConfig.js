@@ -126,6 +126,10 @@ export function removeChild(
   parentInstance.children.splice(index, 1);
 }
 
+export function clearContainer(container: Container): void {
+  container.children.splice(0);
+}
+
 export function getRootHostContext(
   rootContainerInstance: Container,
 ): HostContext {
@@ -438,4 +442,16 @@ export function afterActiveInstanceBlur() {
 
 export function preparePortalMount(portalInstance: Instance): void {
   // noop
+}
+
+export function prepareScopeUpdate(scopeInstance: Object, inst: Object): void {
+  nodeToInstanceMap.set(scopeInstance, inst);
+}
+
+export function prepareScopeUnmount(scopeInstance: Object): void {
+  nodeToInstanceMap.delete(scopeInstance);
+}
+
+export function getInstanceFromScope(scopeInstance: Object): null | Object {
+  return nodeToInstanceMap.get(scopeInstance) || null;
 }

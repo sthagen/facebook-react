@@ -61,6 +61,7 @@ import {
   NoEffect,
   DidCapture,
   Deletion,
+  Snapshot,
 } from './ReactSideEffectTags';
 import invariant from 'shared/invariant';
 
@@ -83,6 +84,7 @@ import {
   cloneFundamentalInstance,
   shouldUpdateFundamentalComponent,
   preparePortalMount,
+  prepareScopeUpdate,
 } from './ReactFiberHostConfig';
 import {
   getRootHostContainer,
@@ -133,7 +135,7 @@ import {createFundamentalStateInstance} from './ReactFiberFundamental.old';
 import {Never} from './ReactFiberExpirationTime.old';
 import {resetChildFibers} from './ReactChildFiber.old';
 import {updateDeprecatedEventListeners} from './ReactFiberDeprecatedEvents.old';
-import {createScopeMethods} from './ReactFiberScope.old';
+import {createScopeInstance} from './ReactFiberScope.old';
 
 function markUpdate(workInProgress: Fiber) {
   // Tag the fiber with an update effect. This turns a Placement into
@@ -678,6 +680,12 @@ function completeWork(
           // If we hydrated, then we'll need to schedule an update for
           // the commit side-effects on the root.
           markUpdate(workInProgress);
+        } else if (!fiberRoot.hydrate) {
+          // Schedule an effect to clear this container at the start of the next commit.
+          // This handles the case of React rendering into a container with previous children.
+          // It's also safe to do for updates too, because current.child would only be null
+          // if the previous render was null (so the the container would already be empty).
+          workInProgress.effectTag |= Snapshot;
         }
       }
       updateHostContainer(workInProgress);
@@ -1255,13 +1263,8 @@ function completeWork(
     case ScopeComponent: {
       if (enableScopeAPI) {
         if (current === null) {
-          const type = workInProgress.type;
-          const scopeInstance: ReactScopeInstance = {
-            fiber: workInProgress,
-            methods: null,
-          };
+          const scopeInstance: ReactScopeInstance = createScopeInstance();
           workInProgress.stateNode = scopeInstance;
-          scopeInstance.methods = createScopeMethods(type, scopeInstance);
           if (enableDeprecatedFlareAPI) {
             const listeners = newProps.DEPRECATED_flareListeners;
             if (listeners != null) {
@@ -1273,6 +1276,7 @@ function completeWork(
               );
             }
           }
+          prepareScopeUpdate(scopeInstance, workInProgress);
           if (workInProgress.ref !== null) {
             markRef(workInProgress);
             markUpdate(workInProgress);
