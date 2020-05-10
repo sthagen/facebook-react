@@ -118,6 +118,7 @@ import {
   prepareToHydrateHostSuspenseInstance,
   popHydrationState,
   resetHydrationState,
+  getIsHydrating,
 } from './ReactFiberHydrationContext.new';
 import {
   enableSchedulerTracing,
@@ -579,6 +580,11 @@ function cutOffTailIfNeeded(
   renderState: SuspenseListRenderState,
   hasRenderedATailFallback: boolean,
 ) {
+  if (getIsHydrating()) {
+    // If we're hydrating, we should consume as many items as we can
+    // so we don't leave any behind.
+    return;
+  }
   switch (renderState.tailMode) {
     case 'hidden': {
       // Any insertions at the end of the tail list after this point
@@ -1092,7 +1098,8 @@ function completeWork(
             if (
               renderState.tail === null &&
               renderState.tailMode === 'hidden' &&
-              !renderedTail.alternate
+              !renderedTail.alternate &&
+              !getIsHydrating() // We don't cut it if we're hydrating.
             ) {
               // We need to delete the row we just rendered.
               // Reset the effect list to what it was before we rendered this

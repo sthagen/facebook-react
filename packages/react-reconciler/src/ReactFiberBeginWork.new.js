@@ -112,6 +112,7 @@ import {
   SyncLane,
   OffscreenLane,
   DefaultHydrationLane,
+  NoTimestamp,
   includesSomeLane,
   laneToLanes,
   removeLanes,
@@ -198,6 +199,7 @@ import {
   getWorkInProgressRoot,
   pushRenderLanes,
 } from './ReactFiberWorkLoop.new';
+import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
 
 import {disableLogs, reenableLogs} from 'shared/ConsolePatchingDev';
 
@@ -2300,7 +2302,9 @@ function updateDehydratedSuspenseComponent(
         // is one of the very rare times where we mutate the current tree
         // during the render phase.
         suspenseState.retryLane = attemptHydrationAtLane;
-        scheduleUpdateOnFiber(current, attemptHydrationAtLane);
+        // TODO: Ideally this would inherit the event time of the current render
+        const eventTime = NoTimestamp;
+        scheduleUpdateOnFiber(current, attemptHydrationAtLane, eventTime);
       } else {
         // We have already tried to ping at a higher priority than we're rendering with
         // so if we got here, we must have failed to hydrate at those levels. We must
@@ -2336,10 +2340,11 @@ function updateDehydratedSuspenseComponent(
     // Leave the child in place. I.e. the dehydrated fragment.
     workInProgress.child = current.child;
     // Register a callback to retry this boundary once the server has sent the result.
-    registerSuspenseInstanceRetry(
-      suspenseInstance,
-      retryDehydratedSuspenseBoundary.bind(null, current),
-    );
+    let retry = retryDehydratedSuspenseBoundary.bind(null, current);
+    if (enableSchedulerTracing) {
+      retry = Schedule_tracing_wrap(retry);
+    }
+    registerSuspenseInstanceRetry(suspenseInstance, retry);
     return null;
   } else {
     // This is the first attempt.
@@ -3110,7 +3115,9 @@ function beginWork(
                 // been unsuspended it has committed as a resolved Suspense component.
                 // If it needs to be retried, it should have work scheduled on it.
                 workInProgress.effectTag |= DidCapture;
-                break;
+                // We should never render the children of a dehydrated boundary until we
+                // upgrade it. We return null instead of bailoutOnAlreadyFinishedWork.
+                return null;
               }
             }
 

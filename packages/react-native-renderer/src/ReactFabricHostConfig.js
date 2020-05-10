@@ -184,6 +184,7 @@ class ReactFabricHostComponent {
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMutation';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
 
 export function appendInitialChild(
   parentInstance: Instance,
@@ -501,10 +502,6 @@ export function makeClientId(): OpaqueIDType {
 }
 
 export function makeClientIdInDEV(warnOnAccessInDEV: () => void): OpaqueIDType {
-  throw new Error('Not yet implemented');
-}
-
-export function makeServerId(): OpaqueIDType {
   throw new Error('Not yet implemented');
 }
 

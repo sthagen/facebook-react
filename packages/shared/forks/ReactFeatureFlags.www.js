@@ -20,12 +20,12 @@ export const {
   enableTrustedTypesIntegration,
   disableSchedulerTimeoutBasedOnReactExpirationTime,
   warnAboutSpreadingKeyToJSX,
-  enableComponentStackLocations,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
   enableModernEventSystem,
   enableFilterEmptyStringAttributesDOM,
   enableLegacyFBSupport,
   enableDebugTracing,
+  deferRenderPhaseUpdateToNextBatch,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
@@ -68,8 +68,7 @@ export const disableTextareaChildren = __EXPERIMENTAL__;
 
 export const warnUnstableRenderSubtreeIntoContainer = false;
 
-// Internal-only attempt to debug a React Native issue. See D20130868.
-export const throwEarlyForMysteriousError = false;
+export const enableComponentStackLocations = true;
 
 // Enable forked reconciler. Piggy-backing on the "variant" global so that we
 // don't have to add another test dimension. The build system will compile this

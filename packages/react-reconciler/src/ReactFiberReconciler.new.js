@@ -56,7 +56,6 @@ import {
   flushSync,
   flushControlled,
   deferredUpdates,
-  syncUpdates,
   discreteUpdates,
   flushDiscreteUpdates,
   flushPassiveEffects,
@@ -77,6 +76,7 @@ import {
   SyncLane,
   InputDiscreteHydrationLane,
   SelectiveHydrationLane,
+  NoTimestamp,
   getHighestPriorityPendingLanes,
   higherPriorityLane,
 } from './ReactFiberLane';
@@ -89,6 +89,18 @@ import {
 } from './ReactFiberHotReloading.new';
 
 export {createPortal} from './ReactPortal';
+export {
+  createComponentSelector,
+  createHasPsuedoClassSelector,
+  createRoleSelector,
+  createTestNameSelector,
+  createTextSelector,
+  getFindAllNodesFailureDescription,
+  findAllNodes,
+  findBoundingRects,
+  focusWithin,
+  observeVisibleRects,
+} from './ReactTestSelectors';
 
 type OpaqueRoot = FiberRoot;
 
@@ -296,7 +308,7 @@ export function updateContainer(
   }
 
   enqueueUpdate(current, update);
-  scheduleUpdateOnFiber(current, lane);
+  scheduleUpdateOnFiber(current, lane, eventTime);
 
   return lane;
 }
@@ -306,7 +318,6 @@ export {
   batchedUpdates,
   unbatchedUpdates,
   deferredUpdates,
-  syncUpdates,
   discreteUpdates,
   flushDiscreteUpdates,
   flushControlled,
@@ -342,7 +353,8 @@ export function attemptSynchronousHydration(fiber: Fiber): void {
       }
       break;
     case SuspenseComponent:
-      flushSync(() => scheduleUpdateOnFiber(fiber, SyncLane));
+      const eventTime = requestEventTime();
+      flushSync(() => scheduleUpdateOnFiber(fiber, SyncLane, eventTime));
       // If we're still blocked after this, we need to increase
       // the priority of any promises resolving within this
       // boundary so that they next attempt also has higher pri.
@@ -379,8 +391,9 @@ export function attemptUserBlockingHydration(fiber: Fiber): void {
     // Suspense.
     return;
   }
+  const eventTime = requestEventTime();
   const lane = InputDiscreteHydrationLane;
-  scheduleUpdateOnFiber(fiber, lane);
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
   markRetryLaneIfNotHydrated(fiber, lane);
 }
 
@@ -392,8 +405,9 @@ export function attemptContinuousHydration(fiber: Fiber): void {
     // Suspense.
     return;
   }
+  const eventTime = requestEventTime();
   const lane = SelectiveHydrationLane;
-  scheduleUpdateOnFiber(fiber, lane);
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
   markRetryLaneIfNotHydrated(fiber, lane);
 }
 
@@ -403,8 +417,9 @@ export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
     // their priority other than synchronously flush it.
     return;
   }
+  const eventTime = requestEventTime();
   const lane = requestUpdateLane(fiber, null);
-  scheduleUpdateOnFiber(fiber, lane);
+  scheduleUpdateOnFiber(fiber, lane, eventTime);
   markRetryLaneIfNotHydrated(fiber, lane);
 }
 
@@ -487,7 +502,7 @@ if (__DEV__) {
       // Shallow cloning props works as a workaround for now to bypass the bailout check.
       fiber.memoizedProps = {...fiber.memoizedProps};
 
-      scheduleUpdateOnFiber(fiber, SyncLane);
+      scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
     }
   };
 
@@ -497,11 +512,11 @@ if (__DEV__) {
     if (fiber.alternate) {
       fiber.alternate.pendingProps = fiber.pendingProps;
     }
-    scheduleUpdateOnFiber(fiber, SyncLane);
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
   };
 
   scheduleUpdate = (fiber: Fiber) => {
-    scheduleUpdateOnFiber(fiber, SyncLane);
+    scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
   };
 
   setSuspenseHandler = (newShouldSuspendImpl: Fiber => boolean) => {

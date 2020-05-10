@@ -44,10 +44,8 @@ export const enableComponentStackLocations = false;
 export const enableLegacyFBSupport = !__EXPERIMENTAL__;
 export const enableFilterEmptyStringAttributesDOM = false;
 
-// Internal-only attempt to debug a React Native issue. See D20130868.
-export const throwEarlyForMysteriousError = false;
-
 export const enableNewReconciler = false;
+export const deferRenderPhaseUpdateToNextBatch = true;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

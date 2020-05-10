@@ -100,9 +100,6 @@ export const warnAboutSpreadingKeyToJSX = false;
 
 export const enableComponentStackLocations = __EXPERIMENTAL__;
 
-// Internal-only attempt to debug a React Native issue. See D20130868.
-export const throwEarlyForMysteriousError = false;
-
 export const enableNewReconciler = false;
 
 // --------------------------
@@ -130,3 +127,11 @@ export const enableModernEventSystem = false;
 
 // Support legacy Primer support on internal FB www
 export const enableLegacyFBSupport = false;
+
+// Updates that occur in the render phase are not officially supported. But when
+// they do occur, in the new reconciler, we defer them to a subsequent render by
+// picking a lane that's not currently rendering. We treat them the same as if
+// they came from an interleaved event. In the old reconciler, we use whatever
+// expiration time is currently rendering. Remove this flag once we have
+// migrated to the new behavior.
+export const deferRenderPhaseUpdateToNextBatch = true;
