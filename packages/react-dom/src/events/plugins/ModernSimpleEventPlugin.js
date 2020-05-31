@@ -25,7 +25,11 @@ import {
   topLevelEventsToDispatchConfig,
   simpleEventPluginEventTypes,
 } from '../DOMEventProperties';
-import {accumulateTwoPhaseListeners} from '../DOMModernPluginEventSystem';
+import {
+  accumulateTwoPhaseListeners,
+  accumulateEventTargetListeners,
+} from '../DOMModernPluginEventSystem';
+import {IS_TARGET_PHASE_ONLY} from '../EventSystemFlags';
 
 import SyntheticAnimationEvent from '../SyntheticAnimationEvent';
 import SyntheticClipboardEvent from '../SyntheticClipboardEvent';
@@ -39,6 +43,8 @@ import SyntheticTransitionEvent from '../SyntheticTransitionEvent';
 import SyntheticUIEvent from '../SyntheticUIEvent';
 import SyntheticWheelEvent from '../SyntheticWheelEvent';
 import getEventCharCode from '../getEventCharCode';
+
+import {enableCreateEventHandleAPI} from 'shared/ReactFeatureFlags';
 
 // Only used in DEV for exhaustiveness validation.
 const knownHTMLTopLevelTypes: Array<DOMTopLevelEventType> = [
@@ -201,7 +207,17 @@ const SimpleEventPlugin: ModernPluginModule<MouseEvent> = {
       nativeEventTarget,
     );
 
-    accumulateTwoPhaseListeners(targetInst, dispatchQueue, event);
+    if (
+      enableCreateEventHandleAPI &&
+      eventSystemFlags !== undefined &&
+      eventSystemFlags & IS_TARGET_PHASE_ONLY &&
+      targetContainer != null
+    ) {
+      accumulateEventTargetListeners(dispatchQueue, event, targetContainer);
+    } else {
+      accumulateTwoPhaseListeners(targetInst, dispatchQueue, event, true);
+    }
+    return event;
   },
 };
 

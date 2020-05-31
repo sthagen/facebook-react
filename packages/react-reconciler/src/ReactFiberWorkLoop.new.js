@@ -19,8 +19,6 @@ import type {StackCursor} from './ReactFiberStack.new';
 
 import {
   warnAboutDeprecatedLifecycles,
-  deferPassiveEffectCleanupDuringUnmount,
-  runAllPassiveEffectDestroysBeforeCreates,
   enableSuspenseServerRenderer,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
   enableProfilerTimer,
@@ -62,6 +60,7 @@ import {
   warnsIfNotActing,
   beforeActiveInstanceBlur,
   afterActiveInstanceBlur,
+  clearContainer,
 } from './ReactFiberHostConfig';
 
 import {
@@ -153,7 +152,6 @@ import {
 import {
   commitBeforeMutationLifeCycles as commitBeforeMutationEffectOnFiber,
   commitLifeCycles as commitLayoutEffectOnFiber,
-  commitPassiveHookEffects,
   commitPlacement,
   commitWork,
   commitDeletion,
@@ -215,13 +213,14 @@ const {
 
 type ExecutionContext = number;
 
-const NoContext = /*                    */ 0b000000;
-const BatchedContext = /*               */ 0b000001;
-const EventContext = /*                 */ 0b000010;
-const DiscreteEventContext = /*         */ 0b000100;
-const LegacyUnbatchedContext = /*       */ 0b001000;
-const RenderContext = /*                */ 0b010000;
-const CommitContext = /*                */ 0b100000;
+export const NoContext = /*             */ 0b0000000;
+const BatchedContext = /*               */ 0b0000001;
+const EventContext = /*                 */ 0b0000010;
+const DiscreteEventContext = /*         */ 0b0000100;
+const LegacyUnbatchedContext = /*       */ 0b0001000;
+const RenderContext = /*                */ 0b0010000;
+const CommitContext = /*                */ 0b0100000;
+export const RetryAfterError = /*       */ 0b1000000;
 
 type RootExitStatus = 0 | 1 | 2 | 3 | 4 | 5;
 const RootIncomplete = 0;
@@ -673,6 +672,15 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
   currentEventWipLanes = NoLanes;
   currentEventPendingLanes = NoLanes;
 
+  invariant(
+    (executionContext & (RenderContext | CommitContext)) === NoContext,
+    'Should not already be working.',
+  );
+
+  // Flush any pending passive effects before deciding which lanes to work on,
+  // in case they schedule additional work.
+  flushPassiveEffects();
+
   // Determine the next expiration time to work on, using the fields stored
   // on the root.
   let lanes = getNextLanes(
@@ -697,12 +705,6 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
   }
 
   const originalCallbackNode = root.callbackNode;
-  invariant(
-    (executionContext & (RenderContext | CommitContext)) === NoContext,
-    'Should not already be working.',
-  );
-
-  flushPassiveEffects();
 
   let exitStatus = renderRootConcurrent(root, lanes);
 
@@ -721,6 +723,15 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
     prepareFreshStack(root, NoLanes);
   } else if (exitStatus !== RootIncomplete) {
     if (exitStatus === RootErrored) {
+      executionContext |= RetryAfterError;
+
+      // If an error occurred during hydration,
+      // discard server response and fall back to client side render.
+      if (root.hydrate) {
+        root.hydrate = false;
+        clearContainer(root.containerInfo);
+      }
+
       // If something threw an error, try rendering one more time. We'll render
       // synchronously to block concurrent data mutations, and we'll includes
       // all pending updates are included. If it still fails after the second
@@ -973,6 +984,15 @@ function performSyncWorkOnRoot(root) {
   }
 
   if (root.tag !== LegacyRoot && exitStatus === RootErrored) {
+    executionContext |= RetryAfterError;
+
+    // If an error occurred during hydration,
+    // discard server response and fall back to client side render.
+    if (root.hydrate) {
+      root.hydrate = false;
+      clearContainer(root.containerInfo);
+    }
+
     // If something threw an error, try rendering one more time. We'll render
     // synchronously to block concurrent data mutations, and we'll includes
     // all pending updates are included. If it still fails after the second
@@ -1011,6 +1031,10 @@ export function flushRoot(root: FiberRoot, lanes: Lanes) {
   if ((executionContext & (RenderContext | CommitContext)) === NoContext) {
     flushSyncCallbackQueue();
   }
+}
+
+export function getExecutionContext(): ExecutionContext {
+  return executionContext;
 }
 
 export function flushDiscreteUpdates() {
@@ -1568,13 +1592,14 @@ function completeUnitOfWork(unitOfWork: Fiber): void {
         stopProfilerTimerIfRunningAndRecordDelta(completedWork, false);
       }
       resetCurrentDebugFiberInDEV();
-      resetChildLanes(completedWork);
 
       if (next !== null) {
         // Completing this fiber spawned new work. Work on that next.
         workInProgress = next;
         return;
       }
+
+      resetChildLanes(completedWork);
 
       if (
         returnFiber !== null &&
@@ -1622,6 +1647,16 @@ function completeUnitOfWork(unitOfWork: Fiber): void {
 
       // Because this fiber did not complete, don't reset its expiration time.
 
+      if (next !== null) {
+        // If completing this work spawned new work, do that next. We'll come
+        // back here again.
+        // Since we're restarting, remove anything that is not a host effect
+        // from the effect tag.
+        next.effectTag &= HostEffectMask;
+        workInProgress = next;
+        return;
+      }
+
       if (
         enableProfilerTimer &&
         (completedWork.mode & ProfileMode) !== NoMode
@@ -1637,16 +1672,6 @@ function completeUnitOfWork(unitOfWork: Fiber): void {
           child = child.sibling;
         }
         completedWork.actualDuration = actualDuration;
-      }
-
-      if (next !== null) {
-        // If completing this work spawned new work, do that next. We'll come
-        // back here again.
-        // Since we're restarting, remove anything that is not a host effect
-        // from the effect tag.
-        next.effectTag &= HostEffectMask;
-        workInProgress = next;
-        return;
       }
 
       if (returnFiber !== null) {
@@ -1681,7 +1706,8 @@ function resetChildLanes(completedWork: Fiber) {
     (completedWork.tag === LegacyHiddenComponent ||
       completedWork.tag === OffscreenComponent) &&
     completedWork.memoizedState !== null &&
-    !includesSomeLane(subtreeRenderLanes, (OffscreenLane: Lane))
+    !includesSomeLane(subtreeRenderLanes, (OffscreenLane: Lane)) &&
+    (completedWork.mode & ConcurrentMode) !== NoLanes
   ) {
     // The children of this component are hidden. Don't bubble their
     // expiration times.
@@ -1695,7 +1721,7 @@ function resetChildLanes(completedWork: Fiber) {
     // In profiling mode, resetChildExpirationTime is also used to reset
     // profiler durations.
     let actualDuration = completedWork.actualDuration;
-    let treeBaseDuration = completedWork.selfBaseDuration;
+    let treeBaseDuration = ((completedWork.selfBaseDuration: any): number);
 
     // When a fiber is cloned, its actualDuration is reset to 0. This value will
     // only be updated if work is done on the fiber (i.e. it doesn't bailout).
@@ -1720,6 +1746,18 @@ function resetChildLanes(completedWork: Fiber) {
       treeBaseDuration += child.treeBaseDuration;
       child = child.sibling;
     }
+
+    const isTimedOutSuspense =
+      completedWork.tag === SuspenseComponent &&
+      completedWork.memoizedState !== null;
+    if (isTimedOutSuspense) {
+      // Don't count time spent in a timed out Suspense subtree as part of the base duration.
+      const primaryChildFragment = completedWork.child;
+      if (primaryChildFragment !== null) {
+        treeBaseDuration -= ((primaryChildFragment.treeBaseDuration: any): number);
+      }
+    }
+
     completedWork.actualDuration = actualDuration;
     completedWork.treeBaseDuration = treeBaseDuration;
   } else {
@@ -1976,6 +2014,9 @@ function commitRootImpl(root, renderPriorityLevel) {
     while (nextEffect !== null) {
       const nextNextEffect = nextEffect.nextEffect;
       nextEffect.nextEffect = null;
+      if (nextEffect.effectTag & Deletion) {
+        detachFiberAfterEffects(nextEffect);
+      }
       nextEffect = nextNextEffect;
     }
   }
@@ -2216,15 +2257,13 @@ export function enqueuePendingPassiveHookEffectMount(
   fiber: Fiber,
   effect: HookEffect,
 ): void {
-  if (runAllPassiveEffectDestroysBeforeCreates) {
-    pendingPassiveHookEffectsMount.push(effect, fiber);
-    if (!rootDoesHavePassiveEffects) {
-      rootDoesHavePassiveEffects = true;
-      scheduleCallback(NormalSchedulerPriority, () => {
-        flushPassiveEffects();
-        return null;
-      });
-    }
+  pendingPassiveHookEffectsMount.push(effect, fiber);
+  if (!rootDoesHavePassiveEffects) {
+    rootDoesHavePassiveEffects = true;
+    scheduleCallback(NormalSchedulerPriority, () => {
+      flushPassiveEffects();
+      return null;
+    });
   }
 }
 
@@ -2232,24 +2271,20 @@ export function enqueuePendingPassiveHookEffectUnmount(
   fiber: Fiber,
   effect: HookEffect,
 ): void {
-  if (runAllPassiveEffectDestroysBeforeCreates) {
-    pendingPassiveHookEffectsUnmount.push(effect, fiber);
-    if (__DEV__) {
-      if (deferPassiveEffectCleanupDuringUnmount) {
-        fiber.effectTag |= PassiveUnmountPendingDev;
-        const alternate = fiber.alternate;
-        if (alternate !== null) {
-          alternate.effectTag |= PassiveUnmountPendingDev;
-        }
-      }
+  pendingPassiveHookEffectsUnmount.push(effect, fiber);
+  if (__DEV__) {
+    fiber.effectTag |= PassiveUnmountPendingDev;
+    const alternate = fiber.alternate;
+    if (alternate !== null) {
+      alternate.effectTag |= PassiveUnmountPendingDev;
     }
-    if (!rootDoesHavePassiveEffects) {
-      rootDoesHavePassiveEffects = true;
-      scheduleCallback(NormalSchedulerPriority, () => {
-        flushPassiveEffects();
-        return null;
-      });
-    }
+  }
+  if (!rootDoesHavePassiveEffects) {
+    rootDoesHavePassiveEffects = true;
+    scheduleCallback(NormalSchedulerPriority, () => {
+      flushPassiveEffects();
+      return null;
+    });
   }
 }
 
@@ -2281,82 +2316,31 @@ function flushPassiveEffectsImpl() {
   executionContext |= CommitContext;
   const prevInteractions = pushInteractions(root);
 
-  if (runAllPassiveEffectDestroysBeforeCreates) {
-    // It's important that ALL pending passive effect destroy functions are called
-    // before ANY passive effect create functions are called.
-    // Otherwise effects in sibling components might interfere with each other.
-    // e.g. a destroy function in one component may unintentionally override a ref
-    // value set by a create function in another component.
-    // Layout effects have the same constraint.
+  // It's important that ALL pending passive effect destroy functions are called
+  // before ANY passive effect create functions are called.
+  // Otherwise effects in sibling components might interfere with each other.
+  // e.g. a destroy function in one component may unintentionally override a ref
+  // value set by a create function in another component.
+  // Layout effects have the same constraint.
 
-    // First pass: Destroy stale passive effects.
-    const unmountEffects = pendingPassiveHookEffectsUnmount;
-    pendingPassiveHookEffectsUnmount = [];
-    for (let i = 0; i < unmountEffects.length; i += 2) {
-      const effect = ((unmountEffects[i]: any): HookEffect);
-      const fiber = ((unmountEffects[i + 1]: any): Fiber);
-      const destroy = effect.destroy;
-      effect.destroy = undefined;
+  // First pass: Destroy stale passive effects.
+  const unmountEffects = pendingPassiveHookEffectsUnmount;
+  pendingPassiveHookEffectsUnmount = [];
+  for (let i = 0; i < unmountEffects.length; i += 2) {
+    const effect = ((unmountEffects[i]: any): HookEffect);
+    const fiber = ((unmountEffects[i + 1]: any): Fiber);
+    const destroy = effect.destroy;
+    effect.destroy = undefined;
 
-      if (__DEV__) {
-        if (deferPassiveEffectCleanupDuringUnmount) {
-          fiber.effectTag &= ~PassiveUnmountPendingDev;
-          const alternate = fiber.alternate;
-          if (alternate !== null) {
-            alternate.effectTag &= ~PassiveUnmountPendingDev;
-          }
-        }
-      }
-
-      if (typeof destroy === 'function') {
-        if (__DEV__) {
-          setCurrentDebugFiberInDEV(fiber);
-          if (
-            enableProfilerTimer &&
-            enableProfilerCommitHooks &&
-            fiber.mode & ProfileMode
-          ) {
-            startPassiveEffectTimer();
-            invokeGuardedCallback(null, destroy, null);
-            recordPassiveEffectDuration(fiber);
-          } else {
-            invokeGuardedCallback(null, destroy, null);
-          }
-          if (hasCaughtError()) {
-            invariant(fiber !== null, 'Should be working on an effect.');
-            const error = clearCaughtError();
-            captureCommitPhaseError(fiber, error);
-          }
-          resetCurrentDebugFiberInDEV();
-        } else {
-          try {
-            if (
-              enableProfilerTimer &&
-              enableProfilerCommitHooks &&
-              fiber.mode & ProfileMode
-            ) {
-              try {
-                startPassiveEffectTimer();
-                destroy();
-              } finally {
-                recordPassiveEffectDuration(fiber);
-              }
-            } else {
-              destroy();
-            }
-          } catch (error) {
-            invariant(fiber !== null, 'Should be working on an effect.');
-            captureCommitPhaseError(fiber, error);
-          }
-        }
+    if (__DEV__) {
+      fiber.effectTag &= ~PassiveUnmountPendingDev;
+      const alternate = fiber.alternate;
+      if (alternate !== null) {
+        alternate.effectTag &= ~PassiveUnmountPendingDev;
       }
     }
-    // Second pass: Create new passive effects.
-    const mountEffects = pendingPassiveHookEffectsMount;
-    pendingPassiveHookEffectsMount = [];
-    for (let i = 0; i < mountEffects.length; i += 2) {
-      const effect = ((mountEffects[i]: any): HookEffect);
-      const fiber = ((mountEffects[i + 1]: any): Fiber);
+
+    if (typeof destroy === 'function') {
       if (__DEV__) {
         setCurrentDebugFiberInDEV(fiber);
         if (
@@ -2365,10 +2349,10 @@ function flushPassiveEffectsImpl() {
           fiber.mode & ProfileMode
         ) {
           startPassiveEffectTimer();
-          invokeGuardedCallback(null, invokePassiveEffectCreate, null, effect);
+          invokeGuardedCallback(null, destroy, null);
           recordPassiveEffectDuration(fiber);
         } else {
-          invokeGuardedCallback(null, invokePassiveEffectCreate, null, effect);
+          invokeGuardedCallback(null, destroy, null);
         }
         if (hasCaughtError()) {
           invariant(fiber !== null, 'Should be working on an effect.');
@@ -2378,7 +2362,6 @@ function flushPassiveEffectsImpl() {
         resetCurrentDebugFiberInDEV();
       } else {
         try {
-          const create = effect.create;
           if (
             enableProfilerTimer &&
             enableProfilerCommitHooks &&
@@ -2386,12 +2369,12 @@ function flushPassiveEffectsImpl() {
           ) {
             try {
               startPassiveEffectTimer();
-              effect.destroy = create();
+              destroy();
             } finally {
               recordPassiveEffectDuration(fiber);
             }
           } else {
-            effect.destroy = create();
+            destroy();
           }
         } catch (error) {
           invariant(fiber !== null, 'Should be working on an effect.');
@@ -2400,36 +2383,66 @@ function flushPassiveEffectsImpl() {
       }
     }
   }
+  // Second pass: Create new passive effects.
+  const mountEffects = pendingPassiveHookEffectsMount;
+  pendingPassiveHookEffectsMount = [];
+  for (let i = 0; i < mountEffects.length; i += 2) {
+    const effect = ((mountEffects[i]: any): HookEffect);
+    const fiber = ((mountEffects[i + 1]: any): Fiber);
+    if (__DEV__) {
+      setCurrentDebugFiberInDEV(fiber);
+      if (
+        enableProfilerTimer &&
+        enableProfilerCommitHooks &&
+        fiber.mode & ProfileMode
+      ) {
+        startPassiveEffectTimer();
+        invokeGuardedCallback(null, invokePassiveEffectCreate, null, effect);
+        recordPassiveEffectDuration(fiber);
+      } else {
+        invokeGuardedCallback(null, invokePassiveEffectCreate, null, effect);
+      }
+      if (hasCaughtError()) {
+        invariant(fiber !== null, 'Should be working on an effect.');
+        const error = clearCaughtError();
+        captureCommitPhaseError(fiber, error);
+      }
+      resetCurrentDebugFiberInDEV();
+    } else {
+      try {
+        const create = effect.create;
+        if (
+          enableProfilerTimer &&
+          enableProfilerCommitHooks &&
+          fiber.mode & ProfileMode
+        ) {
+          try {
+            startPassiveEffectTimer();
+            effect.destroy = create();
+          } finally {
+            recordPassiveEffectDuration(fiber);
+          }
+        } else {
+          effect.destroy = create();
+        }
+      } catch (error) {
+        invariant(fiber !== null, 'Should be working on an effect.');
+        captureCommitPhaseError(fiber, error);
+      }
+    }
+  }
+
   // Note: This currently assumes there are no passive effects on the root fiber
   // because the root is not part of its own effect list.
   // This could change in the future.
   let effect = root.current.firstEffect;
   while (effect !== null) {
-    // We do this work above if this flag is enabled, so we shouldn't be
-    // doing it here.
-    if (!runAllPassiveEffectDestroysBeforeCreates) {
-      if (__DEV__) {
-        setCurrentDebugFiberInDEV(effect);
-        invokeGuardedCallback(null, commitPassiveHookEffects, null, effect);
-        if (hasCaughtError()) {
-          invariant(effect !== null, 'Should be working on an effect.');
-          const error = clearCaughtError();
-          captureCommitPhaseError(effect, error);
-        }
-        resetCurrentDebugFiberInDEV();
-      } else {
-        try {
-          commitPassiveHookEffects(effect);
-        } catch (error) {
-          invariant(effect !== null, 'Should be working on an effect.');
-          captureCommitPhaseError(effect, error);
-        }
-      }
-    }
-
     const nextNextEffect = effect.nextEffect;
     // Remove nextEffect pointer to assist GC
     effect.nextEffect = null;
+    if (effect.effectTag & Deletion) {
+      detachFiberAfterEffects(effect);
+    }
     effect = nextNextEffect;
   }
 
@@ -2821,15 +2834,10 @@ function warnAboutUpdateOnUnmountedFiberInDEV(fiber) {
       return;
     }
 
-    if (
-      deferPassiveEffectCleanupDuringUnmount &&
-      runAllPassiveEffectDestroysBeforeCreates
-    ) {
-      // If there are pending passive effects unmounts for this Fiber,
-      // we can assume that they would have prevented this update.
-      if ((fiber.effectTag & PassiveUnmountPendingDev) !== NoEffect) {
-        return;
-      }
+    // If there are pending passive effects unmounts for this Fiber,
+    // we can assume that they would have prevented this update.
+    if ((fiber.effectTag & PassiveUnmountPendingDev) !== NoEffect) {
+      return;
     }
 
     // We show the whole stack but dedupe on the top component's name because
@@ -3133,7 +3141,7 @@ export function warnIfUnmockedScheduler(fiber: Fiber) {
       } else if (warnAboutUnmockedScheduler === true) {
         didWarnAboutUnmockedScheduler = true;
         console.error(
-          'Starting from React v17, the "scheduler" module will need to be mocked ' +
+          'Starting from React v18, the "scheduler" module will need to be mocked ' +
             'to guarantee consistent behaviour across tests and browsers. ' +
             'For example, with jest: \n' +
             // Break up requires to avoid accidentally parsing them as dependencies.
@@ -3531,4 +3539,8 @@ export function act(callback: () => Thenable<mixed>): Thenable<void> {
       },
     };
   }
+}
+
+function detachFiberAfterEffects(fiber: Fiber): void {
+  fiber.sibling = null;
 }

@@ -1,5 +1,4 @@
 let React;
-let ReactFeatureFlags;
 let Fragment;
 let ReactNoop;
 let Scheduler;
@@ -14,7 +13,6 @@ describe('ReactSuspenseWithNoopRenderer', () => {
   beforeEach(() => {
     jest.resetModules();
 
-    ReactFeatureFlags = require('shared/ReactFeatureFlags');
     React = require('react');
     Fragment = React.Fragment;
     ReactNoop = require('react-noop-renderer');
@@ -139,6 +137,25 @@ describe('ReactSuspenseWithNoopRenderer', () => {
         Scheduler.unstable_yieldValue(`Error! [${text}]`);
       }
       throw promise;
+    }
+  }
+
+  // TODO: Delete this once new API exists in both forks
+  function LegacyHiddenDiv({hidden, children, ...props}) {
+    if (gate(flags => flags.new)) {
+      return (
+        <div hidden={hidden} {...props}>
+          <React.unstable_LegacyHidden mode={hidden ? 'hidden' : 'visible'}>
+            {children}
+          </React.unstable_LegacyHidden>
+        </div>
+      );
+    } else {
+      return (
+        <div hidden={hidden} {...props}>
+          {children}
+        </div>
+      );
     }
   }
 
@@ -1718,26 +1735,13 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     expect(Scheduler).toHaveYielded(['Promise resolved [B]']);
 
-    if (
-      ReactFeatureFlags.deferPassiveEffectCleanupDuringUnmount &&
-      ReactFeatureFlags.runAllPassiveEffectDestroysBeforeCreates
-    ) {
-      expect(Scheduler).toFlushAndYield([
-        'B',
-        'Destroy Layout Effect [Loading...]',
-        'Layout Effect [B]',
-        'Destroy Effect [Loading...]',
-        'Effect [B]',
-      ]);
-    } else {
-      expect(Scheduler).toFlushAndYield([
-        'B',
-        'Destroy Layout Effect [Loading...]',
-        'Destroy Effect [Loading...]',
-        'Layout Effect [B]',
-        'Effect [B]',
-      ]);
-    }
+    expect(Scheduler).toFlushAndYield([
+      'B',
+      'Destroy Layout Effect [Loading...]',
+      'Layout Effect [B]',
+      'Destroy Effect [Loading...]',
+      'Effect [B]',
+    ]);
 
     // Update
     ReactNoop.renderLegacySyncRoot(<App text="B2" />, () =>
@@ -1767,30 +1771,15 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     expect(Scheduler).toHaveYielded(['Promise resolved [B2]']);
 
-    if (
-      ReactFeatureFlags.deferPassiveEffectCleanupDuringUnmount &&
-      ReactFeatureFlags.runAllPassiveEffectDestroysBeforeCreates
-    ) {
-      expect(Scheduler).toFlushAndYield([
-        'B2',
-        'Destroy Layout Effect [Loading...]',
-        'Destroy Layout Effect [B]',
-        'Layout Effect [B2]',
-        'Destroy Effect [Loading...]',
-        'Destroy Effect [B]',
-        'Effect [B2]',
-      ]);
-    } else {
-      expect(Scheduler).toFlushAndYield([
-        'B2',
-        'Destroy Layout Effect [Loading...]',
-        'Destroy Effect [Loading...]',
-        'Destroy Layout Effect [B]',
-        'Layout Effect [B2]',
-        'Destroy Effect [B]',
-        'Effect [B2]',
-      ]);
-    }
+    expect(Scheduler).toFlushAndYield([
+      'B2',
+      'Destroy Layout Effect [Loading...]',
+      'Destroy Layout Effect [B]',
+      'Layout Effect [B2]',
+      'Destroy Effect [Loading...]',
+      'Destroy Effect [B]',
+      'Effect [B2]',
+    ]);
   });
 
   it('suspends for longer if something took a long (CPU bound) time to render', async () => {
@@ -2891,6 +2880,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
   });
 
   // @gate experimental
+  // @gate enableLegacyHiddenType
   it('should not render hidden content while suspended on higher pri', async () => {
     function Offscreen() {
       Scheduler.unstable_yieldValue('Offscreen');
@@ -2902,9 +2892,9 @@ describe('ReactSuspenseWithNoopRenderer', () => {
       });
       return (
         <>
-          <div hidden={true}>
+          <LegacyHiddenDiv hidden={true}>
             <Offscreen />
-          </div>
+          </LegacyHiddenDiv>
           <Suspense fallback={<Text text="Loading..." />}>
             {showContent ? <AsyncText text="A" ms={2000} /> : null}
           </Suspense>
@@ -2946,6 +2936,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
   });
 
   // @gate experimental
+  // @gate enableLegacyHiddenType
   it('should be able to unblock higher pri content before suspended hidden', async () => {
     function Offscreen() {
       Scheduler.unstable_yieldValue('Offscreen');
@@ -2957,10 +2948,10 @@ describe('ReactSuspenseWithNoopRenderer', () => {
       });
       return (
         <Suspense fallback={<Text text="Loading..." />}>
-          <div hidden={true}>
+          <LegacyHiddenDiv hidden={true}>
             <AsyncText text="A" ms={2000} />
             <Offscreen />
-          </div>
+          </LegacyHiddenDiv>
           {showContent ? <AsyncText text="A" ms={2000} /> : null}
         </Suspense>
       );

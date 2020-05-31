@@ -731,7 +731,7 @@ export function attach(
       return null;
     }
 
-    const {displayName} = getData(internalInstance);
+    const {displayName, key} = getData(internalInstance);
     const type = getElementType(internalInstance);
 
     let context = null;
@@ -789,6 +789,8 @@ export function attach(
 
       type: type,
 
+      key: key != null ? key : null,
+
       // Inspectable properties.
       context,
       hooks: null,
@@ -800,6 +802,10 @@ export function attach(
 
       // Location of component in source coude.
       source,
+
+      rootType: null,
+      rendererPackageName: null,
+      rendererVersion: null,
     };
   }
 

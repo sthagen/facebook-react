@@ -430,11 +430,18 @@ export function attach(
   if (process.env.NODE_ENV !== 'test') {
     registerRendererWithConsole(renderer);
 
-    // The renderer interface can't read this preference directly,
+    // The renderer interface can't read these preferences directly,
     // because it is stored in localStorage within the context of the extension.
     // It relies on the extension to pass the preference through via the global.
-    if (window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false) {
-      patchConsole();
+    const appendComponentStack =
+      window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false;
+    const breakOnConsoleErrors =
+      window.__REACT_DEVTOOLS_BREAK_ON_CONSOLE_ERRORS__ === true;
+    if (appendComponentStack || breakOnConsoleErrors) {
+      patchConsole({
+        appendComponentStack,
+        breakOnConsoleErrors,
+      });
     }
   }
 
@@ -2143,6 +2150,7 @@ export function attach(
       _debugOwner,
       _debugSource,
       stateNode,
+      key,
       memoizedProps,
       memoizedState,
       tag,
@@ -2277,6 +2285,16 @@ export function attach(
       }
     }
 
+    let rootType = null;
+    let current = fiber;
+    while (current.return !== null) {
+      current = current.return;
+    }
+    const fiberRoot = current.stateNode;
+    if (fiberRoot != null && fiberRoot._debugRootType !== null) {
+      rootType = fiberRoot._debugRootType;
+    }
+
     return {
       id,
 
@@ -2300,6 +2318,8 @@ export function attach(
       // Does the component have legacy context attached to it.
       hasLegacyContext,
 
+      key: key != null ? key : null,
+
       displayName: getDisplayNameForFiber(fiber),
       type: elementType,
 
@@ -2315,6 +2335,10 @@ export function attach(
 
       // Location of component in source coude.
       source: _debugSource || null,
+
+      rootType,
+      rendererPackageName: renderer.rendererPackageName,
+      rendererVersion: renderer.version,
     };
   }
 

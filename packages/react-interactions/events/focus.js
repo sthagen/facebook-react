@@ -7,6 +7,4 @@
  * @flow
  */
 
-export function createResource(): any {
-  // TODO
-}
+export * from './src/dom/create-event-handle/Focus';

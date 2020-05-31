@@ -16,6 +16,7 @@ import type {
   ReactContext,
   MutableSourceSubscribeFn,
   MutableSourceGetSnapshotFn,
+  MutableSourceVersion,
   MutableSource,
 } from 'shared/ReactTypes';
 import type {SuspenseInstance} from './ReactFiberHostConfig';
@@ -247,6 +248,11 @@ type BaseFiberRootProperties = {|
   // when external, mutable sources are read from during render.
   mutableSourceLastPendingUpdateTime: ExpirationTime,
 
+  // Used by useMutableSource hook to avoid tearing during hydrtaion.
+  mutableSourceEagerHydrationData?: Array<
+    MutableSource<any> | MutableSourceVersion,
+  > | null,
+
   // Only used by new reconciler
 
   // Represents the next task that the root should work on, or the current one
@@ -262,6 +268,9 @@ type BaseFiberRootProperties = {|
   mutableReadLanes: Lanes,
 
   finishedLanes: Lanes,
+
+  entangledLanes: Lanes,
+  entanglements: LaneMap<Lanes>,
 |};
 
 // The following attributes are only used by interaction tracing builds.
@@ -347,4 +356,6 @@ export type Dispatcher = {|
     subscribe: MutableSourceSubscribeFn<Source, Snapshot>,
   ): Snapshot,
   useOpaqueIdentifier(): any,
+
+  unstable_isNewReconciler?: boolean,
 |};

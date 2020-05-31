@@ -13,6 +13,7 @@ import type {LazyComponent as LazyComponentType} from 'react/src/ReactLazy';
 import type {Fiber} from './ReactInternalTypes';
 import type {FiberRoot} from './ReactInternalTypes';
 import type {Lanes, Lane} from './ReactFiberLane';
+import type {MutableSource} from 'shared/ReactTypes';
 import type {
   SuspenseState,
   SuspenseListRenderState,
@@ -80,12 +81,7 @@ import invariant from 'shared/invariant';
 import shallowEqual from 'shared/shallowEqual';
 import getComponentName from 'shared/getComponentName';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings.new';
-import {
-  REACT_ELEMENT_TYPE,
-  REACT_LAZY_TYPE,
-  REACT_LEGACY_HIDDEN_TYPE,
-  getIteratorFn,
-} from 'shared/ReactSymbols';
+import {REACT_LAZY_TYPE, getIteratorFn} from 'shared/ReactSymbols';
 import {
   getCurrentFiberOwnerNameInDevOrNull,
   setIsRendering,
@@ -128,10 +124,10 @@ import {
 } from './ReactTypeOfMode';
 import {
   shouldSetTextContent,
-  shouldDeprioritizeSubtree,
   isSuspenseInstancePending,
   isSuspenseInstanceFallback,
   registerSuspenseInstanceRetry,
+  supportsHydration,
 } from './ReactFiberHostConfig';
 import type {SuspenseInstance} from './ReactFiberHostConfig';
 import {shouldSuspend} from './ReactFiberReconciler';
@@ -198,8 +194,12 @@ import {
   markSkippedUpdateLanes,
   getWorkInProgressRoot,
   pushRenderLanes,
+  getExecutionContext,
+  RetryAfterError,
+  NoContext,
 } from './ReactFiberWorkLoop.new';
 import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
+import {setWorkInProgressVersion} from './ReactMutableSource.new';
 
 import {disableLogs, reenableLogs} from 'shared/ConsolePatchingDev';
 
@@ -571,8 +571,19 @@ function updateOffscreenComponent(
   const prevState: OffscreenState | null =
     current !== null ? current.memoizedState : null;
 
-  if (nextProps.mode === 'hidden') {
-    if (!includesSomeLane(renderLanes, (OffscreenLane: Lane))) {
+  if (
+    nextProps.mode === 'hidden' ||
+    nextProps.mode === 'unstable-defer-without-hiding'
+  ) {
+    if ((workInProgress.mode & ConcurrentMode) === NoMode) {
+      // In legacy sync mode, don't defer the subtree. Render it now.
+      // TODO: Figure out what we should do in Blocking mode.
+      const nextState: OffscreenState = {
+        baseLanes: NoLanes,
+      };
+      workInProgress.memoizedState = nextState;
+      pushRenderLanes(workInProgress, renderLanes);
+    } else if (!includesSomeLane(renderLanes, (OffscreenLane: Lane))) {
       let nextBaseLanes;
       if (prevState !== null) {
         const prevBaseLanes = prevState.baseLanes;
@@ -1062,6 +1073,20 @@ function updateHostRoot(current, workInProgress, renderLanes) {
     // be any children to hydrate which is effectively the same thing as
     // not hydrating.
 
+    if (supportsHydration) {
+      const mutableSourceEagerHydrationData =
+        root.mutableSourceEagerHydrationData;
+      if (mutableSourceEagerHydrationData != null) {
+        for (let i = 0; i < mutableSourceEagerHydrationData.length; i += 2) {
+          const mutableSource = ((mutableSourceEagerHydrationData[
+            i
+          ]: any): MutableSource<any>);
+          const version = mutableSourceEagerHydrationData[i + 1];
+          setWorkInProgressVersion(mutableSource, version);
+        }
+      }
+    }
+
     const child = mountChildFibers(
       workInProgress,
       null,
@@ -1121,26 +1146,6 @@ function updateHostComponent(
   }
 
   markRef(current, workInProgress);
-
-  if (
-    (workInProgress.mode & ConcurrentMode) !== NoMode &&
-    nextProps.hasOwnProperty('hidden')
-  ) {
-    const wrappedChildren = {
-      $$typeof: REACT_ELEMENT_TYPE,
-      type: REACT_LEGACY_HIDDEN_TYPE,
-      key: null,
-      ref: null,
-      props: {
-        children: nextChildren,
-        // Check the host config to see if the children are offscreen/hidden.
-        mode: shouldDeprioritizeSubtree(type, nextProps) ? 'hidden' : 'visible',
-      },
-      _owner: __DEV__ ? {} : null,
-    };
-    nextChildren = wrappedChildren;
-  }
-
   reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   return workInProgress.child;
 }
@@ -2263,6 +2268,14 @@ function updateDehydratedSuspenseComponent(
   // We should never be hydrating at this point because it is the first pass,
   // but after we've already committed once.
   warnIfHydrating();
+
+  if ((getExecutionContext() & RetryAfterError) !== NoContext) {
+    return retrySuspenseComponentWithoutHydrating(
+      current,
+      workInProgress,
+      renderLanes,
+    );
+  }
 
   if ((workInProgress.mode & BlockingMode) === NoMode) {
     return retrySuspenseComponentWithoutHydrating(

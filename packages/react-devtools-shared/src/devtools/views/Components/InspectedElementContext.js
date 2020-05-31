@@ -208,7 +208,11 @@ function InspectedElementContextController({children}: Props) {
             context,
             hooks,
             props,
+            rendererPackageName,
+            rendererVersion,
+            rootType,
             state,
+            key,
           } = ((data.value: any): InspectedElementBackend);
 
           const inspectedElement: InspectedElementFrontend = {
@@ -218,6 +222,10 @@ function InspectedElementContextController({children}: Props) {
             canViewSource,
             hasLegacyContext,
             id,
+            key,
+            rendererPackageName,
+            rendererVersion,
+            rootType,
             source,
             type,
             owners:

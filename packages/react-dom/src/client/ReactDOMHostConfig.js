@@ -76,11 +76,15 @@ import {
   enableDeprecatedFlareAPI,
   enableFundamentalAPI,
   enableModernEventSystem,
+  enableCreateEventHandleAPI,
   enableScopeAPI,
 } from 'shared/ReactFeatureFlags';
 import {HostComponent, HostText} from 'react-reconciler/src/ReactWorkTags';
 import {TOP_BEFORE_BLUR, TOP_AFTER_BLUR} from '../events/DOMTopLevelEventTypes';
-import {listenToEvent} from '../events/DOMModernPluginEventSystem';
+import {
+  listenToEvent,
+  clearEventHandleListenersForTarget,
+} from '../events/DOMModernPluginEventSystem';
 
 export type Type = string;
 export type Props = {
@@ -233,7 +237,7 @@ export function prepareForCommit(containerInfo: Container): Object | null {
   eventsEnabled = ReactBrowserEventEmitterIsEnabled();
   selectionInformation = getSelectionInformation();
   let activeInstance = null;
-  if (enableDeprecatedFlareAPI) {
+  if (enableDeprecatedFlareAPI || enableCreateEventHandleAPI) {
     const focusedElem = selectionInformation.focusedElem;
     if (focusedElem !== null) {
       activeInstance = getClosestInstanceFromNode(focusedElem);
@@ -244,7 +248,7 @@ export function prepareForCommit(containerInfo: Container): Object | null {
 }
 
 export function beforeActiveInstanceBlur(): void {
-  if (enableDeprecatedFlareAPI) {
+  if (enableDeprecatedFlareAPI || enableCreateEventHandleAPI) {
     ReactBrowserEventEmitterSetEnabled(true);
     dispatchBeforeDetachedBlur((selectionInformation: any).focusedElem);
     ReactBrowserEventEmitterSetEnabled(false);
@@ -252,7 +256,7 @@ export function beforeActiveInstanceBlur(): void {
 }
 
 export function afterActiveInstanceBlur(): void {
-  if (enableDeprecatedFlareAPI) {
+  if (enableDeprecatedFlareAPI || enableCreateEventHandleAPI) {
     ReactBrowserEventEmitterSetEnabled(true);
     dispatchAfterDetachedBlur((selectionInformation: any).focusedElem);
     ReactBrowserEventEmitterSetEnabled(false);
@@ -368,7 +372,9 @@ export function shouldSetTextContent(type: string, props: Props): boolean {
 }
 
 export function shouldDeprioritizeSubtree(type: string, props: Props): boolean {
-  return !!props.hidden;
+  // This is obnoxiously specific so that nobody uses it, but we can still opt
+  // in via an infra-level userspace abstraction.
+  return props.hidden === 'unstable-do-not-use-legacy-hidden';
 }
 
 export function createTextInstance(
@@ -515,7 +521,7 @@ function createEvent(type: TopLevelType): Event {
 }
 
 function dispatchBeforeDetachedBlur(target: HTMLElement): void {
-  if (enableDeprecatedFlareAPI) {
+  if (enableDeprecatedFlareAPI || enableCreateEventHandleAPI) {
     const event = createEvent(TOP_BEFORE_BLUR);
     // Dispatch "beforeblur" directly on the target,
     // so it gets picked up by the event system and
@@ -525,7 +531,7 @@ function dispatchBeforeDetachedBlur(target: HTMLElement): void {
 }
 
 function dispatchAfterDetachedBlur(target: HTMLElement): void {
-  if (enableDeprecatedFlareAPI) {
+  if (enableDeprecatedFlareAPI || enableCreateEventHandleAPI) {
     const event = createEvent(TOP_AFTER_BLUR);
     // So we know what was detached, make the relatedTarget the
     // detached target on the "afterblur" event.
@@ -535,10 +541,12 @@ function dispatchAfterDetachedBlur(target: HTMLElement): void {
   }
 }
 
-export function beforeRemoveInstance(
+export function removeInstanceEventHandles(
   instance: Instance | TextInstance | SuspenseInstance,
 ) {
-  // TODO for ReactDOM.createEventInstance
+  if (enableCreateEventHandleAPI) {
+    clearEventHandleListenersForTarget(instance);
+  }
 }
 
 export function removeChild(
@@ -1135,8 +1143,12 @@ export function prepareScopeUpdate(
   }
 }
 
-export function prepareScopeUnmount(scopeInstance: Object): void {
-  // TODO when we add createEventHandle
+export function removeScopeEventHandles(
+  scopeInstance: ReactScopeInstance,
+): void {
+  if (enableScopeAPI && enableCreateEventHandleAPI) {
+    clearEventHandleListenersForTarget(scopeInstance);
+  }
 }
 
 export function getInstanceFromScope(
