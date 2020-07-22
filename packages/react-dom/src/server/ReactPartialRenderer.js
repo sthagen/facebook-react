@@ -60,6 +60,7 @@ import escapeTextForBrowser from './escapeTextForBrowser';
 import {
   prepareToUseHooks,
   finishHooks,
+  resetHooksState,
   Dispatcher,
   currentPartialRenderer,
   setCurrentPartialRenderer,
@@ -114,7 +115,7 @@ if (__DEV__) {
   validatePropertiesInDevelopment = function(type, props) {
     validateARIAProperties(type, props);
     validateInputProperties(type, props);
-    validateUnknownProperties(type, props, /* canUseEventSystem */ false);
+    validateUnknownProperties(type, props, null);
   };
 
   describeStackFrame = function(element): string {
@@ -955,6 +956,7 @@ class ReactDOMServerRenderer {
     } finally {
       ReactCurrentDispatcher.current = prevDispatcher;
       setCurrentPartialRenderer(prevPartialRenderer);
+      resetHooksState();
     }
   }
 
@@ -1105,6 +1107,31 @@ class ReactDOMServerRenderer {
           } else {
             invariant(false, 'ReactDOMServer does not yet support Suspense.');
           }
+        }
+        // eslint-disable-next-line-no-fallthrough
+        case REACT_SCOPE_TYPE: {
+          if (enableScopeAPI) {
+            const nextChildren = toArray(
+              ((nextChild: any): ReactElement).props.children,
+            );
+            const frame: Frame = {
+              type: null,
+              domNamespace: parentNamespace,
+              children: nextChildren,
+              childIndex: 0,
+              context: context,
+              footer: '',
+            };
+            if (__DEV__) {
+              ((frame: any): FrameDev).debugElementStack = [];
+            }
+            this.stack.push(frame);
+            return '';
+          }
+          invariant(
+            false,
+            'ReactDOMServer does not yet support scope components.',
+          );
         }
         // eslint-disable-next-line-no-fallthrough
         default:
@@ -1296,31 +1323,6 @@ class ReactDOMServerRenderer {
             }
             this.stack.push(frame);
             return '';
-          }
-          // eslint-disable-next-line-no-fallthrough
-          case REACT_SCOPE_TYPE: {
-            if (enableScopeAPI) {
-              const nextChildren = toArray(
-                ((nextChild: any): ReactElement).props.children,
-              );
-              const frame: Frame = {
-                type: null,
-                domNamespace: parentNamespace,
-                children: nextChildren,
-                childIndex: 0,
-                context: context,
-                footer: '',
-              };
-              if (__DEV__) {
-                ((frame: any): FrameDev).debugElementStack = [];
-              }
-              this.stack.push(frame);
-              return '';
-            }
-            invariant(
-              false,
-              'ReactDOMServer does not yet support scope components.',
-            );
           }
         }
       }

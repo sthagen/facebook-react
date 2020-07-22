@@ -5,9 +5,29 @@
     Changes that have landed in master but are not yet released.
     Click to see more.
   </summary>
-  
+
   <!-- Upcoming changes go here -->
 </details>
+
+## 4.8.2 (July 15, 2020)
+#### Bugfix
+* Fix broken `Suspense` heuristic ([bvaughn](https://github.com/bvaughn) in [#19373](https://github.com/facebook/react/pull/19373))
+* Fixed error with standalone in HTTPS mode ([b-ponomarenko](https://github.com/b-ponomarenko) in [#19336](https://github.com/facebook/react/pull/19336))
+* Disable DevTools minification ([bvaughn](https://github.com/bvaughn) in [#19369](https://github.com/facebook/react/pull/19369))
+
+## 4.8.1 (July 10, 2020)
+#### Bugfix
+* Fix break-on-warning to truly be off by default. ([gaearon](https://github.com/gaearon) in [#19309](https://github.com/facebook/react/pull/19309))
+
+## 4.8.0 (July 9, 2020)
+#### Features
+* Add SSL support to React devtools standalone ([ittaibaratz](https://github.com/ittaibaratz) in [#19191](https://github.com/facebook/react/pull/19191))
+* New break-on-warning feature (off by default) ([bvaughn](https://github.com/bvaughn) in [#19048](https://github.com/facebook/react/pull/19048))
+
+#### Bugfix
+* Updates Electron version for react-devtools to pull in several security fixes ([gsimone](https://github.com/gsimone) in [#19280](https://github.com/facebook/react/pull/19280))
+* Remove unnecessary tag end from CommitRanked view ([finico](https://github.com/finico) in [#19195](https://github.com/facebook/react/pull/19195))
+* Shutdown DevTools Bridge synchronously when unmounting ([bvaughn](https://github.com/bvaughn) in [#19180](https://github.com/facebook/react/pull/19180))
 
 ## 4.7.0 (May 18, 2020)
 

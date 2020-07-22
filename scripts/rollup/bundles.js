@@ -350,8 +350,8 @@ const bundles = [
   /******* React Native *******/
   {
     bundleTypes: __EXPERIMENTAL__
-      ? [RN_FB_DEV, RN_FB_PROD, RN_FB_PROFILING]
-      : [],
+      ? []
+      : [RN_FB_DEV, RN_FB_PROD, RN_FB_PROFILING],
     moduleType: RENDERER,
     entry: 'react-native-renderer',
     global: 'ReactNativeRenderer',
@@ -380,8 +380,8 @@ const bundles = [
   /******* React Native Fabric *******/
   {
     bundleTypes: __EXPERIMENTAL__
-      ? [RN_FB_DEV, RN_FB_PROD, RN_FB_PROFILING]
-      : [],
+      ? []
+      : [RN_FB_DEV, RN_FB_PROD, RN_FB_PROFILING],
     moduleType: RENDERER,
     entry: 'react-native-renderer/fabric',
     global: 'ReactFabric',
@@ -416,23 +416,12 @@ const bundles = [
       UMD_DEV,
       UMD_PROD,
       RN_FB_DEV,
+      RN_FB_PROD,
+      RN_FB_PROFILING,
     ],
     moduleType: RENDERER,
     entry: 'react-test-renderer',
     global: 'ReactTestRenderer',
-    externals: ['react', 'scheduler', 'scheduler/unstable_mock'],
-    babel: opts =>
-      Object.assign({}, opts, {
-        plugins: opts.plugins.concat([
-          [require.resolve('@babel/plugin-transform-classes'), {loose: true}],
-        ]),
-      }),
-  },
-  {
-    bundleTypes: [UMD_DEV, UMD_PROD],
-    moduleType: NON_FIBER_RENDERER,
-    entry: 'react-test-renderer/shallow',
-    global: 'ReactShallowRenderer',
     externals: ['react', 'scheduler', 'scheduler/unstable_mock'],
     babel: opts =>
       Object.assign({}, opts, {
@@ -758,21 +747,6 @@ const bundles = [
       FB_WWW_PROD,
     ],
     moduleType: NON_FIBER_RENDERER,
-    entry: 'react-interactions/events/keyboard',
-    global: 'ReactEventsKeyboard',
-    externals: ['react'],
-  },
-
-  {
-    bundleTypes: [
-      UMD_DEV,
-      UMD_PROD,
-      NODE_DEV,
-      NODE_PROD,
-      FB_WWW_DEV,
-      FB_WWW_PROD,
-    ],
-    moduleType: NON_FIBER_RENDERER,
     entry: 'react-interactions/events/press-legacy',
     global: 'ReactEventsPressLegacy',
     externals: ['react'],
@@ -781,7 +755,6 @@ const bundles = [
 
 const fbBundleExternalsMap = {
   'react-interactions/events/focus': 'ReactEventsFocus',
-  'react-interactions/events/keyboard': 'ReactEventsKeyboard',
   'react-interactions/events/tap': 'ReactEventsTap',
 };
 

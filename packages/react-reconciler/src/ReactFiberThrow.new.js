@@ -28,9 +28,14 @@ import {
   NoEffect,
   ShouldCapture,
   LifecycleEffectMask,
+  ForceUpdateForLegacySuspense,
 } from './ReactSideEffectTags';
 import {shouldCaptureSuspense} from './ReactFiberSuspenseComponent.new';
-import {NoMode, BlockingMode} from './ReactTypeOfMode';
+import {NoMode, BlockingMode, DebugTracingMode} from './ReactTypeOfMode';
+import {
+  enableDebugTracing,
+  enableSchedulingProfiler,
+} from 'shared/ReactFeatureFlags';
 import {createCapturedValue} from './ReactCapturedValue';
 import {
   enqueueCapturedUpdate,
@@ -53,6 +58,8 @@ import {
   pingSuspendedRoot,
 } from './ReactFiberWorkLoop.new';
 import {logCapturedError} from './ReactFiberErrorLogger';
+import {logComponentSuspended} from './DebugTracing';
+import {markComponentSuspended} from './SchedulingProfiler';
 
 import {
   SyncLane,
@@ -189,6 +196,19 @@ function throwException(
     // This is a wakeable.
     const wakeable: Wakeable = (value: any);
 
+    if (__DEV__) {
+      if (enableDebugTracing) {
+        if (sourceFiber.mode & DebugTracingMode) {
+          const name = getComponentName(sourceFiber.type) || 'Unknown';
+          logComponentSuspended(name, wakeable);
+        }
+      }
+    }
+
+    if (enableSchedulingProfiler) {
+      markComponentSuspended(sourceFiber, wakeable);
+    }
+
     if ((sourceFiber.mode & BlockingMode) === NoMode) {
       // Reset the memoizedState to what it was before we attempted
       // to render it.
@@ -238,6 +258,7 @@ function throwException(
         // should *not* suspend the commit.
         if ((workInProgress.mode & BlockingMode) === NoMode) {
           workInProgress.effectTag |= DidCapture;
+          sourceFiber.effectTag |= ForceUpdateForLegacySuspense;
 
           // We're going to commit this fiber even though it didn't complete.
           // But we shouldn't call any lifecycle methods or callbacks. Remove

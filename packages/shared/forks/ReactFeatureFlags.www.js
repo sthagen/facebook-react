@@ -21,11 +21,12 @@ export const {
   disableSchedulerTimeoutBasedOnReactExpirationTime,
   warnAboutSpreadingKeyToJSX,
   replayFailedUnitOfWorkWithInvokeGuardedCallback,
-  enableModernEventSystem,
   enableFilterEmptyStringAttributesDOM,
   enableLegacyFBSupport,
-  enableDebugTracing,
   deferRenderPhaseUpdateToNextBatch,
+  decoupleUpdatePriorityFromScheduler,
+  enableDebugTracing,
+  enableSchedulingProfilerComponentStacks,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
@@ -33,6 +34,9 @@ export const {
 
 export const enableProfilerTimer = __PROFILE__;
 export const enableProfilerCommitHooks = __PROFILE__;
+
+// Logs additional User Timing API marks for use with an experimental profiling tool.
+export const enableSchedulingProfiler = __PROFILE__;
 
 // Note: we'll want to remove this when we to userland implementation.
 // For now, we'll turn it on for everyone because it's *already* on for everyone in practice.

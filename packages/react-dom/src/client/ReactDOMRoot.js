@@ -57,8 +57,6 @@ import {
   LegacyRoot,
 } from 'react-reconciler/src/ReactRootTags';
 
-import {enableModernEventSystem} from 'shared/ReactFeatureFlags';
-
 function ReactDOMRoot(container: Container, options: void | RootOptions) {
   this._internalRoot = createRootImpl(container, ConcurrentRoot, options);
 }
@@ -144,11 +142,10 @@ function createRootImpl(
     // hoist it to reduce code-size.
     eagerlyTrapReplayableEvents(container, ((doc: any): Document));
   } else if (
-    enableModernEventSystem &&
     containerNodeType !== DOCUMENT_FRAGMENT_NODE &&
     containerNodeType !== DOCUMENT_NODE
   ) {
-    ensureListeningTo(container, 'onMouseEnter');
+    ensureListeningTo(container, 'onMouseEnter', null);
   }
 
   if (mutableSources) {

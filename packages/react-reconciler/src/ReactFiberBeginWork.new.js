@@ -63,6 +63,7 @@ import {
   Update,
   Ref,
   Deletion,
+  ForceUpdateForLegacySuspense,
 } from './ReactSideEffectTags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
@@ -548,6 +549,13 @@ function updateSimpleMemoComponent(
           workInProgress,
           renderLanes,
         );
+      } else if (
+        (current.effectTag & ForceUpdateForLegacySuspense) !==
+        NoEffect
+      ) {
+        // This is a special case that only exists for legacy mode.
+        // See https://github.com/facebook/react/pull/19216.
+        didReceiveUpdate = true;
       }
     }
   }
@@ -2058,6 +2066,14 @@ function updateSuspensePrimaryChildren(
     currentFallbackChildFragment.nextEffect = null;
     currentFallbackChildFragment.effectTag = Deletion;
     workInProgress.firstEffect = workInProgress.lastEffect = currentFallbackChildFragment;
+    const deletions = workInProgress.deletions;
+    if (deletions === null) {
+      workInProgress.deletions = [currentFallbackChildFragment];
+      // TODO (effects) Rename this to better reflect its new usage (e.g. ChildDeletions)
+      workInProgress.effectTag |= Deletion;
+    } else {
+      deletions.push(currentFallbackChildFragment);
+    }
   }
 
   workInProgress.child = primaryChildFragment;
@@ -2082,9 +2098,18 @@ function updateSuspenseFallbackChildren(
   };
 
   let primaryChildFragment;
-  if ((mode & BlockingMode) === NoMode) {
+  if (
     // In legacy mode, we commit the primary tree as if it successfully
     // completed, even though it's in an inconsistent state.
+    (mode & BlockingMode) === NoMode &&
+    // Make sure we're on the second pass, i.e. the primary child fragment was
+    // already cloned. In legacy mode, the only case where this isn't true is
+    // when DevTools forces us to display a fallback; we skip the first render
+    // pass entirely and go straight to rendering the fallback. (In Concurrent
+    // Mode, SuspenseList can also trigger this scenario, but this is a legacy-
+    // only codepath.)
+    workInProgress.child !== currentPrimaryChildFragment
+  ) {
     const progressedPrimaryFragment: Fiber = (workInProgress.child: any);
     primaryChildFragment = progressedPrimaryFragment;
     primaryChildFragment.childLanes = NoLanes;
@@ -2114,9 +2139,11 @@ function updateSuspenseFallbackChildren(
       workInProgress.firstEffect = primaryChildFragment.firstEffect;
       workInProgress.lastEffect = progressedLastEffect;
       progressedLastEffect.nextEffect = null;
+      workInProgress.deletions = null;
     } else {
       // TODO: Reset this somewhere else? Lol legacy mode is so weird.
       workInProgress.firstEffect = workInProgress.lastEffect = null;
+      workInProgress.deletions = null;
     }
   } else {
     primaryChildFragment = createWorkInProgressOffscreenFiber(
@@ -2795,6 +2822,8 @@ function updatePortalComponent(
   return workInProgress.child;
 }
 
+let hasWarnedAboutUsingNoValuePropOnContextProvider = false;
+
 function updateContextProvider(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -2809,6 +2838,14 @@ function updateContextProvider(
   const newValue = newProps.value;
 
   if (__DEV__) {
+    if (!('value' in newProps)) {
+      if (!hasWarnedAboutUsingNoValuePropOnContextProvider) {
+        hasWarnedAboutUsingNoValuePropOnContextProvider = true;
+        console.error(
+          'The `value` prop is required for the `<Context.Provider>`. Did you misspell it or forget to pass it?',
+        );
+      }
+    }
     const providerPropTypes = workInProgress.type.propTypes;
 
     if (providerPropTypes) {
@@ -2941,7 +2978,7 @@ function bailoutOnAlreadyFinishedWork(
 ): Fiber | null {
   if (current !== null) {
     // Reuse previous dependencies
-    workInProgress.dependencies_new = current.dependencies_new;
+    workInProgress.dependencies = current.dependencies;
   }
 
   if (enableProfilerTimer) {
@@ -3013,8 +3050,15 @@ function remountFiber(
     } else {
       returnFiber.firstEffect = returnFiber.lastEffect = current;
     }
+    const deletions = returnFiber.deletions;
+    if (deletions === null) {
+      returnFiber.deletions = [current];
+      // TODO (effects) Rename this to better reflect its new usage (e.g. ChildDeletions)
+      returnFiber.effectTag |= Deletion;
+    } else {
+      deletions.push(current);
+    }
     current.nextEffect = null;
-    current.effectTag = Deletion;
 
     newWorkInProgress.effectTag |= Placement;
 
@@ -3244,11 +3288,17 @@ function beginWork(
       }
       return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
     } else {
-      // An update was scheduled on this fiber, but there are no new props
-      // nor legacy context. Set this to false. If an update queue or context
-      // consumer produces a changed value, it will set this to true. Otherwise,
-      // the component will assume the children have not changed and bail out.
-      didReceiveUpdate = false;
+      if ((current.effectTag & ForceUpdateForLegacySuspense) !== NoEffect) {
+        // This is a special case that only exists for legacy mode.
+        // See https://github.com/facebook/react/pull/19216.
+        didReceiveUpdate = true;
+      } else {
+        // An update was scheduled on this fiber, but there are no new props
+        // nor legacy context. Set this to false. If an update queue or context
+        // consumer produces a changed value, it will set this to true. Otherwise,
+        // the component will assume the children have not changed and bail out.
+        didReceiveUpdate = false;
+      }
     }
   } else {
     didReceiveUpdate = false;

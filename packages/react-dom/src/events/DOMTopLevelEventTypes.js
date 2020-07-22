@@ -7,12 +7,12 @@
  * @flow
  */
 
-import type {DOMTopLevelEventType} from 'legacy-events/TopLevelEventTypes';
+import type {DOMTopLevelEventType} from '../events/TopLevelEventTypes';
 
 import {
   unsafeCastStringToDOMTopLevelType,
   unsafeCastDOMTopLevelTypeToString,
-} from 'legacy-events/TopLevelEventTypes';
+} from '../events/TopLevelEventTypes';
 import getVendorPrefixedEventName from './getVendorPrefixedEventName';
 
 /**
@@ -32,7 +32,6 @@ export const TOP_ANIMATION_ITERATION = unsafeCastStringToDOMTopLevelType(
 export const TOP_ANIMATION_START = unsafeCastStringToDOMTopLevelType(
   getVendorPrefixedEventName('animationstart'),
 );
-export const TOP_BLUR = unsafeCastStringToDOMTopLevelType('blur');
 export const TOP_CAN_PLAY = unsafeCastStringToDOMTopLevelType('canplay');
 export const TOP_CAN_PLAY_THROUGH = unsafeCastStringToDOMTopLevelType(
   'canplaythrough',
@@ -72,7 +71,6 @@ export const TOP_EMPTIED = unsafeCastStringToDOMTopLevelType('emptied');
 export const TOP_ENCRYPTED = unsafeCastStringToDOMTopLevelType('encrypted');
 export const TOP_ENDED = unsafeCastStringToDOMTopLevelType('ended');
 export const TOP_ERROR = unsafeCastStringToDOMTopLevelType('error');
-export const TOP_FOCUS = unsafeCastStringToDOMTopLevelType('focus');
 export const TOP_GOT_POINTER_CAPTURE = unsafeCastStringToDOMTopLevelType(
   'gotpointercapture',
 );
@@ -152,34 +150,8 @@ export const TOP_WHEEL = unsafeCastStringToDOMTopLevelType('wheel');
 export const TOP_AFTER_BLUR = unsafeCastStringToDOMTopLevelType('afterblur');
 export const TOP_BEFORE_BLUR = unsafeCastStringToDOMTopLevelType('beforeblur');
 
-// List of events that need to be individually attached to media elements.
-// Note that events in this list will *not* be listened to at the top level
-// unless they're explicitly whitelisted in `ReactBrowserEventEmitter.listenTo`.
-export const mediaEventTypes = [
-  TOP_ABORT,
-  TOP_CAN_PLAY,
-  TOP_CAN_PLAY_THROUGH,
-  TOP_DURATION_CHANGE,
-  TOP_EMPTIED,
-  TOP_ENCRYPTED,
-  TOP_ENDED,
-  TOP_ERROR,
-  TOP_LOADED_DATA,
-  TOP_LOADED_METADATA,
-  TOP_LOAD_START,
-  TOP_PAUSE,
-  TOP_PLAY,
-  TOP_PLAYING,
-  TOP_PROGRESS,
-  TOP_RATE_CHANGE,
-  TOP_SEEKED,
-  TOP_SEEKING,
-  TOP_STALLED,
-  TOP_SUSPEND,
-  TOP_TIME_UPDATE,
-  TOP_VOLUME_CHANGE,
-  TOP_WAITING,
-];
+export const TOP_FOCUS_IN = unsafeCastStringToDOMTopLevelType('focusin');
+export const TOP_FOCUS_OUT = unsafeCastStringToDOMTopLevelType('focusout');
 
 export function getRawEventName(topLevelType: DOMTopLevelEventType): string {
   return unsafeCastDOMTopLevelTypeToString(topLevelType);

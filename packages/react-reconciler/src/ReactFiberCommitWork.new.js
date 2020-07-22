@@ -35,7 +35,6 @@ import {
   enableFundamentalAPI,
   enableSuspenseCallback,
   enableScopeAPI,
-  enableCreateEventHandleAPI,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -109,10 +108,8 @@ import {
   updateFundamentalComponent,
   commitHydratedContainer,
   commitHydratedSuspenseInstance,
-  removeInstanceEventHandles,
   clearContainer,
   prepareScopeUpdate,
-  removeScopeEventHandles,
 } from './ReactFiberHostConfig';
 import {
   captureCommitPhaseError,
@@ -928,9 +925,6 @@ function commitUnmount(
       if (enableDeprecatedFlareAPI) {
         unmountDeprecatedResponderListeners(current);
       }
-      if (enableCreateEventHandleAPI && current.ref !== null) {
-        removeInstanceEventHandles(current.stateNode);
-      }
       safelyDetachRef(current);
       return;
     }
@@ -971,10 +965,6 @@ function commitUnmount(
       if (enableScopeAPI) {
         if (enableDeprecatedFlareAPI) {
           unmountDeprecatedResponderListeners(current);
-        }
-        const scopeInstance = current.stateNode;
-        if (enableCreateEventHandleAPI && current.ref !== null) {
-          removeScopeEventHandles(scopeInstance);
         }
         safelyDetachRef(current);
       }
@@ -1034,7 +1024,7 @@ function detachFiberMutation(fiber: Fiber) {
   // field after effects, see: detachFiberAfterEffects.
   fiber.alternate = null;
   fiber.child = null;
-  fiber.dependencies_new = null;
+  fiber.dependencies = null;
   fiber.firstEffect = null;
   fiber.lastEffect = null;
   fiber.memoizedProps = null;
@@ -1750,6 +1740,23 @@ function attachSuspenseRetryListeners(finishedWork: Fiber) {
       }
     });
   }
+}
+
+// This function detects when a Suspense boundary goes from visible to hidden.
+// It returns false if the boundary is already hidden.
+// TODO: Use an effect tag.
+export function isSuspenseBoundaryBeingHidden(
+  current: Fiber | null,
+  finishedWork: Fiber,
+): boolean {
+  if (current !== null) {
+    const oldState: SuspenseState | null = current.memoizedState;
+    if (oldState === null || oldState.dehydrated !== null) {
+      const newState: SuspenseState | null = finishedWork.memoizedState;
+      return newState !== null && newState.dehydrated === null;
+    }
+  }
+  return false;
 }
 
 function commitResetTextContent(current: Fiber) {

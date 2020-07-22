@@ -19,7 +19,7 @@ import type {
 import type {RendererInspectionConfig} from './ReactFiberHostConfig';
 import {FundamentalComponent} from './ReactWorkTags';
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {Lane} from './ReactFiberLane';
+import type {Lane, LanePriority} from './ReactFiberLane';
 import type {SuspenseState} from './ReactFiberSuspenseComponent.new';
 
 import {
@@ -35,6 +35,7 @@ import {
 } from './ReactWorkTags';
 import getComponentName from 'shared/getComponentName';
 import invariant from 'shared/invariant';
+import {enableSchedulingProfiler} from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {getPublicInstance} from './ReactFiberHostConfig';
 import {
@@ -79,6 +80,8 @@ import {
   NoTimestamp,
   getHighestPriorityPendingLanes,
   higherPriorityLane,
+  getCurrentUpdateLanePriority,
+  setCurrentUpdateLanePriority,
 } from './ReactFiberLane';
 import {requestCurrentSuspenseConfig} from './ReactFiberSuspenseConfig';
 import {
@@ -87,6 +90,7 @@ import {
   setRefreshHandler,
   findHostInstancesForRefresh,
 } from './ReactFiberHotReloading.new';
+import {markRenderScheduled} from './SchedulingProfiler';
 
 export {registerMutableSourceForHydration} from './ReactMutableSource.new';
 export {createPortal} from './ReactPortal';
@@ -265,6 +269,10 @@ export function updateContainer(
   const suspenseConfig = requestCurrentSuspenseConfig();
   const lane = requestUpdateLane(current, suspenseConfig);
 
+  if (enableSchedulingProfiler) {
+    markRenderScheduled(lane);
+  }
+
   const context = getContextForSubtree(parentComponent);
   if (container.context === null) {
     container.context = context;
@@ -423,6 +431,18 @@ export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
   scheduleUpdateOnFiber(fiber, lane, eventTime);
   markRetryLaneIfNotHydrated(fiber, lane);
 }
+
+export function runWithPriority<T>(priority: LanePriority, fn: () => T) {
+  const previousPriority = getCurrentUpdateLanePriority();
+  try {
+    setCurrentUpdateLanePriority(priority);
+    return fn();
+  } finally {
+    setCurrentUpdateLanePriority(previousPriority);
+  }
+}
+
+export {getCurrentUpdateLanePriority};
 
 export {findHostInstance};
 
