@@ -7,7 +7,7 @@
  * @flow
  */
 
-import type {TopLevelType, DOMTopLevelEventType} from './TopLevelEventTypes';
+import type {DOMEventName} from './DOMEventNames';
 import {
   type EventSystemFlags,
   SHOULD_NOT_DEFER_CLICK_FOR_FB_SUPPORT_MODE,
@@ -38,39 +38,6 @@ import {
 
 import getEventTarget from './getEventTarget';
 import {
-  TOP_LOAD,
-  TOP_ABORT,
-  TOP_CANCEL,
-  TOP_INVALID,
-  TOP_SCROLL,
-  TOP_CLOSE,
-  TOP_CAN_PLAY,
-  TOP_CAN_PLAY_THROUGH,
-  TOP_DURATION_CHANGE,
-  TOP_EMPTIED,
-  TOP_ENCRYPTED,
-  TOP_ENDED,
-  TOP_ERROR,
-  TOP_WAITING,
-  TOP_VOLUME_CHANGE,
-  TOP_TIME_UPDATE,
-  TOP_SUSPEND,
-  TOP_STALLED,
-  TOP_SEEKING,
-  TOP_SEEKED,
-  TOP_PLAY,
-  TOP_PAUSE,
-  TOP_LOAD_START,
-  TOP_LOADED_DATA,
-  TOP_LOADED_METADATA,
-  TOP_RATE_CHANGE,
-  TOP_PROGRESS,
-  TOP_PLAYING,
-  TOP_CLICK,
-  TOP_SELECTION_CHANGE,
-  getRawEventName,
-} from './DOMTopLevelEventTypes';
-import {
   getClosestInstanceFromNode,
   getEventListenerMap,
   getEventHandlerListeners,
@@ -99,11 +66,11 @@ import {
 } from './EventListener';
 import {removeTrappedEventListener} from './DeprecatedDOMEventResponderSystem';
 import {topLevelEventsToReactNames} from './DOMEventProperties';
-import * as ModernBeforeInputEventPlugin from './plugins/ModernBeforeInputEventPlugin';
-import * as ModernChangeEventPlugin from './plugins/ModernChangeEventPlugin';
-import * as ModernEnterLeaveEventPlugin from './plugins/ModernEnterLeaveEventPlugin';
-import * as ModernSelectEventPlugin from './plugins/ModernSelectEventPlugin';
-import * as ModernSimpleEventPlugin from './plugins/ModernSimpleEventPlugin';
+import * as BeforeInputEventPlugin from './plugins/BeforeInputEventPlugin';
+import * as ChangeEventPlugin from './plugins/ChangeEventPlugin';
+import * as EnterLeaveEventPlugin from './plugins/EnterLeaveEventPlugin';
+import * as SelectEventPlugin from './plugins/SelectEventPlugin';
+import * as SimpleEventPlugin from './plugins/SimpleEventPlugin';
 
 type DispatchListener = {|
   instance: null | Fiber,
@@ -119,15 +86,15 @@ type DispatchEntry = {|
 export type DispatchQueue = Array<DispatchEntry>;
 
 // TODO: remove top-level side effect.
-ModernSimpleEventPlugin.registerEvents();
-ModernEnterLeaveEventPlugin.registerEvents();
-ModernChangeEventPlugin.registerEvents();
-ModernSelectEventPlugin.registerEvents();
-ModernBeforeInputEventPlugin.registerEvents();
+SimpleEventPlugin.registerEvents();
+EnterLeaveEventPlugin.registerEvents();
+ChangeEventPlugin.registerEvents();
+SelectEventPlugin.registerEvents();
+BeforeInputEventPlugin.registerEvents();
 
 function extractEvents(
   dispatchQueue: DispatchQueue,
-  topLevelType: TopLevelType,
+  domEventName: DOMEventName,
   targetInst: null | Fiber,
   nativeEvent: AnyNativeEvent,
   nativeEventTarget: null | EventTarget,
@@ -140,9 +107,9 @@ function extractEvents(
   // should probably be inlined somewhere and have its logic
   // be core the to event system. This would potentially allow
   // us to ship builds of React without the polyfilled plugins below.
-  ModernSimpleEventPlugin.extractEvents(
+  SimpleEventPlugin.extractEvents(
     dispatchQueue,
-    topLevelType,
+    domEventName,
     targetInst,
     nativeEvent,
     nativeEventTarget,
@@ -169,36 +136,36 @@ function extractEvents(
   // that might cause other unknown side-effects that we
   // can't forsee right now.
   if (shouldProcessPolyfillPlugins) {
-    ModernEnterLeaveEventPlugin.extractEvents(
+    EnterLeaveEventPlugin.extractEvents(
       dispatchQueue,
-      topLevelType,
+      domEventName,
       targetInst,
       nativeEvent,
       nativeEventTarget,
       eventSystemFlags,
       targetContainer,
     );
-    ModernChangeEventPlugin.extractEvents(
+    ChangeEventPlugin.extractEvents(
       dispatchQueue,
-      topLevelType,
+      domEventName,
       targetInst,
       nativeEvent,
       nativeEventTarget,
       eventSystemFlags,
       targetContainer,
     );
-    ModernSelectEventPlugin.extractEvents(
+    SelectEventPlugin.extractEvents(
       dispatchQueue,
-      topLevelType,
+      domEventName,
       targetInst,
       nativeEvent,
       nativeEventTarget,
       eventSystemFlags,
       targetContainer,
     );
-    ModernBeforeInputEventPlugin.extractEvents(
+    BeforeInputEventPlugin.extractEvents(
       dispatchQueue,
-      topLevelType,
+      domEventName,
       targetInst,
       nativeEvent,
       nativeEventTarget,
@@ -209,45 +176,46 @@ function extractEvents(
 }
 
 // List of events that need to be individually attached to media elements.
-export const mediaEventTypes = [
-  TOP_ABORT,
-  TOP_CAN_PLAY,
-  TOP_CAN_PLAY_THROUGH,
-  TOP_DURATION_CHANGE,
-  TOP_EMPTIED,
-  TOP_ENCRYPTED,
-  TOP_ENDED,
-  TOP_ERROR,
-  TOP_LOADED_DATA,
-  TOP_LOADED_METADATA,
-  TOP_LOAD_START,
-  TOP_PAUSE,
-  TOP_PLAY,
-  TOP_PLAYING,
-  TOP_PROGRESS,
-  TOP_RATE_CHANGE,
-  TOP_SEEKED,
-  TOP_SEEKING,
-  TOP_STALLED,
-  TOP_SUSPEND,
-  TOP_TIME_UPDATE,
-  TOP_VOLUME_CHANGE,
-  TOP_WAITING,
+export const mediaEventTypes: Array<DOMEventName> = [
+  'abort',
+  'canplay',
+  'canplaythrough',
+  'durationchange',
+  'emptied',
+  'encrypted',
+  'ended',
+  'error',
+  'loadeddata',
+  'loadedmetadata',
+  'loadstart',
+  'pause',
+  'play',
+  'playing',
+  'progress',
+  'ratechange',
+  'seeked',
+  'seeking',
+  'stalled',
+  'suspend',
+  'timeupdate',
+  'volumechange',
+  'waiting',
 ];
 
 // We should not delegate these events to the container, but rather
 // set them on the actual target element itself. This is primarily
 // because these events do not consistently bubble in the DOM.
-export const nonDelegatedEvents: Set<DOMTopLevelEventType> = new Set([
-  TOP_SCROLL,
-  TOP_LOAD,
-  TOP_CANCEL,
-  TOP_CLOSE,
-  TOP_INVALID,
+export const nonDelegatedEvents: Set<DOMEventName> = new Set([
+  'cancel',
+  'close',
+  'invalid',
+  'load',
+  'scroll',
+  'toggle',
   // In order to reduce bytes, we insert the above array of media events
-  // into this Set. Note: some events like "load" and "error" aren't
-  // exclusively media events, but rather than duplicate them, we just
-  // take them from the media events array.
+  // into this Set. Note: the "error" event isn't an exclusive media event,
+  // and can occur on other elements too. Rather than duplicate that event,
+  // we just take it from the media events array.
   ...mediaEventTypes,
 ]);
 
@@ -297,14 +265,14 @@ export function processDispatchQueue(
   for (let i = 0; i < dispatchQueue.length; i++) {
     const {event, listeners} = dispatchQueue[i];
     processDispatchQueueItemsInOrder(event, listeners, inCapturePhase);
-    // Modern event system doesn't use pooling.
+    //  event system doesn't use pooling.
   }
   // This would be a good time to rethrow if any of the event handlers threw.
   rethrowCaughtError();
 }
 
 function dispatchEventsForPlugins(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
   nativeEvent: AnyNativeEvent,
   targetInst: null | Fiber,
@@ -314,7 +282,7 @@ function dispatchEventsForPlugins(
   const dispatchQueue: DispatchQueue = [];
   extractEvents(
     dispatchQueue,
-    topLevelType,
+    domEventName,
     targetInst,
     nativeEvent,
     nativeEventTarget,
@@ -334,13 +302,13 @@ function shouldUpgradeListener(
 }
 
 export function listenToNonDelegatedEvent(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   targetElement: Element,
 ): void {
   const isCapturePhaseListener = false;
   const listenerMap = getEventListenerMap(targetElement);
   const listenerMapKey = getListenerMapKey(
-    topLevelType,
+    domEventName,
     isCapturePhaseListener,
   );
   const listenerEntry = ((listenerMap.get(
@@ -349,7 +317,7 @@ export function listenToNonDelegatedEvent(
   if (listenerEntry === undefined) {
     const listener = addTrappedEventListener(
       targetElement,
-      topLevelType,
+      domEventName,
       PLUGIN_EVENT_SYSTEM | IS_NON_DELEGATED,
       isCapturePhaseListener,
     );
@@ -358,7 +326,7 @@ export function listenToNonDelegatedEvent(
 }
 
 export function listenToNativeEvent(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   isCapturePhaseListener: boolean,
   rootContainerElement: EventTarget,
   targetElement: Element | null,
@@ -367,21 +335,39 @@ export function listenToNativeEvent(
   eventSystemFlags?: EventSystemFlags = PLUGIN_EVENT_SYSTEM,
 ): void {
   let target = rootContainerElement;
-  // TOP_SELECTION_CHANGE needs to be attached to the document
+  // selectionchange needs to be attached to the document
   // otherwise it won't capture incoming events that are only
   // triggered on the document directly.
-  if (topLevelType === TOP_SELECTION_CHANGE) {
+  if (domEventName === 'selectionchange') {
     target = (rootContainerElement: any).ownerDocument;
   }
-  // If the event can be delegated, we can register it to the root container.
-  // Otherwise, we should register the event to the target element.
-  if (targetElement !== null && nonDelegatedEvents.has(topLevelType)) {
+  // If the event can be delegated (or is capture phase), we can
+  // register it to the root container. Otherwise, we should
+  // register the event to the target element and mark it as
+  // a non-delegated event.
+  if (
+    targetElement !== null &&
+    !isCapturePhaseListener &&
+    nonDelegatedEvents.has(domEventName)
+  ) {
+    // For all non-delegated events, apart from scroll, we attach
+    // their event listeners to the respective elements that their
+    // events fire on. That means we can skip this step, as event
+    // listener has already been added previously. However, we
+    // special case the scroll event because the reality is that any
+    // element can scroll.
+    // TODO: ideally, we'd eventually apply the same logic to all
+    // events from the nonDelegatedEvents list. Then we can remove
+    // this special case and use the same logic for all events.
+    if (domEventName !== 'scroll') {
+      return;
+    }
     eventSystemFlags |= IS_NON_DELEGATED;
     target = targetElement;
   }
   const listenerMap = getEventListenerMap(target);
   const listenerMapKey = getListenerMapKey(
-    topLevelType,
+    domEventName,
     isCapturePhaseListener,
   );
   const listenerEntry = ((listenerMap.get(
@@ -397,7 +383,7 @@ export function listenToNativeEvent(
     if (shouldUpgrade) {
       removeTrappedEventListener(
         target,
-        topLevelType,
+        domEventName,
         isCapturePhaseListener,
         ((listenerEntry: any): ElementListenerMapEntry).listener,
       );
@@ -407,7 +393,7 @@ export function listenToNativeEvent(
     }
     const listener = addTrappedEventListener(
       target,
-      topLevelType,
+      domEventName,
       eventSystemFlags,
       isCapturePhaseListener,
       false,
@@ -450,8 +436,15 @@ export function listenToReactEvent(
       }
     }
   } else {
-    // Check if the react event ends in "Capture"
-    const isCapturePhaseListener = reactEvent.substr(-7) === 'Capture';
+    const isCapturePhaseListener =
+      reactEvent.substr(-7) === 'Capture' &&
+      // Edge case: onGotPointerCapture and onLostPointerCapture
+      // end with "Capture" but that's part of their event names.
+      // The Capture versions would end with CaptureCapture.
+      // So we have to check against that.
+      // This check works because none of the events we support
+      // end with "Pointer".
+      reactEvent.substr(-14, 7) !== 'Pointer';
     listenToNativeEvent(
       dependencies[0],
       isCapturePhaseListener,
@@ -463,7 +456,7 @@ export function listenToReactEvent(
 
 function addTrappedEventListener(
   targetContainer: EventTarget,
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
   isCapturePhaseListener: boolean,
   isDeferredListenerForLegacyFBSupport?: boolean,
@@ -472,7 +465,7 @@ function addTrappedEventListener(
 ): any => void {
   let listener = createEventListenerWrapperWithPriority(
     targetContainer,
-    topLevelType,
+    domEventName,
     eventSystemFlags,
     listenerPriority,
   );
@@ -486,8 +479,6 @@ function addTrappedEventListener(
     enableLegacyFBSupport && isDeferredListenerForLegacyFBSupport
       ? (targetContainer: any).ownerDocument
       : targetContainer;
-
-  const rawEventName = getRawEventName(topLevelType);
 
   let unsubscribeListener;
   // When legacyFBSupport is enabled, it's for when we
@@ -506,7 +497,7 @@ function addTrappedEventListener(
     listener = function(...p) {
       removeEventListener(
         targetContainer,
-        rawEventName,
+        domEventName,
         unsubscribeListener,
         isCapturePhaseListener,
       );
@@ -517,14 +508,14 @@ function addTrappedEventListener(
     if (enableCreateEventHandleAPI && isPassiveListener !== undefined) {
       unsubscribeListener = addEventCaptureListenerWithPassiveFlag(
         targetContainer,
-        rawEventName,
+        domEventName,
         listener,
         isPassiveListener,
       );
     } else {
       unsubscribeListener = addEventCaptureListener(
         targetContainer,
-        rawEventName,
+        domEventName,
         listener,
       );
     }
@@ -532,14 +523,14 @@ function addTrappedEventListener(
     if (enableCreateEventHandleAPI && isPassiveListener !== undefined) {
       unsubscribeListener = addEventBubbleListenerWithPassiveFlag(
         targetContainer,
-        rawEventName,
+        domEventName,
         listener,
         isPassiveListener,
       );
     } else {
       unsubscribeListener = addEventBubbleListener(
         targetContainer,
-        rawEventName,
+        domEventName,
         listener,
       );
     }
@@ -548,7 +539,7 @@ function addTrappedEventListener(
 }
 
 function deferClickToDocumentForLegacyFBSupport(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   targetContainer: EventTarget,
 ): void {
   // We defer all click events with legacy FB support mode on.
@@ -557,7 +548,7 @@ function deferClickToDocumentForLegacyFBSupport(
   const isDeferredListenerForLegacyFBSupport = true;
   addTrappedEventListener(
     targetContainer,
-    topLevelType,
+    domEventName,
     PLUGIN_EVENT_SYSTEM | IS_LEGACY_FB_SUPPORT_MODE,
     false,
     isDeferredListenerForLegacyFBSupport,
@@ -576,7 +567,7 @@ function isMatchingRootContainer(
 }
 
 export function dispatchEventForPluginEventSystem(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
   nativeEvent: AnyNativeEvent,
   targetInst: null | Fiber,
@@ -599,10 +590,10 @@ export function dispatchEventForPluginEventSystem(
       // then we can defer the event to the "document", to allow
       // for legacy FB support, where the expected behavior was to
       // match React < 16 behavior of delegated clicks to the doc.
-      topLevelType === TOP_CLICK &&
+      domEventName === 'click' &&
       (eventSystemFlags & SHOULD_NOT_DEFER_CLICK_FOR_FB_SUPPORT_MODE) === 0
     ) {
-      deferClickToDocumentForLegacyFBSupport(topLevelType, targetContainer);
+      deferClickToDocumentForLegacyFBSupport(domEventName, targetContainer);
       return;
     }
     if (targetInst !== null) {
@@ -676,7 +667,7 @@ export function dispatchEventForPluginEventSystem(
 
   batchedEventUpdates(() =>
     dispatchEventsForPlugins(
-      topLevelType,
+      domEventName,
       eventSystemFlags,
       nativeEvent,
       ancestorInst,
@@ -712,14 +703,12 @@ export function accumulateSinglePhaseListeners(
   dispatchQueue: DispatchQueue,
   event: ReactSyntheticEvent,
   inCapturePhase: boolean,
+  accumulateTargetOnly: boolean,
 ): void {
   const bubbled = event._reactName;
   const captured = bubbled !== null ? bubbled + 'Capture' : null;
   const listeners: Array<DispatchListener> = [];
 
-  // If we are not handling EventTarget only phase, then we're doing the
-  // usual two phase accumulation using the React fiber tree to pick up
-  // all relevant useEvent and on* prop events.
   let instance = targetFiber;
   let lastHostComponent = null;
   const targetType = event.type;
@@ -778,7 +767,8 @@ export function accumulateSinglePhaseListeners(
       enableCreateEventHandleAPI &&
       enableScopeAPI &&
       tag === ScopeComponent &&
-      lastHostComponent !== null
+      lastHostComponent !== null &&
+      stateNode !== null
     ) {
       const reactScopeInstance = stateNode;
       const eventHandlerlisteners = getEventHandlerListeners(
@@ -808,6 +798,12 @@ export function accumulateSinglePhaseListeners(
         }
       }
     }
+    // If we are only accumulating events for the target, then we don't
+    // continue to propagate through the React fiber tree to find other
+    // listeners.
+    if (accumulateTargetOnly) {
+      break;
+    }
     instance = instance.return;
   }
   if (listeners.length !== 0) {
@@ -816,9 +812,9 @@ export function accumulateSinglePhaseListeners(
 }
 
 // We should only use this function for:
-// - ModernBeforeInputEventPlugin
-// - ModernChangeEventPlugin
-// - ModernSelectEventPlugin
+// - BeforeInputEventPlugin
+// - ChangeEventPlugin
+// - SelectEventPlugin
 // This is because we only process these plugins
 // in the bubble phase, so we need to accumulate two
 // phase event listeners (via emulation).
@@ -969,7 +965,7 @@ function accumulateEnterLeaveListenersForEvent(
 }
 
 // We should only use this function for:
-// - ModernEnterLeaveEventPlugin
+// - EnterLeaveEventPlugin
 // This is because we only process this plugin
 // in the bubble phase, so we need to accumulate two
 // phase event listeners.
@@ -1013,7 +1009,7 @@ export function accumulateEventHandleNonManagedNodeListeners(
   const eventListeners = getEventHandlerListeners(currentTarget);
   if (eventListeners !== null) {
     const listenersArr = Array.from(eventListeners);
-    const targetType = ((event.type: any): DOMTopLevelEventType);
+    const targetType = ((event.type: any): DOMEventName);
 
     for (let i = 0; i < listenersArr.length; i++) {
       const listener = listenersArr[i];
@@ -1032,7 +1028,7 @@ export function accumulateEventHandleNonManagedNodeListeners(
   }
 }
 
-export function addEventTypeToDispatchConfig(type: DOMTopLevelEventType): void {
+export function addEventTypeToDispatchConfig(type: DOMEventName): void {
   const reactName = topLevelEventsToReactNames.get(type);
   // If we don't have a reactName, then we're dealing with
   // an event type that React does not know about (i.e. a custom event).
@@ -1045,8 +1041,8 @@ export function addEventTypeToDispatchConfig(type: DOMTopLevelEventType): void {
 }
 
 export function getListenerMapKey(
-  topLevelType: DOMTopLevelEventType,
+  domEventName: DOMEventName,
   capture: boolean,
 ): string {
-  return `${getRawEventName(topLevelType)}__${capture ? 'capture' : 'bubble'}`;
+  return `${domEventName}__${capture ? 'capture' : 'bubble'}`;
 }
