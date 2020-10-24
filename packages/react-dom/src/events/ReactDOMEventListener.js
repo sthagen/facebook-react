@@ -8,7 +8,6 @@
  */
 
 import type {AnyNativeEvent} from '../events/PluginModuleType';
-import type {EventPriority} from 'shared/ReactTypes';
 import type {FiberRoot} from 'react-reconciler/src/ReactInternalTypes';
 import type {Container, SuspenseInstance} from '../client/ReactDOMHostConfig';
 import type {DOMEventName} from '../events/DOMEventNames';
@@ -17,7 +16,6 @@ import type {DOMEventName} from '../events/DOMEventNames';
 // CommonJS interop named imports.
 import * as Scheduler from 'scheduler';
 
-import {DEPRECATED_dispatchEventForResponderEventSystem} from './DeprecatedDOMEventResponderSystem';
 import {
   isReplayableDiscreteEvent,
   queueDiscreteEvent,
@@ -33,17 +31,16 @@ import {
 import {HostRoot, SuspenseComponent} from 'react-reconciler/src/ReactWorkTags';
 import {
   type EventSystemFlags,
+  IS_CAPTURE_PHASE,
   IS_LEGACY_FB_SUPPORT_MODE,
-  PLUGIN_EVENT_SYSTEM,
-  RESPONDER_EVENT_SYSTEM,
 } from './EventSystemFlags';
 
 import getEventTarget from './getEventTarget';
 import {getClosestInstanceFromNode} from '../client/ReactDOMComponentTree';
 
 import {
-  enableDeprecatedFlareAPI,
   enableLegacyFBSupport,
+  decoupleUpdatePriorityFromScheduler,
 } from 'shared/ReactFeatureFlags';
 import {
   UserBlockingEvent,
@@ -97,12 +94,8 @@ export function createEventListenerWrapperWithPriority(
   targetContainer: EventTarget,
   domEventName: DOMEventName,
   eventSystemFlags: EventSystemFlags,
-  priority?: EventPriority,
 ): Function {
-  const eventPriority =
-    priority === undefined
-      ? getEventPriorityForPluginSystem(domEventName)
-      : priority;
+  const eventPriority = getEventPriorityForPluginSystem(domEventName);
   let listenerWrapper;
   switch (eventPriority) {
     case DiscreteEvent:
@@ -153,10 +146,25 @@ function dispatchUserBlockingUpdate(
   container,
   nativeEvent,
 ) {
-  // TODO: Double wrapping is necessary while we decouple Scheduler priority.
-  const previousPriority = getCurrentUpdateLanePriority();
-  try {
-    setCurrentUpdateLanePriority(InputContinuousLanePriority);
+  if (decoupleUpdatePriorityFromScheduler) {
+    const previousPriority = getCurrentUpdateLanePriority();
+    try {
+      // TODO: Double wrapping is necessary while we decouple Scheduler priority.
+      setCurrentUpdateLanePriority(InputContinuousLanePriority);
+      runWithPriority(
+        UserBlockingPriority,
+        dispatchEvent.bind(
+          null,
+          domEventName,
+          eventSystemFlags,
+          container,
+          nativeEvent,
+        ),
+      );
+    } finally {
+      setCurrentUpdateLanePriority(previousPriority);
+    }
+  } else {
     runWithPriority(
       UserBlockingPriority,
       dispatchEvent.bind(
@@ -167,8 +175,6 @@ function dispatchUserBlockingUpdate(
         nativeEvent,
       ),
     );
-  } finally {
-    setCurrentUpdateLanePriority(previousPriority);
   }
 }
 
@@ -181,7 +187,19 @@ export function dispatchEvent(
   if (!_enabled) {
     return;
   }
-  if (hasQueuedDiscreteEvents() && isReplayableDiscreteEvent(domEventName)) {
+
+  // TODO: replaying capture phase events is currently broken
+  // because we used to do it during top-level native bubble handlers
+  // but now we use different bubble and capture handlers.
+  // In eager mode, we attach capture listeners early, so we need
+  // to filter them out until we fix the logic to handle them correctly.
+  const allowReplay = (eventSystemFlags & IS_CAPTURE_PHASE) === 0;
+
+  if (
+    allowReplay &&
+    hasQueuedDiscreteEvents() &&
+    isReplayableDiscreteEvent(domEventName)
+  ) {
     // If we already have a queue of discrete events, and this is another discrete
     // event, then we can't dispatch it regardless of its target, since they
     // need to dispatch in order.
@@ -204,69 +222,49 @@ export function dispatchEvent(
 
   if (blockedOn === null) {
     // We successfully dispatched this event.
+    if (allowReplay) {
+      clearIfContinuousEvent(domEventName, nativeEvent);
+    }
+    return;
+  }
+
+  if (allowReplay) {
+    if (isReplayableDiscreteEvent(domEventName)) {
+      // This this to be replayed later once the target is available.
+      queueDiscreteEvent(
+        blockedOn,
+        domEventName,
+        eventSystemFlags,
+        targetContainer,
+        nativeEvent,
+      );
+      return;
+    }
+    if (
+      queueIfContinuousEvent(
+        blockedOn,
+        domEventName,
+        eventSystemFlags,
+        targetContainer,
+        nativeEvent,
+      )
+    ) {
+      return;
+    }
+    // We need to clear only if we didn't queue because
+    // queueing is accummulative.
     clearIfContinuousEvent(domEventName, nativeEvent);
-    return;
   }
-
-  if (isReplayableDiscreteEvent(domEventName)) {
-    // This this to be replayed later once the target is available.
-    queueDiscreteEvent(
-      blockedOn,
-      domEventName,
-      eventSystemFlags,
-      targetContainer,
-      nativeEvent,
-    );
-    return;
-  }
-
-  if (
-    queueIfContinuousEvent(
-      blockedOn,
-      domEventName,
-      eventSystemFlags,
-      targetContainer,
-      nativeEvent,
-    )
-  ) {
-    return;
-  }
-
-  // We need to clear only if we didn't queue because
-  // queueing is accummulative.
-  clearIfContinuousEvent(domEventName, nativeEvent);
 
   // This is not replayable so we'll invoke it but without a target,
   // in case the event system needs to trace it.
-  if (enableDeprecatedFlareAPI) {
-    if (eventSystemFlags & PLUGIN_EVENT_SYSTEM) {
-      dispatchEventForPluginEventSystem(
-        domEventName,
-        eventSystemFlags,
-        nativeEvent,
-        null,
-        targetContainer,
-      );
-    }
-    if (eventSystemFlags & RESPONDER_EVENT_SYSTEM) {
-      // React Flare event system
-      DEPRECATED_dispatchEventForResponderEventSystem(
-        (domEventName: any),
-        null,
-        nativeEvent,
-        getEventTarget(nativeEvent),
-        eventSystemFlags,
-      );
-    }
-  } else {
-    dispatchEventForPluginEventSystem(
-      domEventName,
-      eventSystemFlags,
-      nativeEvent,
-      null,
-      targetContainer,
-    );
-  }
+  dispatchEventForPluginEventSystem(
+    domEventName,
+    eventSystemFlags,
+    nativeEvent,
+    null,
+    targetContainer,
+  );
 }
 
 // Attempt dispatching an event. Returns a SuspenseInstance or Container if it's blocked.
@@ -318,36 +316,13 @@ export function attemptToDispatchEvent(
       }
     }
   }
-
-  if (enableDeprecatedFlareAPI) {
-    if (eventSystemFlags & PLUGIN_EVENT_SYSTEM) {
-      dispatchEventForPluginEventSystem(
-        domEventName,
-        eventSystemFlags,
-        nativeEvent,
-        targetInst,
-        targetContainer,
-      );
-    }
-    if (eventSystemFlags & RESPONDER_EVENT_SYSTEM) {
-      // React Flare event system
-      DEPRECATED_dispatchEventForResponderEventSystem(
-        (domEventName: any),
-        targetInst,
-        nativeEvent,
-        nativeEventTarget,
-        eventSystemFlags,
-      );
-    }
-  } else {
-    dispatchEventForPluginEventSystem(
-      domEventName,
-      eventSystemFlags,
-      nativeEvent,
-      targetInst,
-      targetContainer,
-    );
-  }
+  dispatchEventForPluginEventSystem(
+    domEventName,
+    eventSystemFlags,
+    nativeEvent,
+    targetInst,
+    targetContainer,
+  );
   // We're not blocked on anything.
   return null;
 }

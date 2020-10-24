@@ -143,6 +143,10 @@ const forks = Object.freeze({
           case FB_WWW_PROD:
           case FB_WWW_PROFILING:
             return 'shared/forks/ReactFeatureFlags.www.js';
+          case RN_FB_DEV:
+          case RN_FB_PROD:
+          case RN_FB_PROFILING:
+            return 'shared/forks/ReactFeatureFlags.native-fb.js';
         }
     }
     return null;
@@ -205,8 +209,6 @@ const forks = Object.freeze({
       entry === 'react-test-renderer'
     ) {
       return 'scheduler/src/forks/SchedulerHostConfig.mock';
-    } else if (entry === 'scheduler/unstable_post_task') {
-      return 'scheduler/src/forks/SchedulerHostConfig.post-task';
     }
     return 'scheduler/src/forks/SchedulerHostConfig.default';
   },

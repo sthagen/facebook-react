@@ -45,15 +45,13 @@ export {
   useTransition as unstable_useTransition,
   useDeferredValue,
   useDeferredValue as unstable_useDeferredValue,
+  startTransition,
+  startTransition as unstable_startTransition,
   SuspenseList,
   SuspenseList as unstable_SuspenseList,
-  unstable_withSuspenseConfig,
   // enableBlocksAPI
   block,
   block as unstable_block,
-  // enableDeprecatedFlareAPI
-  DEPRECATED_useResponder,
-  DEPRECATED_createResponder,
   // enableScopeAPI
   unstable_Scope,
   unstable_useOpaqueIdentifier,

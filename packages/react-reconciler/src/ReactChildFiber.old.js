@@ -15,7 +15,7 @@ import type {Fiber} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane';
 
 import getComponentName from 'shared/getComponentName';
-import {Placement, Deletion} from './ReactSideEffectTags';
+import {Placement, Deletion} from './ReactFiberFlags';
 import {
   getIteratorFn,
   REACT_ELEMENT_TYPE,
@@ -29,7 +29,9 @@ import {
   ClassComponent,
   HostText,
   HostPortal,
+  ForwardRef,
   Fragment,
+  SimpleMemoComponent,
   Block,
 } from './ReactWorkTags';
 import invariant from 'shared/invariant';
@@ -94,7 +96,7 @@ if (__DEV__) {
 
     console.error(
       'Each child in a list should have a unique ' +
-        '"key" prop. See https://fb.me/react-warning-keys for ' +
+        '"key" prop. See https://reactjs.org/link/warning-keys for ' +
         'more information.',
     );
   };
@@ -135,7 +137,7 @@ function coerceRef(
                 'will be removed in a future major release. We recommend using ' +
                 'useRef() or createRef() instead. ' +
                 'Learn more about using refs safely here: ' +
-                'https://fb.me/react-strict-mode-string-ref',
+                'https://reactjs.org/link/strict-mode-string-ref',
               componentName,
               mixedRef,
             );
@@ -145,7 +147,7 @@ function coerceRef(
                 'String refs are a source of potential bugs and should be avoided. ' +
                 'We recommend using useRef() or createRef() instead. ' +
                 'Learn more about using refs safely here: ' +
-                'https://fb.me/react-strict-mode-string-ref',
+                'https://reactjs.org/link/strict-mode-string-ref',
               mixedRef,
             );
           }
@@ -164,7 +166,7 @@ function coerceRef(
           'Function components cannot have string refs. ' +
             'We recommend using useRef() instead. ' +
             'Learn more about using refs safely here: ' +
-            'https://fb.me/react-strict-mode-string-ref',
+            'https://reactjs.org/link/strict-mode-string-ref',
         );
         inst = ownerFiber.stateNode;
       }
@@ -210,7 +212,7 @@ function coerceRef(
           '1. You may be adding a ref to a function component\n' +
           "2. You may be adding a ref to a component that was not created inside a component's render method\n" +
           '3. You have multiple copies of React loaded\n' +
-          'See https://fb.me/react-refs-must-have-owner for more information.',
+          'See https://reactjs.org/link/refs-must-have-owner for more information.',
         mixedRef,
       );
     }
@@ -288,7 +290,7 @@ function ChildReconciler(shouldTrackSideEffects) {
       returnFiber.firstEffect = returnFiber.lastEffect = childToDelete;
     }
     childToDelete.nextEffect = null;
-    childToDelete.effectTag = Deletion;
+    childToDelete.flags = Deletion;
   }
 
   function deleteRemainingChildren(
@@ -355,7 +357,7 @@ function ChildReconciler(shouldTrackSideEffects) {
       const oldIndex = current.index;
       if (oldIndex < lastPlacedIndex) {
         // This is a move.
-        newFiber.effectTag = Placement;
+        newFiber.flags = Placement;
         return lastPlacedIndex;
       } else {
         // This item can stay in place.
@@ -363,7 +365,7 @@ function ChildReconciler(shouldTrackSideEffects) {
       }
     } else {
       // This is an insertion.
-      newFiber.effectTag = Placement;
+      newFiber.flags = Placement;
       return lastPlacedIndex;
     }
   }
@@ -372,7 +374,7 @@ function ChildReconciler(shouldTrackSideEffects) {
     // This is simpler for the single child case. We only need to do a
     // placement for inserting new children.
     if (shouldTrackSideEffects && newFiber.alternate === null) {
-      newFiber.effectTag = Placement;
+      newFiber.flags = Placement;
     }
     return newFiber;
   }
@@ -1385,14 +1387,16 @@ function ChildReconciler(shouldTrackSideEffects) {
         // Intentionally fall through to the next case, which handles both
         // functions and classes
         // eslint-disable-next-lined no-fallthrough
-        case FunctionComponent: {
-          const Component = returnFiber.type;
+        case Block:
+        case FunctionComponent:
+        case ForwardRef:
+        case SimpleMemoComponent: {
           invariant(
             false,
             '%s(...): Nothing was returned from render. This usually means a ' +
               'return statement is missing. Or, to render nothing, ' +
               'return null.',
-            Component.displayName || Component.name || 'Component',
+            getComponentName(returnFiber.type) || 'Component',
           );
         }
       }

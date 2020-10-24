@@ -26,8 +26,9 @@ export const {
   deferRenderPhaseUpdateToNextBatch,
   decoupleUpdatePriorityFromScheduler,
   enableDebugTracing,
-  enableSchedulingProfilerComponentStacks,
-  disableOnScrollBubbling,
+  skipUnmountedBoundaries,
+  enableDoubleInvokingEffects,
+  enableUseRefAccessWarning,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
@@ -60,8 +61,6 @@ export const disableJavaScriptURLs = true;
 
 export const disableModulePatternComponents = true;
 
-export const enableDeprecatedFlareAPI = true;
-
 export const enableCreateEventHandleAPI = true;
 
 export const enableFundamentalAPI = false;
@@ -77,6 +76,8 @@ export const enableComponentStackLocations = true;
 export const disableTextareaChildren = __EXPERIMENTAL__;
 
 export const warnUnstableRenderSubtreeIntoContainer = false;
+
+export const enableDiscreteEventFlushingChange = true;
 
 // Enable forked reconciler. Piggy-backing on the "variant" global so that we
 // don't have to add another test dimension. The build system will compile this

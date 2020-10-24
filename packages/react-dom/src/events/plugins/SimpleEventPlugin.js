@@ -15,17 +15,17 @@ import type {EventSystemFlags} from '../EventSystemFlags';
 
 import {
   SyntheticEvent,
-  AnimationEventInterface,
-  ClipboardEventInterface,
-  FocusEventInterface,
-  KeyboardEventInterface,
-  MouseEventInterface,
-  PointerEventInterface,
-  DragEventInterface,
-  TouchEventInterface,
-  TransitionEventInterface,
-  UIEventInterface,
-  WheelEventInterface,
+  SyntheticKeyboardEvent,
+  SyntheticFocusEvent,
+  SyntheticMouseEvent,
+  SyntheticDragEvent,
+  SyntheticTouchEvent,
+  SyntheticAnimationEvent,
+  SyntheticTransitionEvent,
+  SyntheticUIEvent,
+  SyntheticWheelEvent,
+  SyntheticClipboardEvent,
+  SyntheticPointerEvent,
 } from '../../events/SyntheticEvent';
 
 import {
@@ -47,10 +47,7 @@ import {IS_EVENT_HANDLE_NON_MANAGED_NODE} from '../EventSystemFlags';
 import getEventCharCode from '../getEventCharCode';
 import {IS_CAPTURE_PHASE} from '../EventSystemFlags';
 
-import {
-  enableCreateEventHandleAPI,
-  disableOnScrollBubbling,
-} from 'shared/ReactFeatureFlags';
+import {enableCreateEventHandleAPI} from 'shared/ReactFeatureFlags';
 
 function extractEvents(
   dispatchQueue: DispatchQueue,
@@ -65,7 +62,8 @@ function extractEvents(
   if (reactName === undefined) {
     return;
   }
-  let EventInterface;
+  let SyntheticEventCtor = SyntheticEvent;
+  let reactEventType: string = domEventName;
   switch (domEventName) {
     case 'keypress':
       // Firefox creates a keypress event for function keys too. This removes
@@ -77,13 +75,19 @@ function extractEvents(
     /* falls through */
     case 'keydown':
     case 'keyup':
-      EventInterface = KeyboardEventInterface;
+      SyntheticEventCtor = SyntheticKeyboardEvent;
       break;
     case 'focusin':
+      reactEventType = 'focus';
+      SyntheticEventCtor = SyntheticFocusEvent;
+      break;
     case 'focusout':
+      reactEventType = 'blur';
+      SyntheticEventCtor = SyntheticFocusEvent;
+      break;
     case 'beforeblur':
     case 'afterblur':
-      EventInterface = FocusEventInterface;
+      SyntheticEventCtor = SyntheticFocusEvent;
       break;
     case 'click':
       // Firefox creates a click event on right mouse clicks. This removes the
@@ -102,7 +106,7 @@ function extractEvents(
     case 'mouseout':
     case 'mouseover':
     case 'contextmenu':
-      EventInterface = MouseEventInterface;
+      SyntheticEventCtor = SyntheticMouseEvent;
       break;
     case 'drag':
     case 'dragend':
@@ -112,32 +116,32 @@ function extractEvents(
     case 'dragover':
     case 'dragstart':
     case 'drop':
-      EventInterface = DragEventInterface;
+      SyntheticEventCtor = SyntheticDragEvent;
       break;
     case 'touchcancel':
     case 'touchend':
     case 'touchmove':
     case 'touchstart':
-      EventInterface = TouchEventInterface;
+      SyntheticEventCtor = SyntheticTouchEvent;
       break;
     case ANIMATION_END:
     case ANIMATION_ITERATION:
     case ANIMATION_START:
-      EventInterface = AnimationEventInterface;
+      SyntheticEventCtor = SyntheticAnimationEvent;
       break;
     case TRANSITION_END:
-      EventInterface = TransitionEventInterface;
+      SyntheticEventCtor = SyntheticTransitionEvent;
       break;
     case 'scroll':
-      EventInterface = UIEventInterface;
+      SyntheticEventCtor = SyntheticUIEvent;
       break;
     case 'wheel':
-      EventInterface = WheelEventInterface;
+      SyntheticEventCtor = SyntheticWheelEvent;
       break;
     case 'copy':
     case 'cut':
     case 'paste':
-      EventInterface = ClipboardEventInterface;
+      SyntheticEventCtor = SyntheticClipboardEvent;
       break;
     case 'gotpointercapture':
     case 'lostpointercapture':
@@ -147,55 +151,69 @@ function extractEvents(
     case 'pointerout':
     case 'pointerover':
     case 'pointerup':
-      EventInterface = PointerEventInterface;
+      SyntheticEventCtor = SyntheticPointerEvent;
       break;
     default:
       // Unknown event. This is used by createEventHandle.
       break;
   }
-  const event = new SyntheticEvent(
-    reactName,
-    null,
-    nativeEvent,
-    nativeEventTarget,
-    EventInterface,
-  );
 
   const inCapturePhase = (eventSystemFlags & IS_CAPTURE_PHASE) !== 0;
   if (
     enableCreateEventHandleAPI &&
     eventSystemFlags & IS_EVENT_HANDLE_NON_MANAGED_NODE
   ) {
-    accumulateEventHandleNonManagedNodeListeners(
-      dispatchQueue,
-      event,
+    const listeners = accumulateEventHandleNonManagedNodeListeners(
+      // TODO: this cast may not make sense for events like
+      // "focus" where React listens to e.g. "focusin".
+      ((reactEventType: any): DOMEventName),
       targetContainer,
       inCapturePhase,
     );
+    if (listeners.length > 0) {
+      // Intentionally create event lazily.
+      const event = new SyntheticEventCtor(
+        reactName,
+        reactEventType,
+        null,
+        nativeEvent,
+        nativeEventTarget,
+      );
+      dispatchQueue.push({event, listeners});
+    }
   } else {
     // Some events don't bubble in the browser.
     // In the past, React has always bubbled them, but this can be surprising.
     // We're going to try aligning closer to the browser behavior by not bubbling
     // them in React either. We'll start by not bubbling onScroll, and then expand.
-    let accumulateTargetOnly = false;
-    if (disableOnScrollBubbling) {
-      accumulateTargetOnly =
-        !inCapturePhase &&
-        // TODO: ideally, we'd eventually add all events from
-        // nonDelegatedEvents list in DOMPluginEventSystem.
-        // Then we can remove this special list.
-        domEventName === 'scroll';
-    }
+    const accumulateTargetOnly =
+      !inCapturePhase &&
+      // TODO: ideally, we'd eventually add all events from
+      // nonDelegatedEvents list in DOMPluginEventSystem.
+      // Then we can remove this special list.
+      // This is a breaking change that can wait until React 18.
+      domEventName === 'scroll';
 
-    accumulateSinglePhaseListeners(
+    const listeners = accumulateSinglePhaseListeners(
       targetInst,
-      dispatchQueue,
-      event,
+      reactName,
+      nativeEvent.type,
       inCapturePhase,
       accumulateTargetOnly,
+      nativeEvent,
     );
+    if (listeners.length > 0) {
+      // Intentionally create event lazily.
+      const event = new SyntheticEventCtor(
+        reactName,
+        reactEventType,
+        null,
+        nativeEvent,
+        nativeEventTarget,
+      );
+      dispatchQueue.push({event, listeners});
+    }
   }
-  return event;
 }
 
 export {registerSimpleEvents as registerEvents, extractEvents};

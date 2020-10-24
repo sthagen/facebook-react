@@ -29,7 +29,7 @@ describe('ReactFresh', () => {
       ReactFreshRuntime.injectIntoGlobalHook(global);
       ReactDOM = require('react-dom');
       Scheduler = require('scheduler');
-      act = require('react-dom/test-utils').act;
+      act = require('react-dom/test-utils').unstable_concurrentAct;
       createReactClass = require('create-react-class/factory')(
         React.Component,
         React.isValidElement,
@@ -3612,11 +3612,26 @@ describe('ReactFresh', () => {
       const useStore = () => {};
       expect(ReactFreshRuntime.isLikelyComponentType(useStore)).toBe(false);
       expect(ReactFreshRuntime.isLikelyComponentType(useTheme)).toBe(false);
+      const rogueProxy = new Proxy(
+        {},
+        {
+          get(target, property) {
+            throw new Error();
+          },
+        },
+      );
+      expect(ReactFreshRuntime.isLikelyComponentType(rogueProxy)).toBe(false);
 
       // These seem like function components.
       const Button = () => {};
       expect(ReactFreshRuntime.isLikelyComponentType(Button)).toBe(true);
       expect(ReactFreshRuntime.isLikelyComponentType(Widget)).toBe(true);
+      const ProxyButton = new Proxy(Button, {
+        get(target, property) {
+          return target[property];
+        },
+      });
+      expect(ReactFreshRuntime.isLikelyComponentType(ProxyButton)).toBe(true);
       const anon = (() => () => {})();
       anon.displayName = 'Foo';
       expect(ReactFreshRuntime.isLikelyComponentType(anon)).toBe(true);
@@ -3624,8 +3639,14 @@ describe('ReactFresh', () => {
       // These seem like class components.
       class Btn extends React.Component {}
       class PureBtn extends React.PureComponent {}
+      const ProxyBtn = new Proxy(Btn, {
+        get(target, property) {
+          return target[property];
+        },
+      });
       expect(ReactFreshRuntime.isLikelyComponentType(Btn)).toBe(true);
       expect(ReactFreshRuntime.isLikelyComponentType(PureBtn)).toBe(true);
+      expect(ReactFreshRuntime.isLikelyComponentType(ProxyBtn)).toBe(true);
       expect(
         ReactFreshRuntime.isLikelyComponentType(
           createReactClass({render() {}}),
@@ -3748,7 +3769,7 @@ describe('ReactFresh', () => {
       React = require('react');
       ReactDOM = require('react-dom');
       Scheduler = require('scheduler');
-      act = require('react-dom/test-utils').act;
+      act = require('react-dom/test-utils').unstable_concurrentAct;
 
       // Important! Inject into the global hook *after* ReactDOM runs:
       ReactFreshRuntime = require('react-refresh/runtime');

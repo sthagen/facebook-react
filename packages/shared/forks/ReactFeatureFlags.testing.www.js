@@ -13,7 +13,6 @@ import typeof * as ExportsType from './ReactFeatureFlags.testing.www';
 export const debugRenderPhaseSideEffectsForStrictMode = false;
 export const enableDebugTracing = false;
 export const enableSchedulingProfiler = false;
-export const enableSchedulingProfilerComponentStacks = false;
 export const warnAboutDeprecatedLifecycles = true;
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = false;
 export const enableProfilerTimer = false;
@@ -26,7 +25,6 @@ export const enableLazyElements = false;
 export const disableJavaScriptURLs = true;
 export const disableInputAttributeSyncing = false;
 export const enableSchedulerDebugging = false;
-export const enableDeprecatedFlareAPI = true;
 export const enableFundamentalAPI = false;
 export const enableScopeAPI = true;
 export const enableCreateEventHandleAPI = true;
@@ -44,11 +42,15 @@ export const warnAboutSpreadingKeyToJSX = false;
 export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = !__EXPERIMENTAL__;
 export const enableFilterEmptyStringAttributesDOM = false;
-export const disableOnScrollBubbling = true;
+export const skipUnmountedBoundaries = __EXPERIMENTAL__;
 
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = true;
 export const decoupleUpdatePriorityFromScheduler = false;
+export const enableDiscreteEventFlushingChange = true;
+
+export const enableDoubleInvokingEffects = false;
+export const enableUseRefAccessWarning = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars
