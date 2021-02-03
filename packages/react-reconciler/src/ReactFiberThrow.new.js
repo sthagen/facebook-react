@@ -188,8 +188,6 @@ function throwException(
 ) {
   // The source fiber did not complete.
   sourceFiber.flags |= Incomplete;
-  // Its effect list is no longer valid.
-  sourceFiber.firstEffect = sourceFiber.lastEffect = null;
 
   if (
     value !== null &&
@@ -295,7 +293,7 @@ function throwException(
               // prevent a bail out.
               const update = createUpdate(NoTimestamp, SyncLane);
               update.tag = ForceUpdate;
-              enqueueUpdate(sourceFiber, update);
+              enqueueUpdate(sourceFiber, update, SyncLane);
             }
           }
 

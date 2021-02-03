@@ -46,6 +46,7 @@ export const enableComponentStackLocations = false;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = false;
 export const disableNativeComponentFrames = false;
+export const skipUnmountedBoundaries = false;
 
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = true;
@@ -57,6 +58,8 @@ export const enableUseRefAccessWarning = false;
 
 export const enableRecursiveCommitTraversal = false;
 export const disableSchedulerTimeoutInWorkLoop = false;
+export const enableTransitionEntanglement = false;
+export const enableDiscreteEventMicroTasks = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

@@ -4,6 +4,7 @@
 
 const {join} = require('path');
 const {readJsonSync} = require('fs-extra');
+const clear = require('clear');
 const {getPublicPackages, handleError} = require('./utils');
 const theme = require('./theme');
 
@@ -48,10 +49,36 @@ const run = async () => {
     await confirmVersionAndTags(params);
     await validateSkipPackages(params);
     await checkNPMPermissions(params);
-    const otp = await promptForOTP(params);
-    await publishToNPM(params, otp);
-    await updateStableVersionNumbers(params);
-    await printFollowUpInstructions(params);
+
+    const packageNames = params.packages;
+
+    if (params.ci) {
+      for (let i = 0; i < packageNames.length; i++) {
+        const packageName = packageNames[i];
+        await publishToNPM(params, packageName, null);
+      }
+    } else {
+      clear();
+      let otp = await promptForOTP(params);
+      for (let i = 0; i < packageNames.length; ) {
+        const packageName = packageNames[i];
+        try {
+          await publishToNPM(params, packageName, otp);
+          i++;
+        } catch (error) {
+          console.error(error.message);
+          console.log();
+          console.log(
+            theme.error`Publish failed. Enter a fresh otp code to retry.`
+          );
+          otp = await promptForOTP(params);
+          // Try publishing package again
+          continue;
+        }
+      }
+      await updateStableVersionNumbers(params);
+      await printFollowUpInstructions(params);
+    }
   } catch (error) {
     handleError(error);
   }

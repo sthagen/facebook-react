@@ -60,6 +60,9 @@ export const MountPassiveDev = /*              */ 0b10000000000000000000;
 // don't contain effects, by checking subtreeFlags.
 
 export const BeforeMutationMask =
+  // TODO: Remove Update flag from before mutation phase by re-landing Visiblity
+  // flag logic (see #20043)
+  Update |
   Snapshot |
   (enableCreateEventHandleAPI
     ? // createEventHandle needs to visit deleted and hidden trees to
@@ -78,6 +81,8 @@ export const MutationMask =
   Hydrating |
   Visibility;
 export const LayoutMask = Update | Callback | Ref;
+
+// TODO: Split into PassiveMountMask and PassiveUnmountMask
 export const PassiveMask = Passive | ChildDeletion;
 
 // Union of tags that don't get reset on clones.

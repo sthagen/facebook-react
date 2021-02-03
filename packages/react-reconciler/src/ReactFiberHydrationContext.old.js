@@ -24,13 +24,7 @@ import {
   HostRoot,
   SuspenseComponent,
 } from './ReactWorkTags';
-import {
-  Deletion,
-  ChildDeletion,
-  Placement,
-  Hydrating,
-  StaticMask,
-} from './ReactFiberFlags';
+import {ChildDeletion, Placement, Hydrating} from './ReactFiberFlags';
 import invariant from 'shared/invariant';
 
 import {
@@ -130,28 +124,14 @@ function deleteHydratableInstance(
   const childToDelete = createFiberFromHostInstanceForDeletion();
   childToDelete.stateNode = instance;
   childToDelete.return = returnFiber;
-  childToDelete.flags = (childToDelete.flags & StaticMask) | Deletion;
 
-  // This might seem like it belongs on progressedFirstDeletion. However,
-  // these children are not part of the reconciliation list of children.
-  // Even if we abort and rereconcile the children, that will try to hydrate
-  // again and the nodes are still in the host tree so these will be
-  // recreated.
-  if (returnFiber.lastEffect !== null) {
-    returnFiber.lastEffect.nextEffect = childToDelete;
-    returnFiber.lastEffect = childToDelete;
-  } else {
-    returnFiber.firstEffect = returnFiber.lastEffect = childToDelete;
-  }
-
-  let deletions = returnFiber.deletions;
+  const deletions = returnFiber.deletions;
   if (deletions === null) {
-    deletions = returnFiber.deletions = [childToDelete];
+    returnFiber.deletions = [childToDelete];
     returnFiber.flags |= ChildDeletion;
   } else {
     deletions.push(childToDelete);
   }
-  childToDelete.deletions = deletions;
 }
 
 function insertNonHydratedInstance(returnFiber: Fiber, fiber: Fiber) {

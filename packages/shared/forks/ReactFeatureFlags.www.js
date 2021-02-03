@@ -26,10 +26,13 @@ export const {
   deferRenderPhaseUpdateToNextBatch,
   decoupleUpdatePriorityFromScheduler,
   enableDebugTracing,
+  skipUnmountedBoundaries,
   enableDoubleInvokingEffects,
   enableUseRefAccessWarning,
   disableNativeComponentFrames,
   disableSchedulerTimeoutInWorkLoop,
+  enableTransitionEntanglement,
+  enableDiscreteEventMicroTasks,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.

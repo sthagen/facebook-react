@@ -67,7 +67,6 @@ import {
   DidCapture,
   Update,
   Ref,
-  Deletion,
   ChildDeletion,
   ForceUpdateForLegacySuspense,
   StaticMask,
@@ -2199,18 +2198,13 @@ function updateSuspensePrimaryChildren(
   primaryChildFragment.sibling = null;
   if (currentFallbackChildFragment !== null) {
     // Delete the fallback child fragment
-    currentFallbackChildFragment.nextEffect = null;
-    currentFallbackChildFragment.flags =
-      (currentFallbackChildFragment.flags & StaticMask) | Deletion;
-    workInProgress.firstEffect = workInProgress.lastEffect = currentFallbackChildFragment;
-    let deletions = workInProgress.deletions;
+    const deletions = workInProgress.deletions;
     if (deletions === null) {
-      deletions = workInProgress.deletions = [currentFallbackChildFragment];
+      workInProgress.deletions = [currentFallbackChildFragment];
       workInProgress.flags |= ChildDeletion;
     } else {
       deletions.push(currentFallbackChildFragment);
     }
-    currentFallbackChildFragment.deletions = deletions;
   }
 
   workInProgress.child = primaryChildFragment;
@@ -2265,22 +2259,9 @@ function updateSuspenseFallbackChildren(
         currentPrimaryChildFragment.treeBaseDuration;
     }
 
-    if (currentFallbackChildFragment !== null) {
-      // The fallback fiber was added as a deletion effect during the first
-      // pass. However, since we're going to remain on the fallback, we no
-      // longer want to delete it. So we need to remove it from the list.
-      // Deletions are stored on the same list as effects, and are always added
-      // to the front. So we know that the first effect must be the fallback
-      // deletion effect, and everything after that is from the primary free.
-      const firstPrimaryTreeEffect = currentFallbackChildFragment.nextEffect;
-      if (firstPrimaryTreeEffect !== null) {
-        workInProgress.firstEffect = firstPrimaryTreeEffect;
-      } else {
-        // TODO: Reset this somewhere else? Lol legacy mode is so weird.
-        workInProgress.firstEffect = workInProgress.lastEffect = null;
-      }
-    }
-
+    // The fallback fiber was added as a deletion during the first pass.
+    // However, since we're going to remain on the fallback, we no longer want
+    // to delete it.
     workInProgress.deletions = null;
   } else {
     primaryChildFragment = createWorkInProgressOffscreenFiber(
@@ -2777,7 +2758,6 @@ function initSuspenseListRenderState(
   tail: null | Fiber,
   lastContentRow: null | Fiber,
   tailMode: SuspenseListTailMode,
-  lastEffectBeforeRendering: null | Fiber,
 ): void {
   const renderState: null | SuspenseListRenderState =
     workInProgress.memoizedState;
@@ -2789,7 +2769,6 @@ function initSuspenseListRenderState(
       last: lastContentRow,
       tail: tail,
       tailMode: tailMode,
-      lastEffect: lastEffectBeforeRendering,
     }: SuspenseListRenderState);
   } else {
     // We can reuse the existing object from previous renders.
@@ -2799,7 +2778,6 @@ function initSuspenseListRenderState(
     renderState.last = lastContentRow;
     renderState.tail = tail;
     renderState.tailMode = tailMode;
-    renderState.lastEffect = lastEffectBeforeRendering;
   }
 }
 
@@ -2881,7 +2859,6 @@ function updateSuspenseListComponent(
           tail,
           lastContentRow,
           tailMode,
-          workInProgress.lastEffect,
         );
         break;
       }
@@ -2913,7 +2890,6 @@ function updateSuspenseListComponent(
           tail,
           null, // last
           tailMode,
-          workInProgress.lastEffect,
         );
         break;
       }
@@ -2924,7 +2900,6 @@ function updateSuspenseListComponent(
           null, // tail
           null, // last
           undefined,
-          workInProgress.lastEffect,
         );
         break;
       }
@@ -3184,24 +3159,13 @@ function remountFiber(
 
     // Delete the old fiber and place the new one.
     // Since the old fiber is disconnected, we have to schedule it manually.
-    const last = returnFiber.lastEffect;
-    if (last !== null) {
-      last.nextEffect = current;
-      returnFiber.lastEffect = current;
-    } else {
-      returnFiber.firstEffect = returnFiber.lastEffect = current;
-    }
-    current.nextEffect = null;
-    current.flags = (current.flags & StaticMask) | Deletion;
-
-    let deletions = returnFiber.deletions;
+    const deletions = returnFiber.deletions;
     if (deletions === null) {
-      deletions = returnFiber.deletions = [current];
+      returnFiber.deletions = [current];
       returnFiber.flags |= ChildDeletion;
     } else {
       deletions.push(current);
     }
-    current.deletions = deletions;
 
     newWorkInProgress.flags |= Placement;
 

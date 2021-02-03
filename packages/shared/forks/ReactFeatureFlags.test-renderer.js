@@ -23,7 +23,7 @@ export const enableSchedulerTracing = __PROFILE__;
 export const enableSuspenseServerRenderer = false;
 export const enableSelectiveHydration = false;
 export const enableLazyElements = false;
-export const enableCache = false;
+export const enableCache = __EXPERIMENTAL__;
 export const disableJavaScriptURLs = false;
 export const disableInputAttributeSyncing = false;
 export const enableSchedulerDebugging = false;
@@ -45,6 +45,7 @@ export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = false;
 export const disableNativeComponentFrames = false;
+export const skipUnmountedBoundaries = false;
 
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = true;
@@ -56,6 +57,8 @@ export const enableUseRefAccessWarning = false;
 
 export const enableRecursiveCommitTraversal = false;
 export const disableSchedulerTimeoutInWorkLoop = false;
+export const enableTransitionEntanglement = false;
+export const enableDiscreteEventMicroTasks = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

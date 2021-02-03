@@ -13,12 +13,7 @@ import type {Fiber} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane.old';
 
 import getComponentName from 'shared/getComponentName';
-import {
-  Deletion,
-  ChildDeletion,
-  Placement,
-  StaticMask,
-} from './ReactFiberFlags';
+import {Placement, ChildDeletion} from './ReactFiberFlags';
 import {
   getIteratorFn,
   REACT_ELEMENT_TYPE,
@@ -222,14 +217,15 @@ function coerceRef(
 
 function throwOnInvalidObjectType(returnFiber: Fiber, newChild: Object) {
   if (returnFiber.type !== 'textarea') {
+    const childString = Object.prototype.toString.call(newChild);
     invariant(
       false,
       'Objects are not valid as a React child (found: %s). ' +
         'If you meant to render a collection of children, use an array ' +
         'instead.',
-      Object.prototype.toString.call(newChild) === '[object Object]'
+      childString === '[object Object]'
         ? 'object with keys {' + Object.keys(newChild).join(', ') + '}'
-        : newChild,
+        : childString,
     );
   }
 }
@@ -267,37 +263,13 @@ function ChildReconciler(shouldTrackSideEffects) {
       // Noop.
       return;
     }
-    // Deletions are added in reversed order so we add it to the front.
-    // At this point, the return fiber's effect list is empty except for
-    // deletions, so we can just append the deletion to the list. The remaining
-    // effects aren't added until the complete phase. Once we implement
-    // resuming, this may not be true.
-    const last = returnFiber.lastEffect;
-    if (last !== null) {
-      last.nextEffect = childToDelete;
-      returnFiber.lastEffect = childToDelete;
-    } else {
-      returnFiber.firstEffect = returnFiber.lastEffect = childToDelete;
-    }
-    childToDelete.nextEffect = null;
-    childToDelete.flags = (childToDelete.flags & StaticMask) | Deletion;
-
-    let deletions = returnFiber.deletions;
+    const deletions = returnFiber.deletions;
     if (deletions === null) {
-      deletions = returnFiber.deletions = [childToDelete];
+      returnFiber.deletions = [childToDelete];
       returnFiber.flags |= ChildDeletion;
     } else {
       deletions.push(childToDelete);
     }
-    // Stash a reference to the return fiber's deletion array on each of the
-    // deleted children. This is really weird, but it's a temporary workaround
-    // while we're still using the effect list to traverse effect fibers. A
-    // better workaround would be to follow the `.return` pointer in the commit
-    // phase, but unfortunately we can't assume that `.return` points to the
-    // correct fiber, even in the commit phase, because `findDOMNode` might
-    // mutate it.
-    // TODO: Remove this line.
-    childToDelete.deletions = deletions;
   }
 
   function deleteRemainingChildren(
