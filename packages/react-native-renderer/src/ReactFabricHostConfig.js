@@ -348,7 +348,7 @@ export const warnsIfNotActing = false;
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
-export function queueMicrotask(callback: Function) {
+export function scheduleMicrotask(callback: Function) {
   invariant(false, 'Not implemented.');
 }
 
@@ -437,30 +437,6 @@ export function replaceContainerChildren(
   container: Container,
   newChildren: ChildSet,
 ): void {}
-
-export function getFundamentalComponentInstance(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
-
-export function mountFundamentalComponent(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
-
-export function shouldUpdateFundamentalComponent(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
-
-export function updateFundamentalComponent(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
-
-export function unmountFundamentalComponent(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
-
-export function cloneFundamentalInstance(fundamentalInstance: any) {
-  throw new Error('Not yet implemented.');
-}
 
 export function getInstanceFromNode(node: any) {
   throw new Error('Not yet implemented.');

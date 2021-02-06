@@ -330,7 +330,7 @@ export function getChildHostContext() {
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
-export function queueMicrotask(callback: Function) {
+export function scheduleMicrotask(callback: Function) {
   invariant(false, 'Not implemented.');
 }
 
@@ -426,26 +426,6 @@ export function unhideTextInstance(textInstance, text): void {
 
 export function clearContainer(container) {
   // TODO Implement this
-}
-
-export function getFundamentalComponentInstance(fundamentalInstance) {
-  throw new Error('Not yet implemented.');
-}
-
-export function mountFundamentalComponent(fundamentalInstance) {
-  throw new Error('Not yet implemented.');
-}
-
-export function shouldUpdateFundamentalComponent(fundamentalInstance) {
-  throw new Error('Not yet implemented.');
-}
-
-export function updateFundamentalComponent(fundamentalInstance) {
-  throw new Error('Not yet implemented.');
-}
-
-export function unmountFundamentalComponent(fundamentalInstance) {
-  throw new Error('Not yet implemented.');
 }
 
 export function getInstanceFromNode(node) {

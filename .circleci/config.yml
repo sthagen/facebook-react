@@ -358,16 +358,22 @@ jobs:
         type: string
       release_channel:
         type: string
+      dist_tag:
+        type: string
     docker: *docker
     environment: *environment
     steps:
       - checkout
       - run: yarn workspaces info | head -n -1 > workspace_info.txt
       - *restore_node_modules
-      # TODO: This doesn't actually publish anything yet. Just logs the inputs.
-      - run: |
-          echo "<< parameters.commit_sha >>"
-          echo "<< parameters.release_channel >>"
+      - run:
+          name: Run publish script
+          command: |
+            git fetch origin master
+            cd ./scripts/release && yarn && cd ../../
+            scripts/release/prepare-release-from-ci.js --skipTests -r << parameters.release_channel >> --commit=<< parameters.commit_sha >>
+            cp ./scripts/release/ci-npmrc ~/.npmrc
+            scripts/release/publish.js --ci --tags << parameters.dist_tag >>
 
 workflows:
   version: 2
@@ -509,19 +515,51 @@ workflows:
           requires:
             - setup
 
-  # TODO: This workflow doesn't do anything yet, but you should be able to
-  # trigger it using the CircleCI API
+  # Used to publish a prerelease manually via the command line
   publish_preleases:
     when: << pipeline.parameters.prerelease_commit_sha >>
     jobs:
       - setup
       - publish_prerelease:
+          name: Publish to Next channel
           requires:
             - setup
-          matrix:
-            parameters:
-              commit_sha:
-                - << pipeline.parameters.prerelease_commit_sha >>
-              release_channel:
-                - stable
-                - experimental
+          commit_sha: << pipeline.parameters.prerelease_commit_sha >>
+          release_channel: stable
+          dist_tag: next
+      - publish_prerelease:
+          name: Publish to Experimental channel
+          requires:
+            - setup
+          commit_sha: << pipeline.parameters.prerelease_commit_sha >>
+          release_channel: experimental
+          dist_tag: experimental
+
+  # Publishes on a cron schedule
+  publish_preleases_nightly:
+    unless: << pipeline.parameters.prerelease_commit_sha >>
+    triggers:
+      - schedule:
+          # At 10 minutes past 16:00 on Mon, Tue, Wed, Thu, and Fri
+          cron: "10 16 * * 1,2,3,4,5"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - setup
+      - publish_prerelease:
+          name: Publish to Next channel
+          requires:
+            - setup
+          commit_sha: master
+          release_channel: stable
+          dist_tag: next
+      - publish_prerelease:
+          name: Publish to Experimental channel
+          requires:
+            - setup
+          commit_sha: master
+          release_channel: experimental
+          dist_tag: experimental
+
