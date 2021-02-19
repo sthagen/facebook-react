@@ -85,6 +85,9 @@ describe('SchedulingProfiler', () => {
     delete global.performance;
   });
 
+  // This is coupled to implementation
+  const DEFAULT_LANE = 128;
+
   // @gate !enableSchedulingProfiler
   it('should not mark if enableSchedulingProfiler is false', () => {
     ReactTestRenderer.create(<div />);
@@ -118,7 +121,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -126,10 +129,10 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--layout-effects-stop',
       '--commit-stop',
     ]);
@@ -153,8 +156,8 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
-      '--render-start-512',
+      `--schedule-render-${DEFAULT_LANE}`,
+      `--render-start-${DEFAULT_LANE}`,
       '--render-yield',
     ]);
   });
@@ -237,7 +240,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -245,11 +248,11 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--suspense-suspend-0-Example',
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--layout-effects-stop',
       '--commit-stop',
     ]);
@@ -276,7 +279,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -284,11 +287,11 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--suspense-suspend-0-Example',
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--layout-effects-stop',
       '--commit-stop',
     ]);
@@ -315,7 +318,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -323,10 +326,10 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--schedule-state-update-1-Example',
       '--layout-effects-stop',
       '--render-start-1',
@@ -352,7 +355,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -360,10 +363,10 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--schedule-forced-update-1-Example',
       '--layout-effects-stop',
       '--render-start-1',
@@ -390,7 +393,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -399,11 +402,7 @@ describe('SchedulingProfiler', () => {
       expect(Scheduler).toFlushUntilNextPaint([]);
     }).toErrorDev('Cannot update during an existing state transition');
 
-    gate(({old}) =>
-      old
-        ? expectMarksToContain('--schedule-state-update-1024-Example')
-        : expectMarksToContain('--schedule-state-update-512-Example'),
-    );
+    expectMarksToContain(`--schedule-state-update-${DEFAULT_LANE}-Example`);
   });
 
   // @gate enableSchedulingProfiler
@@ -422,7 +421,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -431,11 +430,7 @@ describe('SchedulingProfiler', () => {
       expect(Scheduler).toFlushUntilNextPaint([]);
     }).toErrorDev('Cannot update during an existing state transition');
 
-    gate(({old}) =>
-      old
-        ? expectMarksToContain('--schedule-forced-update-1024-Example')
-        : expectMarksToContain('--schedule-forced-update-512-Example'),
-    );
+    expectMarksToContain(`--schedule-forced-update-${DEFAULT_LANE}-Example`);
   });
 
   // @gate enableSchedulingProfiler
@@ -452,7 +447,7 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
+      `--schedule-render-${DEFAULT_LANE}`,
     ]);
 
     clearPendingMarks();
@@ -460,10 +455,10 @@ describe('SchedulingProfiler', () => {
     expect(Scheduler).toFlushUntilNextPaint([]);
 
     expectMarksToEqual([
-      '--render-start-512',
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--schedule-state-update-1-Example',
       '--layout-effects-stop',
       '--render-start-1',
@@ -474,6 +469,8 @@ describe('SchedulingProfiler', () => {
     ]);
   });
 
+  // This test is coupled to lane implementation details, so I'm disabling it in
+  // the new fork until it stabilizes so we don't have to repeatedly update it.
   // @gate enableSchedulingProfiler
   it('should mark cascading passive updates', () => {
     function Example() {
@@ -490,19 +487,19 @@ describe('SchedulingProfiler', () => {
 
     expectMarksToEqual([
       `--react-init-${ReactVersion}`,
-      '--schedule-render-512',
-      '--render-start-512',
+      `--schedule-render-${DEFAULT_LANE}`,
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-512',
-      '--layout-effects-start-512',
+      `--commit-start-${DEFAULT_LANE}`,
+      `--layout-effects-start-${DEFAULT_LANE}`,
       '--layout-effects-stop',
       '--commit-stop',
-      '--passive-effects-start-512',
-      '--schedule-state-update-1024-Example',
+      `--passive-effects-start-${DEFAULT_LANE}`,
+      `--schedule-state-update-${DEFAULT_LANE}-Example`,
       '--passive-effects-stop',
-      '--render-start-1024',
+      `--render-start-${DEFAULT_LANE}`,
       '--render-stop',
-      '--commit-start-1024',
+      `--commit-start-${DEFAULT_LANE}`,
       '--commit-stop',
     ]);
   });
@@ -521,10 +518,6 @@ describe('SchedulingProfiler', () => {
       ReactTestRenderer.create(<Example />, {unstable_isConcurrent: true});
     });
 
-    gate(({old}) =>
-      old
-        ? expectMarksToContain('--schedule-state-update-1024-Example')
-        : expectMarksToContain('--schedule-state-update-512-Example'),
-    );
+    expectMarksToContain(`--schedule-state-update-${DEFAULT_LANE}-Example`);
   });
 });

@@ -8,6 +8,14 @@
  */
 
 import {REACT_OPAQUE_ID_TYPE} from 'shared/ReactSymbols';
+import {enableNewReconciler} from 'shared/ReactFeatureFlags';
+
+import {DefaultLanePriority as DefaultLanePriority_old} from 'react-reconciler/src/ReactFiberLane.old';
+import {DefaultLanePriority as DefaultLanePriority_new} from 'react-reconciler/src/ReactFiberLane.new';
+
+const DefaultLanePriority = enableNewReconciler
+  ? DefaultLanePriority_new
+  : DefaultLanePriority_old;
 
 export type Type = string;
 export type Props = Object;
@@ -50,6 +58,7 @@ export type RendererInspectionConfig = $ReadOnly<{||}>;
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMicrotasks';
 
 const NO_CONTEXT = {};
 const UPDATE_SIGNAL = {};
@@ -213,26 +222,16 @@ export function createTextInstance(
   };
 }
 
+export function getCurrentEventPriority(): * {
+  return DefaultLanePriority;
+}
+
 export const isPrimaryRenderer = false;
 export const warnsIfNotActing = true;
 
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
-export const scheduleMicrotask =
-  typeof queueMicrotask === 'function'
-    ? queueMicrotask
-    : typeof Promise !== 'undefined'
-    ? (callback: Function) =>
-        Promise.resolve(null)
-          .then(callback)
-          .catch(handleErrorInNextTick)
-    : scheduleTimeout; // TODO: Determine the best fallback here.
 
-function handleErrorInNextTick(error) {
-  setTimeout(() => {
-    throw error;
-  });
-}
 export const noTimeout = -1;
 
 // -------------------

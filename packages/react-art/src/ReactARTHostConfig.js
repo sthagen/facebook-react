@@ -7,9 +7,17 @@
 
 import Transform from 'art/core/transform';
 import Mode from 'art/modes/current';
+import {enableNewReconciler} from 'shared/ReactFeatureFlags';
 import invariant from 'shared/invariant';
 
 import {TYPES, EVENT_TYPES, childrenAsString} from './ReactARTInternals';
+
+import {DefaultLanePriority as DefaultLanePriority_old} from 'react-reconciler/src/ReactFiberLane.old';
+import {DefaultLanePriority as DefaultLanePriority_new} from 'react-reconciler/src/ReactFiberLane.new';
+
+const DefaultLanePriority = enableNewReconciler
+  ? DefaultLanePriority_new
+  : DefaultLanePriority_old;
 
 const pooledTransform = new Transform();
 
@@ -241,6 +249,7 @@ export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoHydration';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoScopes';
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoTestSelectors';
+export * from 'react-reconciler/src/ReactFiberHostConfigWithNoMicrotasks';
 
 export function appendInitialChild(parentInstance, child) {
   if (typeof child === 'string') {
@@ -330,14 +339,15 @@ export function getChildHostContext() {
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
-export function scheduleMicrotask(callback: Function) {
-  invariant(false, 'Not implemented.');
-}
 
 export function shouldSetTextContent(type, props) {
   return (
     typeof props.children === 'string' || typeof props.children === 'number'
   );
+}
+
+export function getCurrentEventPriority() {
+  return DefaultLanePriority;
 }
 
 // The ART renderer is secondary to the React DOM renderer.

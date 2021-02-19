@@ -31,8 +31,9 @@ export const {
   enableUseRefAccessWarning,
   disableNativeComponentFrames,
   disableSchedulerTimeoutInWorkLoop,
-  enableTransitionEntanglement,
+  enableNonInterruptingNormalPri,
   enableDiscreteEventMicroTasks,
+  enableNativeEventPriorityInference,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
