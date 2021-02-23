@@ -36,10 +36,7 @@ export type Lane = number;
 export type LaneMap<T> = Array<T>;
 
 import invariant from 'shared/invariant';
-import {
-  enableCache,
-  enableNonInterruptingNormalPri,
-} from 'shared/ReactFeatureFlags';
+import {enableCache, enableSchedulingProfiler} from 'shared/ReactFeatureFlags';
 
 import {
   ImmediatePriority as ImmediateSchedulerPriority,
@@ -76,7 +73,10 @@ const OffscreenLanePriority: LanePriority = 1;
 
 export const NoLanePriority: LanePriority = 0;
 
-const TotalLanes = 31;
+// Lane values below should be kept in sync with getLabelsForLanes(), used by react-devtools-scheduling-profiler.
+// If those values are changed that package should be rebuilt and redeployed.
+
+export const TotalLanes = 31;
 
 export const NoLanes: Lanes = /*                        */ 0b0000000000000000000000000000000;
 export const NoLane: Lane = /*                          */ 0b0000000000000000000000000000000;
@@ -85,10 +85,10 @@ export const SyncLane: Lane = /*                        */ 0b0000000000000000000
 export const SyncBatchedLane: Lane = /*                 */ 0b0000000000000000000000000000010;
 
 export const InputDiscreteHydrationLane: Lane = /*      */ 0b0000000000000000000000000000100;
-const InputDiscreteLane: Lanes = /*                     */ 0b0000000000000000000000000001000;
+export const InputDiscreteLane: Lanes = /*              */ 0b0000000000000000000000000001000;
 
 const InputContinuousHydrationLane: Lane = /*           */ 0b0000000000000000000000000010000;
-const InputContinuousLane: Lanes = /*                   */ 0b0000000000000000000000000100000;
+export const InputContinuousLane: Lanes = /*            */ 0b0000000000000000000000000100000;
 
 export const DefaultHydrationLane: Lane = /*            */ 0b0000000000000000000000001000000;
 export const DefaultLane: Lanes = /*                    */ 0b0000000000000000000000010000000;
@@ -126,6 +126,60 @@ export const IdleHydrationLane: Lane = /*               */ 0b0010000000000000000
 const IdleLane: Lanes = /*                              */ 0b0100000000000000000000000000000;
 
 export const OffscreenLane: Lane = /*                   */ 0b1000000000000000000000000000000;
+
+// This function is used for the experimental scheduling profiler (react-devtools-scheduling-profiler)
+// It should be kept in sync with the Lanes values above.
+export function getLabelsForLanes(lanes: Lanes): Array<string> | void {
+  if (enableSchedulingProfiler) {
+    const labels = [];
+    if (lanes & SyncLane) {
+      labels.push('Sync');
+    }
+    if (lanes & SyncBatchedLane) {
+      labels.push('SyncBatched');
+    }
+    if (lanes & InputDiscreteHydrationLane) {
+      labels.push('InputDiscreteHydration');
+    }
+    if (lanes & InputDiscreteLane) {
+      labels.push('InputDiscrete');
+    }
+    if (lanes & InputContinuousHydrationLane) {
+      labels.push('InputContinuousHydration');
+    }
+    if (lanes & InputContinuousLane) {
+      labels.push('InputContinuous');
+    }
+    if (lanes & DefaultHydrationLane) {
+      labels.push('DefaultHydration');
+    }
+    if (lanes & DefaultLane) {
+      labels.push('Default');
+    }
+    if (lanes & TransitionHydrationLane) {
+      labels.push('TransitionHydration');
+    }
+    if (lanes & TransitionLanes) {
+      labels.push('Transition(s)');
+    }
+    if (lanes & RetryLanes) {
+      labels.push('Retry(s)');
+    }
+    if (lanes & SelectiveHydrationLane) {
+      labels.push('SelectiveHydration');
+    }
+    if (lanes & IdleHydrationLane) {
+      labels.push('IdleHydration');
+    }
+    if (lanes & IdleLane) {
+      labels.push('Idle');
+    }
+    if (lanes & OffscreenLane) {
+      labels.push('Offscreen');
+    }
+    return labels;
+  }
+}
 
 export const NoTimestamp = -1;
 
@@ -348,8 +402,7 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
       // Default priority updates should not interrupt transition updates. The
       // only difference between default updates and transition updates is that
       // default updates do not support refresh transitions.
-      (enableNonInterruptingNormalPri &&
-        nextLanePriority === DefaultLanePriority &&
+      (nextLanePriority === DefaultLanePriority &&
         wipLanePriority === TransitionPriority)
     ) {
       // Keep working on the existing in-progress tree. Do not interrupt.
