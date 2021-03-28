@@ -34,10 +34,11 @@ import {
   ForceUpdateForLegacySuspense,
 } from './ReactFiberFlags';
 import {shouldCaptureSuspense} from './ReactFiberSuspenseComponent.new';
-import {NoMode, BlockingMode, DebugTracingMode} from './ReactTypeOfMode';
+import {NoMode, ConcurrentMode, DebugTracingMode} from './ReactTypeOfMode';
 import {
   enableDebugTracing,
   enableSchedulingProfiler,
+  enableLazyContextPropagation,
 } from 'shared/ReactFeatureFlags';
 import {createCapturedValue} from './ReactCapturedValue';
 import {
@@ -60,6 +61,7 @@ import {
   isAlreadyFailedLegacyErrorBoundary,
   pingSuspendedRoot,
 } from './ReactFiberWorkLoop.new';
+import {propagateParentContextChangesToDeferredTree} from './ReactFiberNewContext.new';
 import {logCapturedError} from './ReactFiberErrorLogger';
 import {logComponentSuspended} from './DebugTracing';
 import {markComponentSuspended} from './SchedulingProfiler';
@@ -194,6 +196,23 @@ function throwException(
     typeof value === 'object' &&
     typeof value.then === 'function'
   ) {
+    if (enableLazyContextPropagation) {
+      const currentSourceFiber = sourceFiber.alternate;
+      if (currentSourceFiber !== null) {
+        // Since we never visited the children of the suspended component, we
+        // need to propagate the context change now, to ensure that we visit
+        // them during the retry.
+        //
+        // We don't have to do this for errors because we retry errors without
+        // committing in between. So this is specific to Suspense.
+        propagateParentContextChangesToDeferredTree(
+          currentSourceFiber,
+          sourceFiber,
+          rootRenderLanes,
+        );
+      }
+    }
+
     // This is a wakeable.
     const wakeable: Wakeable = (value: any);
 
@@ -214,7 +233,7 @@ function throwException(
     // A legacy mode Suspense quirk, only relevant to hook components.
     const tag = sourceFiber.tag;
     if (
-      (sourceFiber.mode & BlockingMode) === NoMode &&
+      (sourceFiber.mode & ConcurrentMode) === NoMode &&
       (tag === FunctionComponent ||
         tag === ForwardRef ||
         tag === SimpleMemoComponent)
@@ -255,13 +274,13 @@ function throwException(
           wakeables.add(wakeable);
         }
 
-        // If the boundary is outside of blocking mode, we should *not*
+        // If the boundary is in legacy mode, we should *not*
         // suspend the commit. Pretend as if the suspended component rendered
         // null and keep rendering. In the commit phase, we'll schedule a
         // subsequent synchronous update to re-render the Suspense.
         //
         // Note: It doesn't matter whether the component that suspended was
-        // inside a blocking mode tree. If the Suspense is outside of it, we
+        // inside a concurrent mode tree. If the Suspense is outside of it, we
         // should *not* suspend the commit.
         //
         // If the suspense boundary suspended itself suspended, we don't have to
@@ -269,7 +288,7 @@ function throwException(
         // directly do a second pass over the fallback in this render and
         // pretend we meant to render that directly.
         if (
-          (workInProgress.mode & BlockingMode) === NoMode &&
+          (workInProgress.mode & ConcurrentMode) === NoMode &&
           workInProgress !== returnFiber
         ) {
           workInProgress.flags |= DidCapture;

@@ -26,7 +26,7 @@ import {
   enableScopeAPI,
 } from 'shared/ReactFeatureFlags';
 import {NoFlags, Placement, StaticMask} from './ReactFiberFlags';
-import {ConcurrentRoot, BlockingRoot} from './ReactRootTags';
+import {ConcurrentRoot} from './ReactRootTags';
 import {
   IndeterminateComponent,
   ClassComponent,
@@ -68,7 +68,6 @@ import {
   ProfileMode,
   StrictLegacyMode,
   StrictEffectsMode,
-  BlockingMode,
 } from './ReactTypeOfMode';
 import {
   REACT_FORWARD_REF_TYPE,
@@ -388,10 +387,7 @@ export function resetWorkInProgress(workInProgress: Fiber, renderLanes: Lanes) {
     workInProgress.lanes = current.lanes;
 
     workInProgress.child = current.child;
-    // TODO: `subtreeFlags` should be reset to NoFlags, like we do in
-    // `createWorkInProgress`. Nothing reads this until the complete phase,
-    // currently, but it might in the future, and we should be consistent.
-    workInProgress.subtreeFlags = current.subtreeFlags;
+    workInProgress.subtreeFlags = NoFlags;
     workInProgress.deletions = null;
     workInProgress.memoizedProps = current.memoizedProps;
     workInProgress.memoizedState = current.memoizedState;
@@ -427,25 +423,7 @@ export function createHostRootFiber(
 ): Fiber {
   let mode;
   if (tag === ConcurrentRoot) {
-    mode = ConcurrentMode | BlockingMode;
-    if (strictModeLevelOverride !== null) {
-      if (strictModeLevelOverride >= 1) {
-        mode |= StrictLegacyMode;
-      }
-      if (enableStrictEffects) {
-        if (strictModeLevelOverride >= 2) {
-          mode |= StrictEffectsMode;
-        }
-      }
-    } else {
-      if (enableStrictEffects && createRootStrictEffectsByDefault) {
-        mode |= StrictLegacyMode | StrictEffectsMode;
-      } else {
-        mode |= StrictLegacyMode;
-      }
-    }
-  } else if (tag === BlockingRoot) {
-    mode = BlockingMode;
+    mode = ConcurrentMode;
     if (strictModeLevelOverride !== null) {
       if (strictModeLevelOverride >= 1) {
         mode |= StrictLegacyMode;

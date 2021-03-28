@@ -984,6 +984,10 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     expect(ReactNoop.getChildren()).toEqual([span('C')]);
   });
 
+  // TODO: This test was written against the old Expiration Times
+  // implementation. It doesn't really test what it was intended to test
+  // anymore, because all updates to the same queue get entangled together.
+  // Even if they haven't expired. Consider either deleting or rewriting.
   // @gate enableCache
   it('flushes all expired updates in a single batch', async () => {
     class Foo extends React.Component {
@@ -1013,10 +1017,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     jest.advanceTimersByTime(1000);
     ReactNoop.render(<Foo text="goodbye" />);
 
-    Scheduler.unstable_advanceTime(10000);
-    jest.advanceTimersByTime(10000);
-
-    expect(Scheduler).toFlushExpired([
+    expect(Scheduler).toFlushAndYield([
       'Suspend! [goodbye]',
       'Loading...',
       'Commit: goodbye',
@@ -1797,12 +1798,32 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     await advanceTimers(5000);
 
     // Retry with the new content.
-    expect(Scheduler).toFlushAndYield([
-      'A',
-      // B still suspends
-      'Suspend! [B]',
-      'Loading more...',
-    ]);
+    if (gate(flags => flags.disableSchedulerTimeoutInWorkLoop)) {
+      expect(Scheduler).toFlushAndYield([
+        'A',
+        // B still suspends
+        'Suspend! [B]',
+        'Loading more...',
+      ]);
+    } else {
+      // In this branch, right as we start rendering, we detect that the work
+      // has expired (via Scheduler's didTimeout argument) and re-schedule the
+      // work as synchronous. Since sync work does not flow through Scheduler,
+      // we need to use `flushSync`.
+      //
+      // Usually we would use `act`, which fluses both sync work and Scheduler
+      // work, but that would also force the fallback to display, and this test
+      // is specifically about whether we delay or show the fallback.
+      expect(Scheduler).toFlushAndYield([]);
+      // This will flush the synchronous callback we just scheduled.
+      ReactNoop.flushSync();
+      expect(Scheduler).toHaveYielded([
+        'A',
+        // B still suspends
+        'Suspend! [B]',
+        'Loading more...',
+      ]);
+    }
     // Because we've already been waiting for so long we've exceeded
     // our threshold and we show the next level immediately.
     expect(ReactNoop.getChildren()).toEqual([
@@ -1929,10 +1950,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     // TODO: assert toErrorDev() when the warning is implemented again.
     ReactNoop.act(() => {
-      Scheduler.unstable_runWithPriority(
-        Scheduler.unstable_UserBlockingPriority,
-        () => _setShow(true),
-      );
+      ReactNoop.flushSync(() => _setShow(true));
     });
   });
 
@@ -1959,10 +1977,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     // TODO: assert toErrorDev() when the warning is implemented again.
     ReactNoop.act(() => {
-      Scheduler.unstable_runWithPriority(
-        Scheduler.unstable_UserBlockingPriority,
-        () => show(),
-      );
+      ReactNoop.flushSync(() => show());
     });
   });
 
@@ -1991,10 +2006,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     expect(ReactNoop).toMatchRenderedOutput('Loading...');
 
     ReactNoop.act(() => {
-      Scheduler.unstable_runWithPriority(
-        Scheduler.unstable_UserBlockingPriority,
-        () => showB(),
-      );
+      ReactNoop.flushSync(() => showB());
     });
 
     expect(Scheduler).toHaveYielded(['Suspend! [A]', 'Suspend! [B]']);
@@ -2025,10 +2037,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
       // TODO: assert toErrorDev() when the warning is implemented again.
       ReactNoop.act(() => {
-        Scheduler.unstable_runWithPriority(
-          Scheduler.unstable_UserBlockingPriority,
-          () => _setShow(true),
-        );
+        ReactNoop.flushSync(() => _setShow(true));
       });
     },
   );
@@ -3514,56 +3523,6 @@ describe('ReactSuspenseWithNoopRenderer', () => {
       <>
         <span prop="Outer: B1" />
         <span prop="Inner: B1" />
-      </>,
-    );
-  });
-
-  // @gate enableCache
-  // @gate !enableDiscreteEventMicroTasks
-  it('regression: empty render at high priority causes update to be dropped', async () => {
-    // Reproduces a bug where flushDiscreteUpdates starts a new (empty) render
-    // pass which cancels a scheduled timeout and causes the fallback never to
-    // be committed.
-    function App({text, shouldSuspend}) {
-      return (
-        <>
-          <Text text={text} />
-          <Suspense fallback={<Text text="Loading..." />}>
-            {shouldSuspend && <AsyncText text="B" />}
-          </Suspense>
-        </>
-      );
-    }
-
-    const root = ReactNoop.createRoot();
-    ReactNoop.discreteUpdates(() => {
-      // High pri
-      root.render(<App text="A" />);
-    });
-    // Low pri
-    root.render(<App text="A" shouldSuspend={true} />);
-
-    expect(Scheduler).toFlushAndYield([
-      // Render the high pri update
-      'A',
-      // Render the low pri update
-      'A',
-      'Suspend! [B]',
-      'Loading...',
-    ]);
-    expect(root).toMatchRenderedOutput(<span prop="A" />);
-
-    // Triggers erstwhile bug where flushDiscreteUpdates caused an empty render
-    // at a previously committed level
-    ReactNoop.flushDiscreteUpdates();
-
-    // Commit the placeholder
-    Scheduler.unstable_advanceTime(2000);
-    await advanceTimers(2000);
-    expect(root).toMatchRenderedOutput(
-      <>
-        <span prop="A" />
-        <span prop="Loading..." />
       </>,
     );
   });

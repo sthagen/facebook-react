@@ -13,21 +13,15 @@ import type {ReactPriorityLevel} from './ReactInternalTypes';
 // CommonJS interop named imports.
 import * as Scheduler from 'scheduler';
 import {__interactionsRef} from 'scheduler/tracing';
-import {
-  enableSchedulerTracing,
-  decoupleUpdatePriorityFromScheduler,
-  enableSyncMicroTasks,
-} from 'shared/ReactFeatureFlags';
+import {enableSchedulerTracing} from 'shared/ReactFeatureFlags';
 import invariant from 'shared/invariant';
 import {
-  SyncLanePriority,
-  getCurrentUpdateLanePriority,
-  setCurrentUpdateLanePriority,
-} from './ReactFiberLane.new';
-import {scheduleMicrotask, supportsMicrotasks} from './ReactFiberHostConfig';
+  DiscreteEventPriority,
+  getCurrentUpdatePriority,
+  setCurrentUpdatePriority,
+} from './ReactEventPriorities.new';
 
 const {
-  unstable_runWithPriority: Scheduler_runWithPriority,
   unstable_scheduleCallback: Scheduler_scheduleCallback,
   unstable_cancelCallback: Scheduler_cancelCallback,
   unstable_shouldYield: Scheduler_shouldYield,
@@ -76,7 +70,6 @@ export const requestPaint =
   Scheduler_requestPaint !== undefined ? Scheduler_requestPaint : () => {};
 
 let syncQueue: Array<SchedulerCallback> | null = null;
-let immediateQueueCallbackNode: mixed | null = null;
 let isFlushingSyncQueue: boolean = false;
 const initialTimeMs: number = Scheduler_now();
 
@@ -124,14 +117,6 @@ function reactPriorityToSchedulerPriority(reactPriorityLevel) {
   }
 }
 
-export function runWithPriority<T>(
-  reactPriorityLevel: ReactPriorityLevel,
-  fn: () => T,
-): T {
-  const priorityLevel = reactPriorityToSchedulerPriority(reactPriorityLevel);
-  return Scheduler_runWithPriority(priorityLevel, fn);
-}
-
 export function scheduleCallback(
   reactPriorityLevel: ReactPriorityLevel,
   callback: SchedulerCallback,
@@ -146,19 +131,6 @@ export function scheduleSyncCallback(callback: SchedulerCallback) {
   // the next tick, or earlier if something calls `flushSyncCallbackQueue`.
   if (syncQueue === null) {
     syncQueue = [callback];
-
-    // TODO: Figure out how to remove this It's only here as a last resort if we
-    // forget to explicitly flush.
-    if (enableSyncMicroTasks && supportsMicrotasks) {
-      // Flush the queue in a microtask.
-      scheduleMicrotask(flushSyncCallbackQueueImpl);
-    } else {
-      // Flush the queue in the next tick.
-      immediateQueueCallbackNode = Scheduler_scheduleCallback(
-        Scheduler_ImmediatePriority,
-        flushSyncCallbackQueueImpl,
-      );
-    }
   } else {
     // Push onto existing queue. Don't need to schedule a callback because
     // we already scheduled one when we created the queue.
@@ -171,76 +143,39 @@ export function cancelCallback(callbackNode: mixed) {
 }
 
 export function flushSyncCallbackQueue() {
-  if (immediateQueueCallbackNode !== null) {
-    const node = immediateQueueCallbackNode;
-    immediateQueueCallbackNode = null;
-    Scheduler_cancelCallback(node);
-  }
-  flushSyncCallbackQueueImpl();
-}
-
-function flushSyncCallbackQueueImpl() {
   if (!isFlushingSyncQueue && syncQueue !== null) {
     // Prevent re-entrancy.
     isFlushingSyncQueue = true;
     let i = 0;
-    if (decoupleUpdatePriorityFromScheduler) {
-      const previousLanePriority = getCurrentUpdateLanePriority();
-      try {
-        const isSync = true;
-        const queue = syncQueue;
-        setCurrentUpdateLanePriority(SyncLanePriority);
-        runWithPriority(ImmediatePriority, () => {
-          for (; i < queue.length; i++) {
-            let callback = queue[i];
-            do {
-              callback = callback(isSync);
-            } while (callback !== null);
-          }
-        });
-        syncQueue = null;
-      } catch (error) {
-        // If something throws, leave the remaining callbacks on the queue.
-        if (syncQueue !== null) {
-          syncQueue = syncQueue.slice(i + 1);
-        }
-        // Resume flushing in the next tick
-        Scheduler_scheduleCallback(
-          Scheduler_ImmediatePriority,
-          flushSyncCallbackQueue,
-        );
-        throw error;
-      } finally {
-        setCurrentUpdateLanePriority(previousLanePriority);
-        isFlushingSyncQueue = false;
+    const previousUpdatePriority = getCurrentUpdatePriority();
+    try {
+      const isSync = true;
+      const queue = syncQueue;
+      // TODO: Is this necessary anymore? The only user code that runs in this
+      // queue is in the render or commit phases.
+      setCurrentUpdatePriority(DiscreteEventPriority);
+      for (; i < queue.length; i++) {
+        let callback = queue[i];
+        do {
+          callback = callback(isSync);
+        } while (callback !== null);
       }
-    } else {
-      try {
-        const isSync = true;
-        const queue = syncQueue;
-        runWithPriority(ImmediatePriority, () => {
-          for (; i < queue.length; i++) {
-            let callback = queue[i];
-            do {
-              callback = callback(isSync);
-            } while (callback !== null);
-          }
-        });
-        syncQueue = null;
-      } catch (error) {
-        // If something throws, leave the remaining callbacks on the queue.
-        if (syncQueue !== null) {
-          syncQueue = syncQueue.slice(i + 1);
-        }
-        // Resume flushing in the next tick
-        Scheduler_scheduleCallback(
-          Scheduler_ImmediatePriority,
-          flushSyncCallbackQueue,
-        );
-        throw error;
-      } finally {
-        isFlushingSyncQueue = false;
+      syncQueue = null;
+    } catch (error) {
+      // If something throws, leave the remaining callbacks on the queue.
+      if (syncQueue !== null) {
+        syncQueue = syncQueue.slice(i + 1);
       }
+      // Resume flushing in the next tick
+      Scheduler_scheduleCallback(
+        Scheduler_ImmediatePriority,
+        flushSyncCallbackQueue,
+      );
+      throw error;
+    } finally {
+      setCurrentUpdatePriority(previousUpdatePriority);
+      isFlushingSyncQueue = false;
     }
   }
+  return null;
 }

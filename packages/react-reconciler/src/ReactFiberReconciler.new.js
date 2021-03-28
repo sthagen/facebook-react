@@ -18,7 +18,7 @@ import type {
 } from './ReactFiberHostConfig';
 import type {RendererInspectionConfig} from './ReactFiberHostConfig';
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {Lane, LanePriority} from './ReactFiberLane.new';
+import type {Lane} from './ReactFiberLane.new';
 import type {SuspenseState} from './ReactFiberSuspenseComponent.new';
 
 import {
@@ -78,14 +78,15 @@ import {
 import {StrictLegacyMode} from './ReactTypeOfMode';
 import {
   SyncLane,
-  InputDiscreteHydrationLane,
   SelectiveHydrationLane,
   NoTimestamp,
   getHighestPriorityPendingLanes,
   higherPriorityLane,
-  getCurrentUpdateLanePriority,
-  setCurrentUpdateLanePriority,
 } from './ReactFiberLane.new';
+import {
+  getCurrentUpdatePriority,
+  runWithPriority,
+} from './ReactEventPriorities.new';
 import {
   scheduleRefresh,
   scheduleRoot,
@@ -93,16 +94,6 @@ import {
   findHostInstancesForRefresh,
 } from './ReactFiberHotReloading.new';
 import {markRenderScheduled} from './SchedulingProfiler';
-
-// Ideally host configs would import these constants from the reconciler
-// entry point, but we can't do this because of a circular dependency.
-// They are used by third-party renderers so they need to stay up to date.
-export {
-  InputDiscreteLanePriority as DiscreteEventPriority,
-  InputContinuousLanePriority as ContinuousEventPriority,
-  DefaultLanePriority as DefaultEventPriority,
-  IdleLanePriority as IdleEventPriority,
-} from './ReactFiberLane.new';
 
 export {registerMutableSourceForHydration} from './ReactMutableSource.new';
 export {createPortal} from './ReactPortal';
@@ -388,7 +379,7 @@ export function attemptSynchronousHydration(fiber: Fiber): void {
       // If we're still blocked after this, we need to increase
       // the priority of any promises resolving within this
       // boundary so that they next attempt also has higher pri.
-      const retryLane = InputDiscreteHydrationLane;
+      const retryLane = SyncLane;
       markRetryLaneIfNotHydrated(fiber, retryLane);
       break;
   }
@@ -422,7 +413,7 @@ export function attemptDiscreteHydration(fiber: Fiber): void {
     return;
   }
   const eventTime = requestEventTime();
-  const lane = InputDiscreteHydrationLane;
+  const lane = SyncLane;
   scheduleUpdateOnFiber(fiber, lane, eventTime);
   markRetryLaneIfNotHydrated(fiber, lane);
 }
@@ -453,17 +444,7 @@ export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
   markRetryLaneIfNotHydrated(fiber, lane);
 }
 
-export function runWithPriority<T>(priority: LanePriority, fn: () => T) {
-  const previousPriority = getCurrentUpdateLanePriority();
-  try {
-    setCurrentUpdateLanePriority(priority);
-    return fn();
-  } finally {
-    setCurrentUpdateLanePriority(previousPriority);
-  }
-}
-
-export {getCurrentUpdateLanePriority};
+export {getCurrentUpdatePriority, runWithPriority};
 
 export {findHostInstance};
 

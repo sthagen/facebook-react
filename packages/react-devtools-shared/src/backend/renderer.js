@@ -79,6 +79,7 @@ import {
   MEMO_SYMBOL_STRING,
 } from './ReactSymbols';
 import {format} from './utils';
+import {enableProfilerChangedHookIndices} from 'react-devtools-feature-flags';
 
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
 import type {
@@ -626,6 +627,14 @@ export function attach(
 
     // If this Fiber is currently being inspected, mark it as needing an udpate as well.
     updateMostRecentlyInspectedElementIfNecessary(fiberID);
+
+    // Passive effects may trigger errors or warnings too;
+    // In this case, we should wait until the rest of the passive effects have run,
+    // but we shouldn't wait until the next commit because that might be a long time.
+    // This would also cause "tearing" between an inspected Component and the tree view.
+    // Then again we don't want to flush too soon because this could be an error during async rendering.
+    // Use a debounce technique to ensure that we'll eventually flush.
+    flushPendingErrorsAndWarningsAfterDelay();
   }
 
   // Patching the console enables DevTools to do a few useful things:
@@ -970,12 +979,9 @@ export function attach(
             state: null,
           };
         } else {
-          return {
+          const data: ChangeDescription = {
             context: getContextChangedKeys(nextFiber),
-            didHooksChange: didHooksChange(
-              prevFiber.memoizedState,
-              nextFiber.memoizedState,
-            ),
+            didHooksChange: false,
             isFirstMount: false,
             props: getChangedKeys(
               prevFiber.memoizedProps,
@@ -986,6 +992,23 @@ export function attach(
               nextFiber.memoizedState,
             ),
           };
+
+          // Only traverse the hooks list once, depending on what info we're returning.
+          if (enableProfilerChangedHookIndices) {
+            const indices = getChangedHooksIndices(
+              prevFiber.memoizedState,
+              nextFiber.memoizedState,
+            );
+            data.hooks = indices;
+            data.didHooksChange = indices !== null && indices.length > 0;
+          } else {
+            data.didHooksChange = didHooksChange(
+              prevFiber.memoizedState,
+              nextFiber.memoizedState,
+            );
+          }
+
+          return data;
         }
       default:
         return null;
@@ -1146,6 +1169,36 @@ export function attach(
     return false;
   }
 
+  function getChangedHooksIndices(prev: any, next: any): null | Array<number> {
+    if (enableProfilerChangedHookIndices) {
+      if (prev == null || next == null) {
+        return null;
+      }
+
+      const indices = [];
+      let index = 0;
+      if (
+        next.hasOwnProperty('baseState') &&
+        next.hasOwnProperty('memoizedState') &&
+        next.hasOwnProperty('next') &&
+        next.hasOwnProperty('queue')
+      ) {
+        while (next !== null) {
+          if (didHookChange(prev, next)) {
+            indices.push(index);
+          }
+          next = next.next;
+          prev = prev.next;
+          index++;
+        }
+      }
+
+      return indices;
+    }
+
+    return null;
+  }
+
   function getChangedKeys(prev: any, next: any): null | Array<string> {
     if (prev == null || next == null) {
       return null;
@@ -1198,10 +1251,12 @@ export function attach(
     }
   }
 
-  const pendingOperations: Array<number> = [];
+  type OperationsArray = Array<number>;
+
+  const pendingOperations: OperationsArray = [];
   const pendingRealUnmountedIDs: Array<number> = [];
   const pendingSimulatedUnmountedIDs: Array<number> = [];
-  let pendingOperationsQueue: Array<Array<number>> | null = [];
+  let pendingOperationsQueue: Array<OperationsArray> | null = [];
   const pendingStringTable: Map<string, number> = new Map();
   let pendingStringTableLength: number = 0;
   let pendingUnmountedRootID: number | null = null;
@@ -1218,6 +1273,61 @@ export function attach(
     pendingOperations.push(op);
   }
 
+  function flushOrQueueOperations(operations: OperationsArray): void {
+    if (pendingOperationsQueue !== null) {
+      pendingOperationsQueue.push(operations);
+    } else {
+      hook.emit('operations', operations);
+    }
+  }
+
+  let flushPendingErrorsAndWarningsAfterDelayTimeoutID = null;
+
+  function clearPendingErrorsAndWarningsAfterDelay() {
+    if (flushPendingErrorsAndWarningsAfterDelayTimeoutID !== null) {
+      clearTimeout(flushPendingErrorsAndWarningsAfterDelayTimeoutID);
+      flushPendingErrorsAndWarningsAfterDelayTimeoutID = null;
+    }
+  }
+
+  function flushPendingErrorsAndWarningsAfterDelay() {
+    clearPendingErrorsAndWarningsAfterDelay();
+
+    flushPendingErrorsAndWarningsAfterDelayTimeoutID = setTimeout(() => {
+      flushPendingErrorsAndWarningsAfterDelayTimeoutID = null;
+
+      if (pendingOperations.length > 0) {
+        // On the off chance that something else has pushed pending operations,
+        // we should bail on warnings; it's probably not safe to push midway.
+        return;
+      }
+
+      recordPendingErrorsAndWarnings();
+
+      if (pendingOperations.length === 0) {
+        // No warnings or errors to flush; we can bail out early here too.
+        return;
+      }
+
+      // We can create a smaller operations array than flushPendingEvents()
+      // because we only need to flush warning and error counts.
+      // Only a few pieces of fixed information are required up front.
+      const operations: OperationsArray = new Array(
+        3 + pendingOperations.length,
+      );
+      operations[0] = rendererID;
+      operations[1] = currentRootID;
+      operations[2] = 0; // String table size
+      for (let j = 0; j < pendingOperations.length; j++) {
+        operations[3 + j] = pendingOperations[j];
+      }
+
+      flushOrQueueOperations(operations);
+
+      pendingOperations.length = 0;
+    }, 1000);
+  }
+
   function reevaluateErrorsAndWarnings() {
     fibersWithChangedErrorOrWarningCounts.clear();
     fiberToErrorsMap.forEach((countMap, fiberID) => {
@@ -1230,6 +1340,8 @@ export function attach(
   }
 
   function recordPendingErrorsAndWarnings() {
+    clearPendingErrorsAndWarningsAfterDelay();
+
     fibersWithChangedErrorOrWarningCounts.forEach(fiberID => {
       const fiber = idToFiberMap.get(fiberID);
       if (fiber != null) {
@@ -1319,7 +1431,7 @@ export function attach(
     // Which in turn enables fiber props, states, and hooks to be inspected.
     let i = 0;
     operations[i++] = rendererID;
-    operations[i++] = currentRootID; // Use this ID in case the root was unmounted!
+    operations[i++] = currentRootID;
 
     // Now fill in the string table.
     // [stringTableLength, str1Length, ...str1, str2Length, ...str2, ...]
@@ -1366,18 +1478,9 @@ export function attach(
     i += pendingOperations.length;
 
     // Let the frontend know about tree operations.
-    // The first value in this array will identify which root it corresponds to,
-    // so we do no longer need to dispatch a separate root-committed event.
-    if (pendingOperationsQueue !== null) {
-      // Until the frontend has been connected, store the tree operations.
-      // This will let us avoid walking the tree later when the frontend connects,
-      // and it enables the Profiler's reload-and-profile functionality to work as well.
-      pendingOperationsQueue.push(operations);
-    } else {
-      // If we've already connected to the frontend, just pass the operations through.
-      hook.emit('operations', operations);
-    }
+    flushOrQueueOperations(operations);
 
+    // Reset all of the pending state now that we've told the frontend about it.
     pendingOperations.length = 0;
     pendingRealUnmountedIDs.length = 0;
     pendingSimulatedUnmountedIDs.length = 0;
@@ -2039,6 +2142,25 @@ export function attach(
         // Checking root.memoizedInteractions handles multi-renderer edge-case-
         // where some v16 renderers support profiling and others don't.
         if (isProfiling && root.memoizedInteractions != null) {
+          // Profiling durations are only available for certain builds.
+          // If available, they'll be stored on the HostRoot.
+          let effectDuration = null;
+          let passiveEffectDuration = null;
+          const hostRoot = root.current;
+          if (hostRoot != null) {
+            const stateNode = hostRoot.stateNode;
+            if (stateNode != null) {
+              effectDuration =
+                stateNode.effectDuration != null
+                  ? stateNode.effectDuration
+                  : null;
+              passiveEffectDuration =
+                stateNode.passiveEffectDuration != null
+                  ? stateNode.passiveEffectDuration
+                  : null;
+            }
+          }
+
           // If profiling is active, store commit time and duration, and the current interactions.
           // The frontend may request this information after profiling has stopped.
           currentCommitProfilingMetadata = {
@@ -2053,6 +2175,8 @@ export function attach(
             ),
             maxActualDuration: 0,
             priorityLevel: null,
+            effectDuration,
+            passiveEffectDuration,
           };
         }
 
@@ -2091,6 +2215,23 @@ export function attach(
     const isProfilingSupported = root.memoizedInteractions != null;
 
     if (isProfiling && isProfilingSupported) {
+      // Profiling durations are only available for certain builds.
+      // If available, they'll be stored on the HostRoot.
+      let effectDuration = null;
+      let passiveEffectDuration = null;
+      const hostRoot = root.current;
+      if (hostRoot != null) {
+        const stateNode = hostRoot.stateNode;
+        if (stateNode != null) {
+          effectDuration =
+            stateNode.effectDuration != null ? stateNode.effectDuration : null;
+          passiveEffectDuration =
+            stateNode.passiveEffectDuration != null
+              ? stateNode.passiveEffectDuration
+              : null;
+        }
+      }
+
       // If profiling is active, store commit time and duration, and the current interactions.
       // The frontend may request this information after profiling has stopped.
       currentCommitProfilingMetadata = {
@@ -2106,6 +2247,8 @@ export function attach(
         maxActualDuration: 0,
         priorityLevel:
           priorityLevel == null ? null : formatPriorityLevel(priorityLevel),
+        effectDuration,
+        passiveEffectDuration,
       };
     }
 
@@ -3236,8 +3379,10 @@ export function attach(
     changeDescriptions: Map<number, ChangeDescription> | null,
     commitTime: number,
     durations: Array<number>,
+    effectDuration: number | null,
     interactions: Array<Interaction>,
     maxActualDuration: number,
+    passiveEffectDuration: number | null,
     priorityLevel: string | null,
   |};
 
@@ -3291,8 +3436,10 @@ export function attach(
           const {
             changeDescriptions,
             durations,
+            effectDuration,
             interactions,
             maxActualDuration,
+            passiveEffectDuration,
             priorityLevel,
             commitTime,
           } = commitProfilingData;
@@ -3328,9 +3475,11 @@ export function attach(
                 ? Array.from(changeDescriptions.entries())
                 : null,
             duration: maxActualDuration,
+            effectDuration,
             fiberActualDurations,
             fiberSelfDurations,
             interactionIDs,
+            passiveEffectDuration,
             priorityLevel,
             timestamp: commitTime,
           });

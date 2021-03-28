@@ -23,12 +23,8 @@ let onWorkCanceled;
 let onWorkScheduled;
 let onWorkStarted;
 let onWorkStopped;
-
-// Copied from ReactFiberLanes. Don't do this!
-// This is hard coded directly to avoid needing to import, and
-// we'll remove this as we replace runWithPriority with React APIs.
-const IdleLanePriority = 2;
-const InputContinuousPriority = 10;
+let IdleEventPriority;
+let ContinuousEventPriority;
 
 function loadModules() {
   ReactFeatureFlags = require('shared/ReactFeatureFlags');
@@ -43,6 +39,10 @@ function loadModules() {
   Scheduler = require('scheduler');
   SchedulerTracing = require('scheduler/tracing');
   TestUtils = require('react-dom/test-utils');
+
+  IdleEventPriority = require('react-reconciler/constants').IdleEventPriority;
+  ContinuousEventPriority = require('react-reconciler/constants')
+    .ContinuousEventPriority;
 
   act = TestUtils.unstable_concurrentAct;
 
@@ -246,12 +246,8 @@ describe('ReactDOMTracing', () => {
               Scheduler.unstable_yieldValue('Child:update');
             } else {
               Scheduler.unstable_yieldValue('Child:mount');
-              // TODO: Double wrapping is temporary while we remove Scheduler runWithPriority.
-              ReactDOM.unstable_runWithPriority(IdleLanePriority, () =>
-                Scheduler.unstable_runWithPriority(
-                  Scheduler.unstable_IdlePriority,
-                  () => setDidMount(true),
-                ),
+              ReactDOM.unstable_runWithPriority(IdleEventPriority, () =>
+                setDidMount(true),
               );
             }
           }, [didMount]);
@@ -428,7 +424,6 @@ describe('ReactDOMTracing', () => {
       });
 
       // @gate experimental
-      // @gate enableNativeEventPriorityInference
       it('should properly trace interactions when there is work of interleaved priorities', () => {
         const Child = () => {
           Scheduler.unstable_yieldValue('Child');
@@ -504,7 +499,7 @@ describe('ReactDOMTracing', () => {
           let interaction = null;
           SchedulerTracing.unstable_trace('update', 0, () => {
             interaction = Array.from(SchedulerTracing.unstable_getCurrent())[0];
-            ReactDOM.unstable_runWithPriority(InputContinuousPriority, () =>
+            ReactDOM.unstable_runWithPriority(ContinuousEventPriority, () =>
               scheduleUpdateWithHidden(),
             );
           });
@@ -550,7 +545,6 @@ describe('ReactDOMTracing', () => {
       });
 
       // @gate experimental
-      // @gate enableNativeEventPriorityInference
       it('should properly trace interactions through a multi-pass SuspenseList render', () => {
         const SuspenseList = React.SuspenseList;
         const Suspense = React.Suspense;
@@ -612,7 +606,7 @@ describe('ReactDOMTracing', () => {
           // Schedule an unrelated low priority update that shouldn't be included
           // in the previous interaction. This is meant to ensure that we don't
           // rely on the whole tree completing to cover up bugs.
-          ReactDOM.unstable_runWithPriority(IdleLanePriority, () => {
+          ReactDOM.unstable_runWithPriority(IdleEventPriority, () => {
             root.render(<App />);
           });
 

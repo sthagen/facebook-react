@@ -748,6 +748,7 @@ describe('Profiler', () => {
         expect(onRender.mock.calls[2][1]).toBe('update');
       });
 
+      // @gate experimental
       it('is properly distinguish updates and nested-updates when there is more than sync remaining work', () => {
         loadModules({
           enableSchedulerTracing,
@@ -767,15 +768,12 @@ describe('Profiler', () => {
         const onRender = jest.fn();
 
         // Schedule low-priority work.
-        Scheduler.unstable_runWithPriority(
-          Scheduler.unstable_LowPriority,
-          () => {
-            ReactNoop.render(
-              <React.Profiler id="root" onRender={onRender}>
-                <Component />
-              </React.Profiler>,
-            );
-          },
+        React.unstable_startTransition(() =>
+          ReactNoop.render(
+            <React.Profiler id="root" onRender={onRender}>
+              <Component />
+            </React.Profiler>,
+          ),
         );
 
         // Flush sync work with a nested update
@@ -4308,7 +4306,7 @@ describe('Profiler', () => {
         await resourcePromise;
 
         expect(Scheduler).toHaveYielded(['Promise resolved [loaded]']);
-        expect(Scheduler).toFlushExpired([
+        expect(Scheduler).toFlushUntilNextPaint([
           'onPostCommit',
           'AsyncText [loaded]',
         ]);
@@ -4372,7 +4370,7 @@ describe('Profiler', () => {
         await resourcePromise;
 
         expect(Scheduler).toHaveYielded(['Promise resolved [loaded]']);
-        expect(Scheduler).toFlushExpired(['onPostCommit', 'render']);
+        expect(Scheduler).toFlushUntilNextPaint(['onPostCommit', 'render']);
 
         expect(onInteractionScheduledWorkCompleted).not.toHaveBeenCalled();
 
@@ -4577,7 +4575,7 @@ describe('Profiler', () => {
         await originalPromise;
 
         expect(Scheduler).toHaveYielded(['Promise resolved [loaded]']);
-        expect(Scheduler).toFlushExpired(['AsyncText [loaded]']);
+        expect(Scheduler).toFlushUntilNextPaint(['AsyncText [loaded]']);
         expect(renderer.toJSON()).toEqual(['loaded', 'updated']);
         expect(Scheduler).toFlushAndYield(['onPostCommit']);
 

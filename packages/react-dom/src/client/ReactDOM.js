@@ -18,7 +18,7 @@ import {
   unstable_renderSubtreeIntoContainer,
   unmountComponentAtNode,
 } from './ReactDOMLegacy';
-import {createRoot, createBlockingRoot, isValidContainer} from './ReactDOMRoot';
+import {createRoot, isValidContainer} from './ReactDOMRoot';
 import {createEventHandle} from './ReactDOMEventHandle';
 
 import {
@@ -35,9 +35,11 @@ import {
   attemptDiscreteHydration,
   attemptContinuousHydration,
   attemptHydrationAtCurrentPriority,
-  runWithPriority,
-  getCurrentUpdateLanePriority,
 } from 'react-reconciler/src/ReactFiberReconciler';
+import {
+  runWithPriority,
+  getCurrentUpdatePriority,
+} from 'react-reconciler/src/ReactEventPriorities';
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import ReactVersion from 'shared/ReactVersion';
@@ -74,7 +76,7 @@ setAttemptSynchronousHydration(attemptSynchronousHydration);
 setAttemptDiscreteHydration(attemptDiscreteHydration);
 setAttemptContinuousHydration(attemptContinuousHydration);
 setAttemptHydrationAtCurrentPriority(attemptHydrationAtCurrentPriority);
-setGetCurrentUpdatePriority(getCurrentUpdateLanePriority);
+setGetCurrentUpdatePriority(getCurrentUpdatePriority);
 setAttemptHydrationAtPriority(runWithPriority);
 
 let didWarnAboutUnstableCreatePortal = false;
@@ -201,7 +203,6 @@ export {
   unmountComponentAtNode,
   // exposeConcurrentModeAPIs
   createRoot,
-  createBlockingRoot,
   flushControlled as unstable_flushControlled,
   scheduleHydration as unstable_scheduleHydration,
   // Disabled behind disableUnstableRenderSubtreeIntoContainer

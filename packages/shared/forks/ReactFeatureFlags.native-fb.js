@@ -46,11 +46,10 @@ export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = false;
 export const disableNativeComponentFrames = false;
 export const skipUnmountedBoundaries = false;
+export const deletedTreeCleanUpLevel = 1;
 
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = true;
-export const decoupleUpdatePriorityFromScheduler = false;
-export const enableDiscreteEventFlushingChange = false;
 
 export const enableStrictEffects = false;
 export const createRootStrictEffectsByDefault = false;
@@ -58,9 +57,7 @@ export const enableUseRefAccessWarning = false;
 
 export const enableRecursiveCommitTraversal = false;
 export const disableSchedulerTimeoutInWorkLoop = false;
-export const enableDiscreteEventMicroTasks = false;
-export const enableSyncMicroTasks = false;
-export const enableNativeEventPriorityInference = false;
+export const enableLazyContextPropagation = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

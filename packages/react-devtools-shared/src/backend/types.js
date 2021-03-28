@@ -150,17 +150,22 @@ export type ChangeDescription = {|
   isFirstMount: boolean,
   props: Array<string> | null,
   state: Array<string> | null,
+  hooks?: Array<number> | null,
 |};
 
 export type CommitDataBackend = {|
   // Tuple of fiber ID and change description
   changeDescriptions: Array<[number, ChangeDescription]> | null,
   duration: number,
+  // Only available in certain (newer) React builds,
+  effectDuration: number | null,
   // Tuple of fiber ID and actual duration
   fiberActualDurations: Array<[number, number]>,
   // Tuple of fiber ID and computed "self" duration
   fiberSelfDurations: Array<[number, number]>,
   interactionIDs: Array<number>,
+  // Only available in certain (newer) React builds,
+  passiveEffectDuration: number | null,
   priorityLevel: string | null,
   timestamp: number,
 |};

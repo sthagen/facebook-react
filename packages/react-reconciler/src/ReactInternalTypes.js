@@ -49,8 +49,8 @@ export type ReactPriorityLevel = 99 | 98 | 97 | 96 | 95 | 90;
 
 export type ContextDependency<T> = {
   context: ReactContext<T>,
-  observedBits: number,
   next: ContextDependency<mixed> | null,
+  memoizedValue: T,
   ...
 };
 
@@ -230,7 +230,6 @@ type BaseFiberRootProperties = {|
   pendingLanes: Lanes,
   suspendedLanes: Lanes,
   pingedLanes: Lanes,
-  expiredLanes: Lanes,
   mutableReadLanes: Lanes,
 
   finishedLanes: Lanes,
@@ -280,20 +279,14 @@ type Dispatch<A> = A => void;
 
 export type Dispatcher = {|
   getCacheForType?: <T>(resourceType: () => T) => T,
-  readContext<T>(
-    context: ReactContext<T>,
-    observedBits: void | number | boolean,
-  ): T,
+  readContext<T>(context: ReactContext<T>): T,
   useState<S>(initialState: (() => S) | S): [S, Dispatch<BasicStateAction<S>>],
   useReducer<S, I, A>(
     reducer: (S, A) => S,
     initialArg: I,
     init?: (I) => S,
   ): [S, Dispatch<A>],
-  useContext<T>(
-    context: ReactContext<T>,
-    observedBits: void | number | boolean,
-  ): T,
+  useContext<T>(context: ReactContext<T>): T,
   useRef<T>(initialValue: T): {|current: T|},
   useEffect(
     create: () => (() => void) | void,

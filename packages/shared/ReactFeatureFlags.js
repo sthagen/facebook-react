@@ -27,7 +27,7 @@ export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 // this feature flag only impacts StrictEffectsMode.
 export const enableStrictEffects = false;
 
-// If TRUE, trees rendered with createRoot (and createBlockingRoot) APIs will be StrictEffectsMode.
+// If TRUE, trees rendered with createRoot will be StrictEffectsMode.
 // If FALSE, these trees will be StrictLegacyMode.
 export const createRootStrictEffectsByDefault = false;
 
@@ -112,6 +112,19 @@ export const disableNativeComponentFrames = false;
 // If there are no still-mounted boundaries, the errors should be rethrown.
 export const skipUnmountedBoundaries = false;
 
+// When a node is unmounted, recurse into the Fiber subtree and clean out
+// references. Each level cleans up more fiber fields than the previous level.
+// As far as we know, React itself doesn't leak, but because the Fiber contains
+// cycles, even a single leak in product code can cause us to retain large
+// amounts of memory.
+//
+// The long term plan is to remove the cycles, but in the meantime, we clear
+// additional fields to mitigate.
+//
+// It's an enum so that we can experiment with different levels of
+// aggressiveness.
+export const deletedTreeCleanUpLevel = 1;
+
 // --------------------------
 // Future APIs to be deprecated
 // --------------------------
@@ -142,19 +155,10 @@ export const enableLegacyFBSupport = false;
 // new behavior.
 export const deferRenderPhaseUpdateToNextBatch = true;
 
-// Replacement for runWithPriority in React internals.
-export const decoupleUpdatePriorityFromScheduler = false;
-
-export const enableDiscreteEventFlushingChange = false;
-
 export const enableUseRefAccessWarning = false;
 
 export const enableRecursiveCommitTraversal = false;
 
 export const disableSchedulerTimeoutInWorkLoop = false;
 
-export const enableDiscreteEventMicroTasks = false;
-
-export const enableSyncMicroTasks = false;
-
-export const enableNativeEventPriorityInference = false;
+export const enableLazyContextPropagation = false;

@@ -386,63 +386,44 @@ describe('ReactDOMFiberAsync', () => {
     });
 
     // @gate experimental
-    it('ignores discrete events on a pending removed element', () => {
+    it('ignores discrete events on a pending removed element', async () => {
       const disableButtonRef = React.createRef();
       const submitButtonRef = React.createRef();
-
-      let formSubmitted = false;
 
       function Form() {
         const [active, setActive] = React.useState(true);
         function disableForm() {
           setActive(false);
         }
-        function submitForm() {
-          formSubmitted = true; // This should not get invoked
-        }
+
         return (
           <div>
             <button onClick={disableForm} ref={disableButtonRef}>
               Disable
             </button>
-            {active ? (
-              <button onClick={submitForm} ref={submitButtonRef}>
-                Submit
-              </button>
-            ) : null}
+            {active ? <button ref={submitButtonRef}>Submit</button> : null}
           </div>
         );
       }
 
       const root = ReactDOM.unstable_createRoot(container);
-      root.render(<Form />);
-      // Flush
-      Scheduler.unstable_flushAll();
+      await act(async () => {
+        root.render(<Form />);
+      });
 
       const disableButton = disableButtonRef.current;
       expect(disableButton.tagName).toBe('BUTTON');
+
+      const submitButton = submitButtonRef.current;
+      expect(submitButton.tagName).toBe('BUTTON');
 
       // Dispatch a click event on the Disable-button.
       const firstEvent = document.createEvent('Event');
       firstEvent.initEvent('click', true, true);
       disableButton.dispatchEvent(firstEvent);
 
-      // There should now be a pending update to disable the form.
-
-      // This should not have flushed yet since it's in concurrent mode.
-      const submitButton = submitButtonRef.current;
-      expect(submitButton.tagName).toBe('BUTTON');
-
-      // In the meantime, we can dispatch a new client event on the submit button.
-      const secondEvent = document.createEvent('Event');
-      secondEvent.initEvent('click', true, true);
-      // This should force the pending update to flush which disables the submit button before the event is invoked.
-      submitButton.dispatchEvent(secondEvent);
-
-      // Therefore the form should never have been submitted.
-      expect(formSubmitted).toBe(false);
-
-      expect(submitButtonRef.current).toBe(null);
+      // The click event is flushed synchronously, even in concurrent mode.
+      expect(submitButton.current).toBe(undefined);
     });
 
     // @gate experimental
@@ -593,31 +574,29 @@ describe('ReactDOMFiberAsync', () => {
     expect(containerC.textContent).toEqual('Finished');
   });
 
-  describe('createBlockingRoot', () => {
-    // @gate experimental
-    it('updates flush without yielding in the next event', () => {
-      const root = ReactDOM.unstable_createBlockingRoot(container);
+  // @gate experimental
+  it('updates flush without yielding in the next event', () => {
+    const root = ReactDOM.unstable_createRoot(container);
 
-      function Text(props) {
-        Scheduler.unstable_yieldValue(props.text);
-        return props.text;
-      }
+    function Text(props) {
+      Scheduler.unstable_yieldValue(props.text);
+      return props.text;
+    }
 
-      root.render(
-        <>
-          <Text text="A" />
-          <Text text="B" />
-          <Text text="C" />
-        </>,
-      );
+    root.render(
+      <>
+        <Text text="A" />
+        <Text text="B" />
+        <Text text="C" />
+      </>,
+    );
 
-      // Nothing should have rendered yet
-      expect(container.textContent).toEqual('');
+    // Nothing should have rendered yet
+    expect(container.textContent).toEqual('');
 
-      // Everything should render immediately in the next event
-      expect(Scheduler).toFlushExpired(['A', 'B', 'C']);
-      expect(container.textContent).toEqual('ABC');
-    });
+    // Everything should render immediately in the next event
+    expect(Scheduler).toFlushAndYield(['A', 'B', 'C']);
+    expect(container.textContent).toEqual('ABC');
   });
 
   // @gate experimental

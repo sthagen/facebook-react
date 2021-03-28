@@ -43,7 +43,6 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
   }
 
   // @gate experimental
-  // @gate enableDiscreteEventMicroTasks && enableNativeEventPriorityInference
   it('ignores discrete events on a pending removed element', async () => {
     const disableButtonRef = React.createRef();
     const submitButtonRef = React.createRef();
@@ -68,9 +67,9 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     }
 
     const root = ReactDOM.unstable_createRoot(container);
-    root.render(<Form />);
-    // Flush
-    Scheduler.unstable_flushAll();
+    await act(() => {
+      root.render(<Form />);
+    });
 
     const disableButton = disableButtonRef.current;
     expect(disableButton.tagName).toBe('BUTTON');
@@ -82,11 +81,6 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       dispatchAndSetCurrentEvent(disableButton, firstEvent),
     ).toErrorDev(['An update to Form inside a test was not wrapped in act']);
 
-    // There should now be a pending update to disable the form.
-    // This should not have flushed yet since it's in concurrent mode.
-    const submitButton = submitButtonRef.current;
-    expect(submitButton.tagName).toBe('BUTTON');
-
     // Discrete events should be flushed in a microtask.
     // Verify that the second button was removed.
     await null;
@@ -95,7 +89,6 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
   });
 
   // @gate experimental
-  // @gate enableDiscreteEventMicroTasks && enableNativeEventPriorityInference
   it('ignores discrete events on a pending removed event listener', async () => {
     const disableButtonRef = React.createRef();
     const submitButtonRef = React.createRef();
@@ -165,7 +158,6 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
   });
 
   // @gate experimental
-  // @gate enableDiscreteEventMicroTasks && enableNativeEventPriorityInference
   it('uses the newest discrete events on a pending changed event listener', async () => {
     const enableButtonRef = React.createRef();
     const submitButtonRef = React.createRef();
@@ -229,7 +221,6 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
   });
 
   // @gate experimental
-  // @gate enableDiscreteEventMicroTasks && enableNativeEventPriorityInference
   it('mouse over should be user-blocking but not discrete', async () => {
     const root = ReactDOM.unstable_createRoot(container);
 
@@ -252,15 +243,15 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       mouseOverEvent.initEvent('mouseover', true, true);
       dispatchAndSetCurrentEvent(target.current, mouseOverEvent);
 
-      // 3s should be enough to expire the updates
-      Scheduler.unstable_advanceTime(3000);
-      expect(Scheduler).toFlushExpired([]);
-      expect(container.textContent).toEqual('hovered');
+      // Flush discrete updates
+      ReactDOM.flushSync();
+      // Since mouse over is not discrete, should not have updated yet
+      expect(container.textContent).toEqual('not hovered');
     });
+    expect(container.textContent).toEqual('hovered');
   });
 
   // @gate experimental
-  // @gate enableDiscreteEventMicroTasks && enableNativeEventPriorityInference
   it('mouse enter should be user-blocking but not discrete', async () => {
     const root = ReactDOM.unstable_createRoot(container);
 
@@ -285,10 +276,59 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       mouseEnterEvent.initEvent('mouseenter', true, true);
       dispatchAndSetCurrentEvent(target.current, mouseEnterEvent);
 
-      // 3s should be enough to expire the updates
-      Scheduler.unstable_advanceTime(3000);
-      expect(Scheduler).toFlushExpired([]);
-      expect(container.textContent).toEqual('hovered');
+      // Flush discrete updates
+      ReactDOM.flushSync();
+      // Since mouse end is not discrete, should not have updated yet
+      expect(container.textContent).toEqual('not hovered');
     });
+    expect(container.textContent).toEqual('hovered');
+  });
+
+  // @gate experimental
+  it('should batch inside native events', async () => {
+    const root = ReactDOM.unstable_createRoot(container);
+
+    const target = React.createRef(null);
+    function Foo() {
+      const [count, setCount] = React.useState(0);
+      const countRef = React.useRef(-1);
+
+      React.useLayoutEffect(() => {
+        countRef.current = count;
+        target.current.onclick = () => {
+          setCount(countRef.current + 1);
+          // Now update again. If these updates are batched, then this should be
+          // a no-op, because we didn't re-render yet and `countRef` hasn't
+          // been mutated.
+          setCount(countRef.current + 1);
+        };
+      });
+      return <div ref={target}>Count: {count}</div>;
+    }
+
+    await act(async () => {
+      root.render(<Foo />);
+    });
+    expect(container.textContent).toEqual('Count: 0');
+
+    // Ignore act warning. We can't use act because it forces batched updates.
+    spyOnDev(console, 'error');
+
+    const pressEvent = document.createEvent('Event');
+    pressEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(target.current, pressEvent);
+    // If this is 2, that means the `setCount` calls were not batched.
+    expect(container.textContent).toEqual('Count: 1');
+
+    // Assert that the `act` warnings were the only ones that fired.
+    if (__DEV__) {
+      expect(console.error).toHaveBeenCalledTimes(2);
+      expect(console.error.calls.argsFor(0)[0]).toContain(
+        'was not wrapped in act',
+      );
+      expect(console.error.calls.argsFor(1)[0]).toContain(
+        'was not wrapped in act',
+      );
+    }
   });
 });

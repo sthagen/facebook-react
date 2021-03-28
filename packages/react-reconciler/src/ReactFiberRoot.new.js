@@ -22,10 +22,12 @@ import {
   enableSchedulerTracing,
   enableSuspenseCallback,
   enableCache,
+  enableProfilerCommitHooks,
+  enableProfilerTimer,
 } from 'shared/ReactFeatureFlags';
 import {unstable_getThreadID} from 'scheduler/tracing';
 import {initializeUpdateQueue} from './ReactUpdateQueue.new';
-import {LegacyRoot, BlockingRoot, ConcurrentRoot} from './ReactRootTags';
+import {LegacyRoot, ConcurrentRoot} from './ReactRootTags';
 
 function FiberRootNode(containerInfo, tag, hydrate) {
   this.tag = tag;
@@ -46,7 +48,6 @@ function FiberRootNode(containerInfo, tag, hydrate) {
   this.pendingLanes = NoLanes;
   this.suspendedLanes = NoLanes;
   this.pingedLanes = NoLanes;
-  this.expiredLanes = NoLanes;
   this.mutableReadLanes = NoLanes;
   this.finishedLanes = NoLanes;
 
@@ -71,11 +72,13 @@ function FiberRootNode(containerInfo, tag, hydrate) {
     this.hydrationCallbacks = null;
   }
 
+  if (enableProfilerTimer && enableProfilerCommitHooks) {
+    this.effectDuration = 0;
+    this.passiveEffectDuration = 0;
+  }
+
   if (__DEV__) {
     switch (tag) {
-      case BlockingRoot:
-        this._debugRootType = 'createBlockingRoot()';
-        break;
       case ConcurrentRoot:
         this._debugRootType = 'createRoot()';
         break;
