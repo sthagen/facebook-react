@@ -382,7 +382,7 @@ describe(preprocessData, () => {
     });
   });
 
-  // @gate experimental && enableSchedulingProfiler
+  // @gate enableSchedulingProfiler
   it('should process a sample createRoot render sequence', () => {
     function App() {
       const [didMount, setDidMount] = React.useState(false);
@@ -517,7 +517,7 @@ describe(preprocessData, () => {
           timestamp: 0.003,
         },
         {
-          name: '--react-init-17.0.2',
+          name: '--react-init-17.0.3',
           timestamp: 0.004,
         },
       ],

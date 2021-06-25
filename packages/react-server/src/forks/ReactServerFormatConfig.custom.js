@@ -28,9 +28,13 @@ export opaque type Destination = mixed; // eslint-disable-line no-undef
 export opaque type ResponseState = mixed;
 export opaque type FormatContext = mixed;
 export opaque type SuspenseBoundaryID = mixed;
+export opaque type OpaqueIDType = mixed;
+
+export const isPrimaryRenderer = false;
 
 export const getChildFormatContext = $$$hostConfig.getChildFormatContext;
 export const createSuspenseBoundaryID = $$$hostConfig.createSuspenseBoundaryID;
+export const makeServerID = $$$hostConfig.makeServerID;
 export const pushEmpty = $$$hostConfig.pushEmpty;
 export const pushTextInstance = $$$hostConfig.pushTextInstance;
 export const pushStartInstance = $$$hostConfig.pushStartInstance;
@@ -42,7 +46,12 @@ export const writeStartPendingSuspenseBoundary =
   $$$hostConfig.writeStartPendingSuspenseBoundary;
 export const writeStartClientRenderedSuspenseBoundary =
   $$$hostConfig.writeStartClientRenderedSuspenseBoundary;
-export const writeEndSuspenseBoundary = $$$hostConfig.writeEndSuspenseBoundary;
+export const writeEndCompletedSuspenseBoundary =
+  $$$hostConfig.writeEndCompletedSuspenseBoundary;
+export const writeEndPendingSuspenseBoundary =
+  $$$hostConfig.writeEndPendingSuspenseBoundary;
+export const writeEndClientRenderedSuspenseBoundary =
+  $$$hostConfig.writeEndClientRenderedSuspenseBoundary;
 export const writeStartSegment = $$$hostConfig.writeStartSegment;
 export const writeEndSegment = $$$hostConfig.writeEndSegment;
 export const writeCompletedSegmentInstruction =

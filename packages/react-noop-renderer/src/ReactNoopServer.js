@@ -14,6 +14,8 @@
  * environment.
  */
 
+import type {ReactNodeList} from 'shared/ReactTypes';
+
 import ReactFizzServer from 'react-server';
 
 type Instance = {|
@@ -51,6 +53,8 @@ type Destination = {
 
 const POP = Buffer.from('/', 'utf8');
 
+let opaqueID = 0;
+
 const ReactNoopServer = ReactFizzServer({
   scheduleWork(callback: () => void) {
     callback();
@@ -82,6 +86,10 @@ const ReactNoopServer = ReactFizzServer({
     return {state: 'pending', children: []};
   },
 
+  makeServerID(): number {
+    return opaqueID++;
+  },
+
   getChildFormatContext(): null {
     return null;
   },
@@ -97,7 +105,7 @@ const ReactNoopServer = ReactFizzServer({
     target: Array<Uint8Array>,
     type: string,
     props: Object,
-  ): void {
+  ): ReactNodeList {
     const instance: Instance = {
       type: type,
       children: [],
@@ -105,6 +113,7 @@ const ReactNoopServer = ReactFizzServer({
       hidden: false,
     };
     target.push(Buffer.from(JSON.stringify(instance), 'utf8'));
+    return props.children;
   },
 
   pushEndInstance(
@@ -129,6 +138,7 @@ const ReactNoopServer = ReactFizzServer({
 
   writeStartCompletedSuspenseBoundary(
     destination: Destination,
+    responseState: ResponseState,
     suspenseInstance: SuspenseInstance,
   ): boolean {
     suspenseInstance.state = 'complete';
@@ -138,6 +148,7 @@ const ReactNoopServer = ReactFizzServer({
   },
   writeStartPendingSuspenseBoundary(
     destination: Destination,
+    responseState: ResponseState,
     suspenseInstance: SuspenseInstance,
   ): boolean {
     suspenseInstance.state = 'pending';
@@ -147,6 +158,7 @@ const ReactNoopServer = ReactFizzServer({
   },
   writeStartClientRenderedSuspenseBoundary(
     destination: Destination,
+    responseState: ResponseState,
     suspenseInstance: SuspenseInstance,
   ): boolean {
     suspenseInstance.state = 'client-render';
@@ -154,7 +166,13 @@ const ReactNoopServer = ReactFizzServer({
     parent.children.push(suspenseInstance);
     destination.stack.push(suspenseInstance);
   },
-  writeEndSuspenseBoundary(destination: Destination): boolean {
+  writeEndCompletedSuspenseBoundary(destination: Destination): boolean {
+    destination.stack.pop();
+  },
+  writeEndPendingSuspenseBoundary(destination: Destination): boolean {
+    destination.stack.pop();
+  },
+  writeEndClientRenderedSuspenseBoundary(destination: Destination): boolean {
     destination.stack.pop();
   },
 

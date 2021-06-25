@@ -7,6 +7,8 @@
  * @flow
  */
 
+import type {ReactNodeList} from 'shared/ReactTypes';
+
 import type {
   Destination,
   Chunk,
@@ -20,6 +22,8 @@ import {
 } from 'react-server/src/ReactServerStreamConfig';
 
 import invariant from 'shared/invariant';
+
+export const isPrimaryRenderer = true;
 
 // Every list of children or string is null terminated.
 const END_TAG = 0;
@@ -57,12 +61,14 @@ SUSPENSE_UPDATE_TO_CLIENT_RENDER[0] = SUSPENSE_UPDATE_TO_CLIENT_RENDER_TAG;
 // Per response,
 export type ResponseState = {
   nextSuspenseID: number,
+  nextOpaqueID: number,
 };
 
 // Allows us to keep track of what we've already written so we can refer back to it.
 export function createResponseState(): ResponseState {
   return {
     nextSuspenseID: 0,
+    nextOpaqueID: 0,
   };
 }
 
@@ -104,6 +110,19 @@ export function createSuspenseBoundaryID(
   return responseState.nextSuspenseID++;
 }
 
+export type OpaqueIDType = number;
+
+export function makeServerID(
+  responseState: null | ResponseState,
+): OpaqueIDType {
+  invariant(
+    responseState !== null,
+    'Invalid hook call. Hooks can only be called inside of the body of a function component.',
+  );
+  // TODO: This is not deterministic since it's created during render.
+  return responseState.nextOpaqueID++;
+}
+
 const RAW_TEXT = stringToPrecomputedChunk('RCTRawText');
 
 export function pushEmpty(
@@ -134,14 +153,16 @@ export function pushStartInstance(
   type: string,
   props: Object,
   responseState: ResponseState,
+  formatContext: FormatContext,
   assignID: null | SuspenseBoundaryID,
-): void {
+): ReactNodeList {
   target.push(
     INSTANCE,
     stringToChunk(type),
     END, // Null terminated type string
     // TODO: props
   );
+  return props.children;
 }
 
 export function pushEndInstance(
@@ -182,6 +203,7 @@ export function writePlaceholder(
 // Suspense boundaries are encoded as comments.
 export function writeStartCompletedSuspenseBoundary(
   destination: Destination,
+  responseState: ResponseState,
   id: SuspenseBoundaryID,
 ): boolean {
   writeChunk(destination, SUSPENSE_COMPLETE);
@@ -189,6 +211,7 @@ export function writeStartCompletedSuspenseBoundary(
 }
 export function writeStartPendingSuspenseBoundary(
   destination: Destination,
+  responseState: ResponseState,
   id: SuspenseBoundaryID,
 ): boolean {
   writeChunk(destination, SUSPENSE_PENDING);
@@ -196,12 +219,28 @@ export function writeStartPendingSuspenseBoundary(
 }
 export function writeStartClientRenderedSuspenseBoundary(
   destination: Destination,
+  responseState: ResponseState,
   id: SuspenseBoundaryID,
 ): boolean {
   writeChunk(destination, SUSPENSE_CLIENT_RENDER);
   return writeChunk(destination, formatID(id));
 }
-export function writeEndSuspenseBoundary(destination: Destination): boolean {
+export function writeEndCompletedSuspenseBoundary(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
+  return writeChunk(destination, END);
+}
+export function writeEndPendingSuspenseBoundary(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
+  return writeChunk(destination, END);
+}
+export function writeEndClientRenderedSuspenseBoundary(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
   return writeChunk(destination, END);
 }
 

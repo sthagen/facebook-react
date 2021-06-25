@@ -34,6 +34,7 @@ import {
 } from './ReactWorkTags';
 import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
 import invariant from 'shared/invariant';
+import isArray from 'shared/isArray';
 import {enableSchedulingProfiler} from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {getPublicInstance} from './ReactFiberHostConfig';
@@ -59,10 +60,6 @@ import {
   discreteUpdates,
   flushDiscreteUpdates,
   flushPassiveEffects,
-  warnIfNotScopedWithMatchingAct,
-  warnIfUnmockedScheduler,
-  IsThisRendererActing,
-  act,
 } from './ReactFiberWorkLoop.old';
 import {
   createUpdate,
@@ -94,7 +91,7 @@ import {
   findHostInstancesForRefresh,
 } from './ReactFiberHotReloading.old';
 import {markRenderScheduled} from './SchedulingProfiler';
-
+import ReactVersion from 'shared/ReactVersion';
 export {registerMutableSourceForHydration} from './ReactMutableSource.old';
 export {createPortal} from './ReactPortal';
 export {
@@ -247,14 +244,16 @@ export function createContainer(
   tag: RootTag,
   hydrate: boolean,
   hydrationCallbacks: null | SuspenseHydrationCallbacks,
-  strictModeLevelOverride: null | number,
+  isStrictMode: boolean,
+  concurrentUpdatesByDefaultOverride: null | boolean,
 ): OpaqueRoot {
   return createFiberRoot(
     containerInfo,
     tag,
     hydrate,
     hydrationCallbacks,
-    strictModeLevelOverride,
+    isStrictMode,
+    concurrentUpdatesByDefaultOverride,
   );
 }
 
@@ -269,13 +268,6 @@ export function updateContainer(
   }
   const current = container.current;
   const eventTime = requestEventTime();
-  if (__DEV__) {
-    // $FlowExpectedError - jest isn't a global, and isn't recognized outside of tests
-    if ('undefined' !== typeof jest) {
-      warnIfUnmockedScheduler(current);
-      warnIfNotScopedWithMatchingAct(current);
-    }
-  }
   const lane = requestUpdateLane(current);
 
   if (enableSchedulingProfiler) {
@@ -344,8 +336,6 @@ export {
   flushControlled,
   flushSync,
   flushPassiveEffects,
-  IsThisRendererActing,
-  act,
 };
 
 export function getPublicRootInstance(
@@ -460,6 +450,12 @@ export function findHostInstanceWithNoPortals(
   return hostFiber.stateNode;
 }
 
+let shouldErrorImpl = fiber => null;
+
+export function shouldError(fiber: Fiber): ?boolean {
+  return shouldErrorImpl(fiber);
+}
+
 let shouldSuspendImpl = fiber => false;
 
 export function shouldSuspend(fiber: Fiber): boolean {
@@ -473,6 +469,7 @@ let overrideProps = null;
 let overridePropsDeletePath = null;
 let overridePropsRenamePath = null;
 let scheduleUpdate = null;
+let setErrorHandler = null;
 let setSuspenseHandler = null;
 
 if (__DEV__) {
@@ -482,9 +479,9 @@ if (__DEV__) {
     index: number,
   ) => {
     const key = path[index];
-    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    const updated = isArray(obj) ? obj.slice() : {...obj};
     if (index + 1 === path.length) {
-      if (Array.isArray(updated)) {
+      if (isArray(updated)) {
         updated.splice(((key: any): number), 1);
       } else {
         delete updated[key];
@@ -510,12 +507,12 @@ if (__DEV__) {
     index: number,
   ) => {
     const oldKey = oldPath[index];
-    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    const updated = isArray(obj) ? obj.slice() : {...obj};
     if (index + 1 === oldPath.length) {
       const newKey = newPath[index];
       // $FlowFixMe number or string is fine here
       updated[newKey] = updated[oldKey];
-      if (Array.isArray(updated)) {
+      if (isArray(updated)) {
         updated.splice(((oldKey: any): number), 1);
       } else {
         delete updated[oldKey];
@@ -564,7 +561,7 @@ if (__DEV__) {
       return value;
     }
     const key = path[index];
-    const updated = Array.isArray(obj) ? obj.slice() : {...obj};
+    const updated = isArray(obj) ? obj.slice() : {...obj};
     // $FlowFixMe number or string is fine here
     updated[key] = copyWithSetImpl(obj[key], path, index + 1, value);
     return updated;
@@ -687,6 +684,10 @@ if (__DEV__) {
     scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
   };
 
+  setErrorHandler = (newShouldErrorImpl: Fiber => ?boolean) => {
+    shouldErrorImpl = newShouldErrorImpl;
+  };
+
   setSuspenseHandler = (newShouldSuspendImpl: Fiber => boolean) => {
     shouldSuspendImpl = newShouldSuspendImpl;
   };
@@ -725,6 +726,7 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     overrideProps,
     overridePropsDeletePath,
     overridePropsRenamePath,
+    setErrorHandler,
     setSuspenseHandler,
     scheduleUpdate,
     currentDispatcherRef: ReactCurrentDispatcher,
@@ -738,5 +740,8 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     setRefreshHandler: __DEV__ ? setRefreshHandler : null,
     // Enables DevTools to append owner stacks to error messages in DEV mode.
     getCurrentFiber: __DEV__ ? getCurrentFiberForDevTools : null,
+    // Enables DevTools to detect reconciler version rather than renderer version
+    // which may not match for third party renderers.
+    reconcilerVersion: ReactVersion,
   });
 }

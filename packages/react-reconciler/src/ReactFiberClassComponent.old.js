@@ -10,9 +10,15 @@
 import type {Fiber} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane.old';
 import type {UpdateQueue} from './ReactUpdateQueue.old';
+import type {Flags} from './ReactFiberFlags';
 
 import * as React from 'react';
-import {MountLayoutDev, Update, Snapshot} from './ReactFiberFlags';
+import {
+  LayoutStatic,
+  MountLayoutDev,
+  Update,
+  Snapshot,
+} from './ReactFiberFlags';
 import {
   debugRenderPhaseSideEffectsForStrictMode,
   disableLegacyContext,
@@ -21,6 +27,7 @@ import {
   warnAboutDeprecatedLifecycles,
   enableStrictEffects,
   enableLazyContextPropagation,
+  enableSuspenseLayoutEffectSemantics,
 } from 'shared/ReactFeatureFlags';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings.old';
 import {isMounted} from './ReactFiberTreeReflection';
@@ -29,6 +36,7 @@ import shallowEqual from 'shared/shallowEqual';
 import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
 import getComponentNameFromType from 'shared/getComponentNameFromType';
 import invariant from 'shared/invariant';
+import isArray from 'shared/isArray';
 import {REACT_CONTEXT_TYPE, REACT_PROVIDER_TYPE} from 'shared/ReactSymbols';
 
 import {resolveDefaultProps} from './ReactFiberLazyComponent.old';
@@ -74,7 +82,6 @@ import {
 } from './SchedulingProfiler';
 
 const fakeInternalInstance = {};
-const isArray = Array.isArray;
 
 // React.Component uses a shared frozen object by default.
 // We'll use it to determine whether we need to initialize legacy refs.
@@ -155,14 +162,14 @@ if (__DEV__) {
   Object.freeze(fakeInternalInstance);
 }
 
-export function applyDerivedStateFromProps(
+function applyDerivedStateFromProps(
   workInProgress: Fiber,
   ctor: any,
   getDerivedStateFromProps: (props: any, state: any) => any,
   nextProps: any,
 ) {
   const prevState = workInProgress.memoizedState;
-
+  let partialState = getDerivedStateFromProps(nextProps, prevState);
   if (__DEV__) {
     if (
       debugRenderPhaseSideEffectsForStrictMode &&
@@ -171,16 +178,11 @@ export function applyDerivedStateFromProps(
       disableLogs();
       try {
         // Invoke the function an extra time to help detect side-effects.
-        getDerivedStateFromProps(nextProps, prevState);
+        partialState = getDerivedStateFromProps(nextProps, prevState);
       } finally {
         reenableLogs();
       }
     }
-  }
-
-  const partialState = getDerivedStateFromProps(nextProps, prevState);
-
-  if (__DEV__) {
     warnOnUndefinedDerivedState(ctor, partialState);
   }
   // Merge the partial state and the previous state.
@@ -316,6 +318,11 @@ function checkShouldComponentUpdate(
 ) {
   const instance = workInProgress.stateNode;
   if (typeof instance.shouldComponentUpdate === 'function') {
+    let shouldUpdate = instance.shouldComponentUpdate(
+      newProps,
+      newState,
+      nextContext,
+    );
     if (__DEV__) {
       if (
         debugRenderPhaseSideEffectsForStrictMode &&
@@ -324,19 +331,15 @@ function checkShouldComponentUpdate(
         disableLogs();
         try {
           // Invoke the function an extra time to help detect side-effects.
-          instance.shouldComponentUpdate(newProps, newState, nextContext);
+          shouldUpdate = instance.shouldComponentUpdate(
+            newProps,
+            newState,
+            nextContext,
+          );
         } finally {
           reenableLogs();
         }
       }
-    }
-    const shouldUpdate = instance.shouldComponentUpdate(
-      newProps,
-      newState,
-      nextContext,
-    );
-
-    if (__DEV__) {
       if (shouldUpdate === undefined) {
         console.error(
           '%s.shouldComponentUpdate(): Returned undefined instead of a ' +
@@ -652,6 +655,7 @@ function constructClassInstance(
       : emptyContextObject;
   }
 
+  let instance = new ctor(props, context);
   // Instantiate twice to help detect side-effects.
   if (__DEV__) {
     if (
@@ -660,14 +664,13 @@ function constructClassInstance(
     ) {
       disableLogs();
       try {
-        new ctor(props, context); // eslint-disable-line no-new
+        instance = new ctor(props, context); // eslint-disable-line no-new
       } finally {
         reenableLogs();
       }
     }
   }
 
-  const instance = new ctor(props, context);
   const state = (workInProgress.memoizedState =
     instance.state !== null && instance.state !== undefined
       ? instance.state
@@ -878,7 +881,6 @@ function mountClassInstance(
     }
   }
 
-  processUpdateQueue(workInProgress, newProps, instance, renderLanes);
   instance.state = workInProgress.memoizedState;
 
   const getDerivedStateFromProps = ctor.getDerivedStateFromProps;
@@ -908,16 +910,18 @@ function mountClassInstance(
   }
 
   if (typeof instance.componentDidMount === 'function') {
+    let fiberFlags: Flags = Update;
+    if (enableSuspenseLayoutEffectSemantics) {
+      fiberFlags |= LayoutStatic;
+    }
     if (
       __DEV__ &&
       enableStrictEffects &&
       (workInProgress.mode & StrictEffectsMode) !== NoMode
     ) {
-      // Never double-invoke effects for legacy roots.
-      workInProgress.flags |= MountLayoutDev | Update;
-    } else {
-      workInProgress.flags |= Update;
+      fiberFlags |= MountLayoutDev;
     }
+    workInProgress.flags |= fiberFlags;
   }
 }
 
@@ -987,16 +991,18 @@ function resumeMountClassInstance(
     // If an update was already in progress, we should schedule an Update
     // effect even though we're bailing out, so that cWU/cDU are called.
     if (typeof instance.componentDidMount === 'function') {
+      let fiberFlags: Flags = Update;
+      if (enableSuspenseLayoutEffectSemantics) {
+        fiberFlags |= LayoutStatic;
+      }
       if (
         __DEV__ &&
         enableStrictEffects &&
         (workInProgress.mode & StrictEffectsMode) !== NoMode
       ) {
-        // Never double-invoke effects for legacy roots.
-        workInProgress.flags |= MountLayoutDev | Update;
-      } else {
-        workInProgress.flags |= Update;
+        fiberFlags |= MountLayoutDev;
       }
+      workInProgress.flags |= fiberFlags;
     }
     return false;
   }
@@ -1039,31 +1045,35 @@ function resumeMountClassInstance(
       }
     }
     if (typeof instance.componentDidMount === 'function') {
+      let fiberFlags: Flags = Update;
+      if (enableSuspenseLayoutEffectSemantics) {
+        fiberFlags |= LayoutStatic;
+      }
       if (
         __DEV__ &&
         enableStrictEffects &&
         (workInProgress.mode & StrictEffectsMode) !== NoMode
       ) {
-        // Never double-invoke effects for legacy roots.
-        workInProgress.flags |= MountLayoutDev | Update;
-      } else {
-        workInProgress.flags |= Update;
+        fiberFlags |= MountLayoutDev;
       }
+      workInProgress.flags |= fiberFlags;
     }
   } else {
     // If an update was already in progress, we should schedule an Update
     // effect even though we're bailing out, so that cWU/cDU are called.
     if (typeof instance.componentDidMount === 'function') {
+      let fiberFlags: Flags = Update;
+      if (enableSuspenseLayoutEffectSemantics) {
+        fiberFlags |= LayoutStatic;
+      }
       if (
         __DEV__ &&
         enableStrictEffects &&
         (workInProgress.mode & StrictEffectsMode) !== NoMode
       ) {
-        // Never double-invoke effects for legacy roots.
-        workInProgress.flags |= MountLayoutDev | Update;
-      } else {
-        workInProgress.flags |= Update;
+        fiberFlags |= MountLayoutDev;
       }
+      workInProgress.flags |= fiberFlags;
     }
 
     // If shouldComponentUpdate returned false, we should still update the

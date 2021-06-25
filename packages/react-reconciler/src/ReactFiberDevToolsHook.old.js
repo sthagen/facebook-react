@@ -25,7 +25,7 @@ import {
   UserBlockingPriority as UserBlockingSchedulerPriority,
   NormalPriority as NormalSchedulerPriority,
   IdlePriority as IdleSchedulerPriority,
-} from './SchedulerWithReactIntegration.old';
+} from './Scheduler';
 
 declare var __REACT_DEVTOOLS_GLOBAL_HOOK__: Object | void;
 
@@ -123,6 +123,24 @@ export function onCommitRoot(root: FiberRoot, eventPriority: EventPriority) {
       } else {
         injectedHook.onCommitFiberRoot(rendererID, root, undefined, didError);
       }
+    } catch (err) {
+      if (__DEV__) {
+        if (!hasLoggedError) {
+          hasLoggedError = true;
+          console.error('React instrumentation encountered an error: %s', err);
+        }
+      }
+    }
+  }
+}
+
+export function onPostCommitRoot(root: FiberRoot) {
+  if (
+    injectedHook &&
+    typeof injectedHook.onPostCommitFiberRoot === 'function'
+  ) {
+    try {
+      injectedHook.onPostCommitFiberRoot(rendererID, root);
     } catch (err) {
       if (__DEV__) {
         if (!hasLoggedError) {
