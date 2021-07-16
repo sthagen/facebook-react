@@ -10,7 +10,6 @@
  */
 
 import {parse} from '@babel/parser';
-import {enableHookNameParsing} from 'react-devtools-feature-flags';
 import LRU from 'lru-cache';
 import {SourceMapConsumer} from 'source-map';
 import {getHookName} from './astUtils';
@@ -102,13 +101,9 @@ const originalURLToMetadataCache: LRUCache<
   },
 });
 
-export default async function parseHookNames(
+export async function parseHookNames(
   hooksTree: HooksTree,
 ): Thenable<HookNames | null> {
-  if (!enableHookNameParsing) {
-    return Promise.resolve(null);
-  }
-
   const hooksList: Array<HooksNode> = [];
   flattenHooksList(hooksTree, hooksList);
 
@@ -622,4 +617,9 @@ function updateLruCache(
     }
   });
   return Promise.resolve();
+}
+
+export function purgeCachedMetadata(): void {
+  originalURLToMetadataCache.reset();
+  runtimeURLToMetadataCache.reset();
 }
