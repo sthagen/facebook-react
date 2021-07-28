@@ -8,7 +8,13 @@
  */
 
 import type {NativeEvent, ReactProfilerData} from '../types';
-import type {Interaction, MouseMoveInteraction, Rect, Size} from '../view-base';
+import type {
+  Interaction,
+  MouseMoveInteraction,
+  Rect,
+  Size,
+  ViewRefs,
+} from '../view-base';
 
 import {
   durationToWidth,
@@ -72,7 +78,6 @@ export class NativeEventsView extends View {
     this._profilerData = profilerData;
 
     this._performPreflightComputations();
-    console.log(this._depthToNativeEvent);
   }
 
   _performPreflightComputations() {
@@ -123,7 +128,7 @@ export class NativeEventsView extends View {
     showHoverHighlight: boolean,
   ) {
     const {frame} = this;
-    const {depth, duration, highlight, timestamp, type} = event;
+    const {depth, duration, timestamp, type, warnings} = event;
 
     baseY += depth * ROW_WITH_BORDER_HEIGHT;
 
@@ -147,7 +152,7 @@ export class NativeEventsView extends View {
 
     const drawableRect = intersectionOfRects(eventRect, rect);
     context.beginPath();
-    if (highlight) {
+    if (warnings !== null) {
       context.fillStyle = showHoverHighlight
         ? COLORS.NATIVE_EVENT_WARNING_HOVER
         : COLORS.NATIVE_EVENT_WARNING;
@@ -177,9 +182,10 @@ export class NativeEventsView extends View {
       );
 
       if (trimmedName !== null) {
-        context.fillStyle = highlight
-          ? COLORS.NATIVE_EVENT_WARNING_TEXT
-          : COLORS.TEXT_COLOR;
+        context.fillStyle =
+          warnings !== null
+            ? COLORS.NATIVE_EVENT_WARNING_TEXT
+            : COLORS.TEXT_COLOR;
 
         context.fillText(
           trimmedName,
@@ -250,7 +256,7 @@ export class NativeEventsView extends View {
   /**
    * @private
    */
-  _handleMouseMove(interaction: MouseMoveInteraction) {
+  _handleMouseMove(interaction: MouseMoveInteraction, viewRefs: ViewRefs) {
     const {frame, _intrinsicSize, onHover, visibleArea} = this;
     if (!onHover) {
       return;
@@ -279,6 +285,10 @@ export class NativeEventsView extends View {
           hoverTimestamp >= timestamp &&
           hoverTimestamp <= timestamp + duration
         ) {
+          this.currentCursor = 'pointer';
+
+          viewRefs.hoveredView = this;
+
           onHover(nativeEvent);
           return;
         }
@@ -288,10 +298,10 @@ export class NativeEventsView extends View {
     onHover(null);
   }
 
-  handleInteraction(interaction: Interaction) {
+  handleInteraction(interaction: Interaction, viewRefs: ViewRefs) {
     switch (interaction.type) {
       case 'mousemove':
-        this._handleMouseMove(interaction);
+        this._handleMouseMove(interaction, viewRefs);
         break;
     }
   }
