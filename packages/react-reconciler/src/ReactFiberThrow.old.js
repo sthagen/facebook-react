@@ -33,6 +33,10 @@ import {
   LifecycleEffectMask,
   ForceUpdateForLegacySuspense,
 } from './ReactFiberFlags';
+import {
+  supportsPersistence,
+  getOffscreenContainerProps,
+} from './ReactFiberHostConfig';
 import {shouldCaptureSuspense} from './ReactFiberSuspenseComponent.old';
 import {NoMode, ConcurrentMode, DebugTracingMode} from './ReactTypeOfMode';
 import {
@@ -313,6 +317,26 @@ function throwException(
           // all lifecycle effect tags.
           sourceFiber.flags &= ~(LifecycleEffectMask | Incomplete);
 
+          if (supportsPersistence) {
+            // Another legacy Suspense quirk. In persistent mode, if this is the
+            // initial mount, override the props of the host container to hide
+            // its contents.
+            const currentSuspenseBoundary = workInProgress.alternate;
+            if (currentSuspenseBoundary === null) {
+              const offscreenFiber: Fiber = (workInProgress.child: any);
+              const offscreenContainer = offscreenFiber.child;
+              if (offscreenContainer !== null) {
+                const children = offscreenContainer.memoizedProps.children;
+                const containerProps = getOffscreenContainerProps(
+                  'hidden',
+                  children,
+                );
+                offscreenContainer.pendingProps = containerProps;
+                offscreenContainer.memoizedProps = containerProps;
+              }
+            }
+          }
+
           if (sourceFiber.tag === ClassComponent) {
             const currentSourceFiber = sourceFiber.alternate;
             if (currentSourceFiber === null) {
@@ -383,6 +407,8 @@ function throwException(
         attachPingListener(root, wakeable, rootRenderLanes);
 
         workInProgress.flags |= ShouldCapture;
+        // TODO: I think we can remove this, since we now use `DidCapture` in
+        // the begin phase to prevent an early bailout.
         workInProgress.lanes = rootRenderLanes;
 
         return;
