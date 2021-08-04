@@ -15,6 +15,7 @@ import {
   useContext,
   useDeferredValue,
   useLayoutEffect,
+  useRef,
   useState,
 } from 'react';
 import {SettingsContext} from 'react-devtools-shared/src/devtools/views/Settings/SettingsContext';
@@ -30,6 +31,8 @@ export function SchedulingProfiler(_: {||}) {
     SchedulingProfilerContext,
   );
 
+  const ref = useRef(null);
+
   // HACK: Canvas rendering uses an imperative API,
   // but DevTools colors are stored in CSS variables (see root.css and SettingsContext).
   // When the theme changes, we need to trigger update the imperative colors and re-draw the Canvas.
@@ -41,12 +44,22 @@ export function SchedulingProfiler(_: {||}) {
   // The easiest way to guarangee this happens is to recreate the inner Canvas component.
   const [key, setKey] = useState<string>(theme);
   useLayoutEffect(() => {
-    updateColorsToMatchTheme();
-    setKey(deferredTheme);
+    const pollForTheme = () => {
+      if (updateColorsToMatchTheme(((ref.current: any): HTMLDivElement))) {
+        clearInterval(intervalID);
+        setKey(deferredTheme);
+      }
+    };
+
+    const intervalID = setInterval(pollForTheme, 50);
+
+    return () => {
+      clearInterval(intervalID);
+    };
   }, [deferredTheme]);
 
   return (
-    <div className={styles.Content}>
+    <div className={styles.Content} ref={ref}>
       {schedulingProfilerData ? (
         <Suspense fallback={<ProcessingData />}>
           <DataResourceComponent

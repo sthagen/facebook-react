@@ -44,6 +44,7 @@ import {
   enableSchedulingProfiler,
   enableLazyContextPropagation,
   enableUpdaterTracking,
+  enablePersistentOffscreenHostContainer,
 } from 'shared/ReactFeatureFlags';
 import {createCapturedValue} from './ReactCapturedValue';
 import {
@@ -70,7 +71,10 @@ import {
 import {propagateParentContextChangesToDeferredTree} from './ReactFiberNewContext.new';
 import {logCapturedError} from './ReactFiberErrorLogger';
 import {logComponentSuspended} from './DebugTracing';
-import {markComponentSuspended} from './SchedulingProfiler';
+import {
+  markComponentRenderStopped,
+  markComponentSuspended,
+} from './SchedulingProfiler';
 import {isDevToolsPresent} from './ReactFiberDevToolsHook.new';
 import {
   SyncLane,
@@ -244,7 +248,8 @@ function throwException(
     }
 
     if (enableSchedulingProfiler) {
-      markComponentSuspended(sourceFiber, wakeable);
+      markComponentRenderStopped();
+      markComponentSuspended(sourceFiber, wakeable, rootRenderLanes);
     }
 
     // Reset the memoizedState to what it was before we attempted to render it.
@@ -317,7 +322,7 @@ function throwException(
           // all lifecycle effect tags.
           sourceFiber.flags &= ~(LifecycleEffectMask | Incomplete);
 
-          if (supportsPersistence) {
+          if (supportsPersistence && enablePersistentOffscreenHostContainer) {
             // Another legacy Suspense quirk. In persistent mode, if this is the
             // initial mount, override the props of the host container to hide
             // its contents.

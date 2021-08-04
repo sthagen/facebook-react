@@ -97,6 +97,23 @@ export function markCommitStopped(): void {
   }
 }
 
+export function markComponentRenderStarted(fiber: Fiber): void {
+  if (enableSchedulingProfiler) {
+    if (supportsUserTimingV3) {
+      const componentName = getComponentNameFromFiber(fiber) || 'Unknown';
+      markAndClear(`--component-render-start-${componentName}`);
+    }
+  }
+}
+
+export function markComponentRenderStopped(): void {
+  if (enableSchedulingProfiler) {
+    if (supportsUserTimingV3) {
+      markAndClear('--component-render-stop');
+    }
+  }
+}
+
 const PossiblyWeakMap = typeof WeakMap === 'function' ? WeakMap : Map;
 
 // $FlowFixMe: Flow cannot handle polymorphic WeakMaps
@@ -109,13 +126,23 @@ function getWakeableID(wakeable: Wakeable): number {
   return ((wakeableIDs.get(wakeable): any): number);
 }
 
-export function markComponentSuspended(fiber: Fiber, wakeable: Wakeable): void {
+export function markComponentSuspended(
+  fiber: Fiber,
+  wakeable: Wakeable,
+  lanes: Lanes,
+): void {
   if (enableSchedulingProfiler) {
     if (supportsUserTimingV3) {
+      const eventType = wakeableIDs.has(wakeable) ? 'resuspend' : 'suspend';
       const id = getWakeableID(wakeable);
       const componentName = getComponentNameFromFiber(fiber) || 'Unknown';
-      // TODO Add component stack id
-      markAndClear(`--suspense-suspend-${id}-${componentName}`);
+      const phase = fiber.alternate === null ? 'mount' : 'update';
+      // TODO (scheduling profiler) Add component stack id if we re-add component stack info.
+      markAndClear(
+        `--suspense-${eventType}-${id}-${componentName}-${phase}-${formatLanes(
+          lanes,
+        )}`,
+      );
       wakeable.then(
         () => markAndClear(`--suspense-resolved-${id}-${componentName}`),
         () => markAndClear(`--suspense-rejected-${id}-${componentName}`),

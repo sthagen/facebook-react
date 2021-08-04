@@ -31,7 +31,10 @@ import type {
 import type {UpdateQueue} from './ReactUpdateQueue.old';
 
 import checkPropTypes from 'shared/checkPropTypes';
-
+import {
+  markComponentRenderStarted,
+  markComponentRenderStopped,
+} from './SchedulingProfiler';
 import {
   IndeterminateComponent,
   FunctionComponent,
@@ -85,6 +88,8 @@ import {
   enableCache,
   enableLazyContextPropagation,
   enableSuspenseLayoutEffectSemantics,
+  enableSchedulingProfiler,
+  enablePersistentOffscreenHostContainer,
 } from 'shared/ReactFeatureFlags';
 import invariant from 'shared/invariant';
 import isArray from 'shared/isArray';
@@ -142,7 +147,6 @@ import {
   registerSuspenseInstanceRetry,
   supportsHydration,
   isPrimaryRenderer,
-  supportsMutation,
   supportsPersistence,
   getOffscreenContainerProps,
 } from './ReactFiberHostConfig';
@@ -357,6 +361,9 @@ function updateForwardRef(
   // The rest is a fork of updateFunctionComponent
   let nextChildren;
   prepareToReadContext(workInProgress, renderLanes);
+  if (enableSchedulingProfiler) {
+    markComponentRenderStarted(workInProgress);
+  }
   if (__DEV__) {
     ReactCurrentOwner.current = workInProgress;
     setIsRendering(true);
@@ -396,6 +403,9 @@ function updateForwardRef(
       ref,
       renderLanes,
     );
+  }
+  if (enableSchedulingProfiler) {
+    markComponentRenderStopped();
   }
 
   if (current !== null && !didReceiveUpdate) {
@@ -734,7 +744,7 @@ function updateOffscreenComponent(
     workInProgress.updateQueue = spawnedCachePool;
   }
 
-  if (supportsPersistence) {
+  if (enablePersistentOffscreenHostContainer && supportsPersistence) {
     // In persistent mode, the offscreen children are wrapped in a host node.
     // TODO: Optimize this to use the OffscreenComponent fiber instead of
     // an extra HostComponent fiber. Need to make sure this doesn't break Fabric
@@ -750,12 +760,10 @@ function updateOffscreenComponent(
       renderLanes,
     );
     return offscreenContainer;
-  }
-  if (supportsMutation) {
+  } else {
     reconcileChildren(current, workInProgress, nextChildren, renderLanes);
     return workInProgress.child;
   }
-  return null;
 }
 
 function reconcileOffscreenHostContainer(
@@ -958,6 +966,9 @@ function updateFunctionComponent(
 
   let nextChildren;
   prepareToReadContext(workInProgress, renderLanes);
+  if (enableSchedulingProfiler) {
+    markComponentRenderStarted(workInProgress);
+  }
   if (__DEV__) {
     ReactCurrentOwner.current = workInProgress;
     setIsRendering(true);
@@ -997,6 +1008,9 @@ function updateFunctionComponent(
       context,
       renderLanes,
     );
+  }
+  if (enableSchedulingProfiler) {
+    markComponentRenderStopped();
   }
 
   if (current !== null && !didReceiveUpdate) {
@@ -1177,6 +1191,9 @@ function finishClassComponent(
       stopProfilerTimerIfRunning(workInProgress);
     }
   } else {
+    if (enableSchedulingProfiler) {
+      markComponentRenderStarted(workInProgress);
+    }
     if (__DEV__) {
       setIsRendering(true);
       nextChildren = instance.render();
@@ -1194,6 +1211,9 @@ function finishClassComponent(
       setIsRendering(false);
     } else {
       nextChildren = instance.render();
+    }
+    if (enableSchedulingProfiler) {
+      markComponentRenderStopped();
     }
   }
 
@@ -1567,6 +1587,9 @@ function mountIndeterminateComponent(
   prepareToReadContext(workInProgress, renderLanes);
   let value;
 
+  if (enableSchedulingProfiler) {
+    markComponentRenderStarted(workInProgress);
+  }
   if (__DEV__) {
     if (
       Component.prototype &&
@@ -1610,6 +1633,10 @@ function mountIndeterminateComponent(
       renderLanes,
     );
   }
+  if (enableSchedulingProfiler) {
+    markComponentRenderStopped();
+  }
+
   // React DevTools reads this flag.
   workInProgress.flags |= PerformedWork;
 
@@ -2354,7 +2381,7 @@ function updateSuspenseFallbackChildren(
         currentPrimaryChildFragment.treeBaseDuration;
     }
 
-    if (supportsPersistence) {
+    if (enablePersistentOffscreenHostContainer && supportsPersistence) {
       // In persistent mode, the offscreen children are wrapped in a host node.
       // We need to complete it now, because we're going to skip over its normal
       // complete phase and go straight to rendering the fallback.
@@ -2382,7 +2409,7 @@ function updateSuspenseFallbackChildren(
       primaryChildProps,
     );
 
-    if (supportsPersistence) {
+    if (enablePersistentOffscreenHostContainer && supportsPersistence) {
       // In persistent mode, the offscreen children are wrapped in a host node.
       // We need to complete it now, because we're going to skip over its normal
       // complete phase and go straight to rendering the fallback.
@@ -3195,6 +3222,9 @@ function updateContextConsumer(
 
   prepareToReadContext(workInProgress, renderLanes);
   const newValue = readContext(context);
+  if (enableSchedulingProfiler) {
+    markComponentRenderStarted(workInProgress);
+  }
   let newChildren;
   if (__DEV__) {
     ReactCurrentOwner.current = workInProgress;
@@ -3203,6 +3233,9 @@ function updateContextConsumer(
     setIsRendering(false);
   } else {
     newChildren = render(newValue);
+  }
+  if (enableSchedulingProfiler) {
+    markComponentRenderStopped();
   }
 
   // React DevTools reads this flag.
