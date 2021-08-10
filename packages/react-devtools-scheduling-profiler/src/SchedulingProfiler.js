@@ -8,6 +8,7 @@
  */
 
 import type {DataResource} from './createDataResourceFromImportedFile';
+import type {ViewState} from './types';
 
 import * as React from 'react';
 import {
@@ -27,9 +28,11 @@ import CanvasPage from './CanvasPage';
 import styles from './SchedulingProfiler.css';
 
 export function SchedulingProfiler(_: {||}) {
-  const {importSchedulingProfilerData, schedulingProfilerData} = useContext(
-    SchedulingProfilerContext,
-  );
+  const {
+    importSchedulingProfilerData,
+    schedulingProfilerData,
+    viewState,
+  } = useContext(SchedulingProfilerContext);
 
   const ref = useRef(null);
 
@@ -66,6 +69,7 @@ export function SchedulingProfiler(_: {||}) {
             dataResource={schedulingProfilerData}
             key={key}
             onFileSelect={importSchedulingProfilerData}
+            viewState={viewState}
           />
         </Suspense>
       ) : (
@@ -86,7 +90,7 @@ const Welcome = ({onFileSelect}: {|onFileSelect: (file: File) => void|}) => (
         target="_blank">
         profiling build of ReactDOM
       </a>
-      .
+      (version 18 or newer).
     </li>
     <li className={styles.WelcomeInstructionsListItem}>
       Open the "Performance" tab in Chrome and record some performance data.
@@ -130,9 +134,11 @@ const CouldNotLoadProfile = ({error, onFileSelect}) => (
 const DataResourceComponent = ({
   dataResource,
   onFileSelect,
+  viewState,
 }: {|
   dataResource: DataResource,
   onFileSelect: (file: File) => void,
+  viewState: ViewState,
 |}) => {
   const dataOrError = dataResource.read();
   if (dataOrError instanceof Error) {
@@ -140,5 +146,5 @@ const DataResourceComponent = ({
       <CouldNotLoadProfile error={dataOrError} onFileSelect={onFileSelect} />
     );
   }
-  return <CanvasPage profilerData={dataOrError} />;
+  return <CanvasPage profilerData={dataOrError} viewState={viewState} />;
 };

@@ -13,24 +13,28 @@ import {
 } from '@elg/speedscope';
 import type {TimelineEvent} from '@elg/speedscope';
 import type {
-  Milliseconds,
   BatchUID,
   Flamechart,
+  Milliseconds,
   NativeEvent,
+  Phase,
   ReactLane,
   ReactComponentMeasure,
+  ReactMeasure,
   ReactMeasureType,
   ReactProfilerData,
+  SchedulingEvent,
   SuspenseEvent,
 } from '../types';
 
-import {REACT_TOTAL_NUM_LANES} from '../constants';
+import {REACT_TOTAL_NUM_LANES, SCHEDULING_PROFILER_VERSION} from '../constants';
 import InvalidProfileError from './InvalidProfileError';
+import {getBatchRange} from '../utils/getBatchRange';
 
 type MeasureStackElement = {|
   type: ReactMeasureType,
   depth: number,
-  index: number,
+  measure: ReactMeasure,
   startTime: Milliseconds,
   stopTime?: Milliseconds,
 |};
@@ -41,18 +45,27 @@ type ProcessorState = {|
   measureStack: MeasureStackElement[],
   nativeEventStack: NativeEvent[],
   nextRenderShouldGenerateNewBatchID: boolean,
+  potentialLongEvents: Array<[NativeEvent, BatchUID]>,
+  potentialLongNestedUpdate: SchedulingEvent | null,
+  potentialLongNestedUpdates: Array<[SchedulingEvent, BatchUID]>,
+  potentialSuspenseEventsOutsideOfTransition: Array<
+    [SuspenseEvent, ReactLane[]],
+  >,
   uidCounter: BatchUID,
   unresolvedSuspenseEvents: Map<string, SuspenseEvent>,
 |};
 
 const NATIVE_EVENT_DURATION_THRESHOLD = 20;
+const NESTED_UPDATE_DURATION_THRESHOLD = 20;
 
 const WARNING_STRINGS = {
   LONG_EVENT_HANDLER:
     'An event handler scheduled a big update with React. Consider using the Transition API to defer some of this work.',
   NESTED_UPDATE:
-    'A nested update was scheduled during layout. These updates require React to re-render synchronously before the browser can paint.',
-  SUSPENDD_DURING_UPATE:
+    'A big nested update was scheduled during layout. ' +
+    'Nested updates require React to re-render synchronously before the browser can paint. ' +
+    'Consider delaying this update by moving it to a passive effect (useEffect).',
+  SUSPEND_DURING_UPATE:
     'A component suspended during an update which caused a fallback to be shown. ' +
     "Consider using the Transition API to avoid hiding components after they've been mounted.",
 };
@@ -80,6 +93,25 @@ export function getLanesFromTransportDecimalBitmask(
   return lanes;
 }
 
+function updateLaneToLabelMap(
+  profilerData: ReactProfilerData,
+  laneLabelTuplesString: string,
+): void {
+  // These marks appear multiple times in the data;
+  // We only need to extact them once.
+  if (profilerData.laneToLabelMap.size === 0) {
+    const laneLabelTuples = laneLabelTuplesString.split(',');
+    for (let laneIndex = 0; laneIndex < laneLabelTuples.length; laneIndex++) {
+      // The numeric lane value (e.g. 64) isn't important.
+      // The profiler parses and stores the lane's position within the bitmap,
+      // (e.g. lane 1 is index 0, lane 16 is index 4).
+      profilerData.laneToLabelMap.set(laneIndex, laneLabelTuples[laneIndex]);
+    }
+  }
+}
+
+let profilerVersion = null;
+
 function getLastType(stack: $PropertyType<ProcessorState, 'measureStack'>) {
   if (stack.length > 0) {
     const {type} = stack[stack.length - 1];
@@ -100,24 +132,36 @@ function markWorkStarted(
   type: ReactMeasureType,
   startTime: Milliseconds,
   lanes: ReactLane[],
-  laneLabels: Array<string>,
   currentProfilerData: ReactProfilerData,
   state: ProcessorState,
 ) {
   const {batchUID, measureStack} = state;
-  const index = currentProfilerData.measures.length;
   const depth = getDepth(measureStack);
 
-  state.measureStack.push({depth, index, startTime, type});
-
-  currentProfilerData.measures.push({
+  const measure: ReactMeasure = {
     type,
     batchUID,
     depth,
     lanes,
-    laneLabels,
     timestamp: startTime,
     duration: 0,
+  };
+
+  state.measureStack.push({depth, measure, startTime, type});
+
+  // This array is pre-initialized when the batchUID is generated.
+  const measures = currentProfilerData.batchUIDToMeasuresMap.get(batchUID);
+  if (measures != null) {
+    measures.push(measure);
+  } else {
+    currentProfilerData.batchUIDToMeasuresMap.set(state.batchUID, [measure]);
+  }
+
+  // This array is pre-initialized before processing starts.
+  lanes.forEach(lane => {
+    ((currentProfilerData.laneToReactMeasureMap.get(
+      lane,
+    ): any): ReactMeasure[]).push(measure);
   });
 }
 
@@ -147,8 +191,7 @@ function markWorkCompleted(
     );
   }
 
-  const {index, startTime} = stack.pop();
-  const measure = currentProfilerData.measures[index];
+  const {measure, startTime} = stack.pop();
   if (!measure) {
     console.error('Could not find matching measure for type "%s".', type);
   }
@@ -242,7 +285,21 @@ function processTimelineEvent(
     case 'blink.user_timing':
       const startTime = (ts - currentProfilerData.startTime) / 1000;
 
-      if (name.startsWith('--component-render-start-')) {
+      if (name.startsWith('--react-version-')) {
+        const [reactVersion] = name.substr(16).split('-');
+        currentProfilerData.reactVersion = reactVersion;
+      } else if (name.startsWith('--profiler-version-')) {
+        const [versionString] = name.substr(19).split('-');
+        profilerVersion = parseInt(versionString, 10);
+        if (profilerVersion !== SCHEDULING_PROFILER_VERSION) {
+          throw new InvalidProfileError(
+            `This version of profiling data (${versionString}) is not supported by the current profiler.`,
+          );
+        }
+      } else if (name.startsWith('--react-lane-labels-')) {
+        const [laneLabelTuplesString] = name.substr(20).split('-');
+        updateLaneToLabelMap(currentProfilerData, laneLabelTuplesString);
+      } else if (name.startsWith('--component-render-start-')) {
         const [componentName] = name.substr(25).split('-');
 
         if (state.currentReactComponentMeasure !== null) {
@@ -268,77 +325,58 @@ function processTimelineEvent(
           currentProfilerData.componentMeasures.push(componentMeasure);
         }
       } else if (name.startsWith('--schedule-render-')) {
-        const [laneBitmaskString, laneLabels] = name.substr(18).split('-');
+        const [laneBitmaskString] = name.substr(18).split('-');
+
         currentProfilerData.schedulingEvents.push({
           type: 'schedule-render',
           lanes: getLanesFromTransportDecimalBitmask(laneBitmaskString),
-          laneLabels: laneLabels ? laneLabels.split(',') : [],
           timestamp: startTime,
           warning: null,
         });
       } else if (name.startsWith('--schedule-forced-update-')) {
-        const [laneBitmaskString, laneLabels, componentName] = name
-          .substr(25)
-          .split('-');
+        const [laneBitmaskString, componentName] = name.substr(25).split('-');
 
-        let warning = null;
-        if (state.measureStack.find(({type}) => type === 'commit')) {
-          // TODO (scheduling profiler) Only warn if the subsequent update is longer than some threshold.
-          warning = WARNING_STRINGS.NESTED_UPDATE;
-        }
-
-        currentProfilerData.schedulingEvents.push({
+        const forceUpdateEvent = {
           type: 'schedule-force-update',
           lanes: getLanesFromTransportDecimalBitmask(laneBitmaskString),
-          laneLabels: laneLabels ? laneLabels.split(',') : [],
           componentName,
           timestamp: startTime,
-          warning,
-        });
-      } else if (name.startsWith('--schedule-state-update-')) {
-        const [laneBitmaskString, laneLabels, componentName] = name
-          .substr(24)
-          .split('-');
+          warning: null,
+        };
 
-        let warning = null;
+        // If this is a nested update, make a note of it.
+        // Once we're done processing events, we'll check to see if it was a long update and warn about it.
         if (state.measureStack.find(({type}) => type === 'commit')) {
-          // TODO (scheduling profiler) Only warn if the subsequent update is longer than some threshold.
-          warning = WARNING_STRINGS.NESTED_UPDATE;
+          state.potentialLongNestedUpdate = forceUpdateEvent;
         }
 
-        currentProfilerData.schedulingEvents.push({
+        currentProfilerData.schedulingEvents.push(forceUpdateEvent);
+      } else if (name.startsWith('--schedule-state-update-')) {
+        const [laneBitmaskString, componentName] = name.substr(24).split('-');
+
+        const stateUpdateEvent = {
           type: 'schedule-state-update',
           lanes: getLanesFromTransportDecimalBitmask(laneBitmaskString),
-          laneLabels: laneLabels ? laneLabels.split(',') : [],
           componentName,
           timestamp: startTime,
-          warning,
-        });
+          warning: null,
+        };
+
+        // If this is a nested update, make a note of it.
+        // Once we're done processing events, we'll check to see if it was a long update and warn about it.
+        if (state.measureStack.find(({type}) => type === 'commit')) {
+          state.potentialLongNestedUpdate = stateUpdateEvent;
+        }
+
+        currentProfilerData.schedulingEvents.push(stateUpdateEvent);
       } // eslint-disable-line brace-style
 
       // React Events - suspense
       else if (name.startsWith('--suspense-suspend-')) {
-        const [id, componentName, ...rest] = name.substr(19).split('-');
-
-        // Older versions of the scheduling profiler data didn't contain phase or lane values.
-        let phase = null;
-        let warning = null;
-        if (rest.length === 3) {
-          switch (rest[0]) {
-            case 'mount':
-            case 'update':
-              phase = rest[0];
-              break;
-          }
-
-          if (phase === 'update') {
-            const laneLabels = rest[2];
-            // HACK This is a bit gross but the numeric lane value might change between render versions.
-            if (!laneLabels.includes('Transition')) {
-              warning = WARNING_STRINGS.SUSPENDD_DURING_UPATE;
-            }
-          }
-        }
+        const [id, componentName, phase, laneBitmaskString] = name
+          .substr(19)
+          .split('-');
+        const lanes = getLanesFromTransportDecimalBitmask(laneBitmaskString);
 
         const availableDepths = new Array(
           state.unresolvedSuspenseEvents.size + 1,
@@ -365,13 +403,24 @@ function processTimelineEvent(
           depth,
           duration: null,
           id,
-          phase,
+          phase: ((phase: any): Phase),
           resolution: 'unresolved',
           resuspendTimestamps: null,
           timestamp: startTime,
           type: 'suspense',
-          warning,
+          warning: null,
         };
+
+        if (phase === 'update') {
+          // If a component suspended during an update, we should verify that it was during a transition.
+          // We need the lane metadata to verify this though.
+          // Since that data is only logged during commit, we may not have it yet.
+          // Store these events for post-processing then.
+          state.potentialSuspenseEventsOutsideOfTransition.push([
+            suspenseEvent,
+            lanes,
+          ]);
+        }
 
         currentProfilerData.suspenseEvents.push(suspenseEvent);
         state.unresolvedSuspenseEvents.set(id, suspenseEvent);
@@ -411,15 +460,25 @@ function processTimelineEvent(
           state.nextRenderShouldGenerateNewBatchID = false;
           state.batchUID = ((state.uidCounter++: any): BatchUID);
         }
-        const [laneBitmaskString, laneLabels] = name.substr(15).split('-');
-        const lanes = getLanesFromTransportDecimalBitmask(laneBitmaskString);
+
+        // If this render is the result of a nested update, make a note of it.
+        // Once we're done processing events, we'll check to see if it was a long update and warn about it.
+        if (state.potentialLongNestedUpdate !== null) {
+          state.potentialLongNestedUpdates.push([
+            state.potentialLongNestedUpdate,
+            state.batchUID,
+          ]);
+          state.potentialLongNestedUpdate = null;
+        }
+
+        const [laneBitmaskString] = name.substr(15).split('-');
+
         throwIfIncomplete('render', state.measureStack);
         if (getLastType(state.measureStack) !== 'render-idle') {
           markWorkStarted(
             'render-idle',
             startTime,
-            lanes,
-            laneLabels ? laneLabels.split(',') : [],
+            getLanesFromTransportDecimalBitmask(laneBitmaskString),
             currentProfilerData,
             state,
           );
@@ -427,8 +486,7 @@ function processTimelineEvent(
         markWorkStarted(
           'render',
           startTime,
-          lanes,
-          laneLabels ? laneLabels.split(',') : [],
+          getLanesFromTransportDecimalBitmask(laneBitmaskString),
           currentProfilerData,
           state,
         );
@@ -436,11 +494,14 @@ function processTimelineEvent(
         for (let i = 0; i < state.nativeEventStack.length; i++) {
           const nativeEvent = state.nativeEventStack[i];
           const stopTime = nativeEvent.timestamp + nativeEvent.duration;
-          if (
-            stopTime > startTime &&
-            nativeEvent.duration > NATIVE_EVENT_DURATION_THRESHOLD
-          ) {
-            nativeEvent.warning = WARNING_STRINGS.LONG_EVENT_HANDLER;
+
+          // If React work was scheduled during an event handler, and the event had a long duration,
+          // it might be because the React render was long and stretched the event.
+          // It might also be that the React work was short and that something else stretched the event.
+          // Make a note of this event for now and we'll examine the batch of React render work later.
+          // (We can't know until we're done processing the React update anyway.)
+          if (stopTime > startTime) {
+            state.potentialLongEvents.push([nativeEvent, state.batchUID]);
           }
         }
       } else if (
@@ -472,13 +533,12 @@ function processTimelineEvent(
       // React Measures - commits
       else if (name.startsWith('--commit-start-')) {
         state.nextRenderShouldGenerateNewBatchID = true;
-        const [laneBitmaskString, laneLabels] = name.substr(15).split('-');
-        const lanes = getLanesFromTransportDecimalBitmask(laneBitmaskString);
+        const [laneBitmaskString] = name.substr(15).split('-');
+
         markWorkStarted(
           'commit',
           startTime,
-          lanes,
-          laneLabels ? laneLabels.split(',') : [],
+          getLanesFromTransportDecimalBitmask(laneBitmaskString),
           currentProfilerData,
           state,
         );
@@ -499,13 +559,12 @@ function processTimelineEvent(
 
       // React Measures - layout effects
       else if (name.startsWith('--layout-effects-start-')) {
-        const [laneBitmaskString, laneLabels] = name.substr(23).split('-');
-        const lanes = getLanesFromTransportDecimalBitmask(laneBitmaskString);
+        const [laneBitmaskString] = name.substr(23).split('-');
+
         markWorkStarted(
           'layout-effects',
           startTime,
-          lanes,
-          laneLabels ? laneLabels.split(',') : [],
+          getLanesFromTransportDecimalBitmask(laneBitmaskString),
           currentProfilerData,
           state,
         );
@@ -520,13 +579,12 @@ function processTimelineEvent(
 
       // React Measures - passive effects
       else if (name.startsWith('--passive-effects-start-')) {
-        const [laneBitmaskString, laneLabels] = name.substr(24).split('-');
-        const lanes = getLanesFromTransportDecimalBitmask(laneBitmaskString);
+        const [laneBitmaskString] = name.substr(24).split('-');
+
         markWorkStarted(
           'passive-effects',
           startTime,
-          lanes,
-          laneLabels ? laneLabels.split(',') : [],
+          getLanesFromTransportDecimalBitmask(laneBitmaskString),
           currentProfilerData,
           state,
         );
@@ -606,13 +664,21 @@ export default function preprocessData(
 ): ReactProfilerData {
   const flamechart = preprocessFlamechart(timeline);
 
+  const laneToReactMeasureMap = new Map();
+  for (let lane: ReactLane = 0; lane < REACT_TOTAL_NUM_LANES; lane++) {
+    laneToReactMeasureMap.set(lane, []);
+  }
+
   const profilerData: ReactProfilerData = {
+    batchUIDToMeasuresMap: new Map(),
     componentMeasures: [],
     duration: 0,
     flamechart,
-    measures: [],
+    laneToLabelMap: new Map(),
+    laneToReactMeasureMap,
     nativeEvents: [],
     otherUserTimingMarks: [],
+    reactVersion: null,
     schedulingEvents: [],
     startTime: 0,
     suspenseEvents: [],
@@ -650,17 +716,60 @@ export default function preprocessData(
     measureStack: [],
     nativeEventStack: [],
     nextRenderShouldGenerateNewBatchID: true,
+    potentialLongEvents: [],
+    potentialLongNestedUpdate: null,
+    potentialLongNestedUpdates: [],
+    potentialSuspenseEventsOutsideOfTransition: [],
     uidCounter: 0,
     unresolvedSuspenseEvents: new Map(),
   };
 
   timeline.forEach(event => processTimelineEvent(event, profilerData, state));
 
+  if (profilerVersion === null) {
+    throw new InvalidProfileError(
+      `This version of profiling data is not supported by the current profiler.`,
+    );
+  }
+
   // Validate that all events and measures are complete
   const {measureStack} = state;
   if (measureStack.length > 0) {
     console.error('Incomplete events or measures', measureStack);
   }
+
+  // Check for warnings.
+  state.potentialLongEvents.forEach(([nativeEvent, batchUID]) => {
+    // See how long the subsequent batch of React work was.
+    // Ignore any work that was already started.
+    const [startTime, stopTime] = getBatchRange(
+      batchUID,
+      profilerData,
+      nativeEvent.timestamp,
+    );
+    if (stopTime - startTime > NATIVE_EVENT_DURATION_THRESHOLD) {
+      nativeEvent.warning = WARNING_STRINGS.LONG_EVENT_HANDLER;
+    }
+  });
+  state.potentialLongNestedUpdates.forEach(([schedulingEvent, batchUID]) => {
+    // See how long the subsequent batch of React work was.
+    const [startTime, stopTime] = getBatchRange(batchUID, profilerData);
+    if (stopTime - startTime > NESTED_UPDATE_DURATION_THRESHOLD) {
+      schedulingEvent.warning = WARNING_STRINGS.NESTED_UPDATE;
+    }
+  });
+  state.potentialSuspenseEventsOutsideOfTransition.forEach(
+    ([suspenseEvent, lanes]) => {
+      // HACK This is a bit gross but the numeric lane value might change between render versions.
+      if (
+        !lanes.some(
+          lane => profilerData.laneToLabelMap.get(lane) === 'Transition',
+        )
+      ) {
+        suspenseEvent.warning = WARNING_STRINGS.SUSPEND_DURING_UPATE;
+      }
+    },
+  );
 
   return profilerData;
 }

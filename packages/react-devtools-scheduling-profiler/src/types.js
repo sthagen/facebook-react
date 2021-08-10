@@ -7,7 +7,7 @@
  * @flow
  */
 
-// Type utilities
+import type {ScrollState} from './view-base/utils/scrollState';
 
 // Source: https://github.com/facebook/flow/issues/4002#issuecomment-323612798
 // eslint-disable-next-line no-unused-vars
@@ -38,7 +38,6 @@ type BaseReactEvent = {|
 type BaseReactScheduleEvent = {|
   ...BaseReactEvent,
   +lanes: ReactLane[],
-  +laneLabels: string[],
 |};
 export type ReactScheduleRenderEvent = {|
   ...BaseReactScheduleEvent,
@@ -53,12 +52,14 @@ export type ReactScheduleForceUpdateEvent = {|
   +type: 'schedule-force-update',
 |};
 
+export type Phase = 'mount' | 'update';
+
 export type SuspenseEvent = {|
   ...BaseReactEvent,
   depth: number,
   duration: number | null,
   +id: string,
-  +phase: 'mount' | 'update' | null,
+  +phase: Phase | null,
   resolution: 'rejected' | 'resolved' | 'unresolved',
   resuspendTimestamps: Array<number> | null,
   +type: 'suspense',
@@ -84,7 +85,6 @@ export type BatchUID = number;
 export type ReactMeasure = {|
   +type: ReactMeasureType,
   +lanes: ReactLane[],
-  +laneLabels: string[],
   +timestamp: Milliseconds,
   +duration: Milliseconds,
   +batchUID: BatchUID,
@@ -123,13 +123,32 @@ export type FlamechartStackLayer = FlamechartStackFrame[];
 
 export type Flamechart = FlamechartStackLayer[];
 
+export type HorizontalScrollStateChangeCallback = (
+  scrollState: ScrollState,
+) => void;
+
+// Imperative view state that corresponds to profiler data.
+// This state lives outside of React's lifecycle
+// and should be erased/reset whenever new profiler data is loaded.
+export type ViewState = {|
+  horizontalScrollState: ScrollState,
+  onHorizontalScrollStateChange: (
+    callback: HorizontalScrollStateChangeCallback,
+  ) => void,
+  updateHorizontalScrollState: (scrollState: ScrollState) => void,
+  viewToMutableViewStateMap: Map<string, mixed>,
+|};
+
 export type ReactProfilerData = {|
+  batchUIDToMeasuresMap: Map<BatchUID, ReactMeasure[]>,
   componentMeasures: ReactComponentMeasure[],
   duration: number,
   flamechart: Flamechart,
-  measures: ReactMeasure[],
+  laneToLabelMap: Map<ReactLane, string>,
+  laneToReactMeasureMap: Map<ReactLane, ReactMeasure[]>,
   nativeEvents: NativeEvent[],
   otherUserTimingMarks: UserTimingMark[],
+  reactVersion: string | null,
   schedulingEvents: SchedulingEvent[],
   startTime: number,
   suspenseEvents: SuspenseEvent[],
