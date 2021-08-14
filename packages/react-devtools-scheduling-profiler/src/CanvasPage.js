@@ -30,14 +30,12 @@ import {copy} from 'clipboard-js';
 import prettyMilliseconds from 'pretty-ms';
 
 import {
-  BackgroundColorView,
   HorizontalPanAndZoomView,
   ResizableView,
+  VerticalScrollOverflowView,
   Surface,
   VerticalScrollView,
   View,
-  createComposedLayout,
-  lastViewTakesUpRemainingSpaceLayout,
   useCanvasInteraction,
   verticallyStackedLayout,
   zeroPoint,
@@ -48,6 +46,7 @@ import {
   NativeEventsView,
   ReactMeasuresView,
   SchedulingEventsView,
+  SnapshotsView,
   SuspenseEventsView,
   TimeAxisMarkersView,
   UserTimingMarksView,
@@ -159,6 +158,7 @@ function AutoSizedCanvas({
   const componentMeasuresViewRef = useRef(null);
   const reactMeasuresViewRef = useRef(null);
   const flamechartViewRef = useRef(null);
+  const snapshotsViewRef = useRef(null);
 
   const {hideMenu: hideContextMenu} = useContext(RegistryContext);
 
@@ -306,6 +306,18 @@ function AutoSizedCanvas({
       );
     }
 
+    let snapshotsViewWrapper = null;
+    if (data.snapshots.length > 0) {
+      const snapshotsView = new SnapshotsView(surface, defaultFrame, data);
+      snapshotsViewRef.current = snapshotsView;
+      snapshotsViewWrapper = createViewHelper(
+        snapshotsView,
+        'snapshots',
+        true,
+        true,
+      );
+    }
+
     const flamechartView = new FlamechartView(
       surface,
       defaultFrame,
@@ -325,10 +337,9 @@ function AutoSizedCanvas({
     const rootView = new View(
       surface,
       defaultFrame,
-      createComposedLayout(
-        verticallyStackedLayout,
-        lastViewTakesUpRemainingSpaceLayout,
-      ),
+      verticallyStackedLayout,
+      defaultFrame,
+      COLORS.BACKGROUND,
     );
     rootView.addSubview(axisMarkersViewWrapper);
     if (userTimingMarksViewWrapper !== null) {
@@ -343,12 +354,19 @@ function AutoSizedCanvas({
     if (componentMeasuresViewWrapper !== null) {
       rootView.addSubview(componentMeasuresViewWrapper);
     }
+    if (snapshotsViewWrapper !== null) {
+      rootView.addSubview(snapshotsViewWrapper);
+    }
     rootView.addSubview(flamechartViewWrapper);
 
-    // If subviews are less than the available height, fill remaining height with a solid color.
-    rootView.addSubview(new BackgroundColorView(surface, defaultFrame));
+    const verticalScrollOverflowView = new VerticalScrollOverflowView(
+      surface,
+      defaultFrame,
+      rootView,
+      viewState,
+    );
 
-    surfaceRef.current.rootView = rootView;
+    surfaceRef.current.rootView = verticalScrollOverflowView;
   }, [data]);
 
   useLayoutEffect(() => {
@@ -388,6 +406,7 @@ function AutoSizedCanvas({
               measure: null,
               nativeEvent: null,
               schedulingEvent: null,
+              snapshot: null,
               suspenseEvent: null,
               userTimingMark: null,
             };
@@ -400,6 +419,16 @@ function AutoSizedCanvas({
 
     const surface = surfaceRef.current;
     surface.handleInteraction(interaction);
+
+    // Flush any display work that got queued up as part of the previous interaction.
+    // Typically there should be no work, but certain interactions may need a second pass.
+    // For example, the ResizableView may collapse/expand its contents,
+    // which requires a second layout pass for an ancestor VerticalScrollOverflowView.
+    //
+    // TODO It would be nice to remove this call for performance reasons.
+    // To do that, we'll need to address the UX bug with VerticalScrollOverflowView.
+    // For more info see: https://github.com/facebook/react/pull/22005#issuecomment-896953399
+    surface.displayIfNeeded();
 
     canvas.style.cursor = surface.getCurrentCursor() || 'default';
 
@@ -436,6 +465,7 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent: null,
             schedulingEvent: null,
+            snapshot: null,
             suspenseEvent: null,
             userTimingMark,
           });
@@ -454,6 +484,7 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent,
             schedulingEvent: null,
+            snapshot: null,
             suspenseEvent: null,
             userTimingMark: null,
           });
@@ -472,6 +503,7 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent: null,
             schedulingEvent,
+            snapshot: null,
             suspenseEvent: null,
             userTimingMark: null,
           });
@@ -490,6 +522,7 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent: null,
             schedulingEvent: null,
+            snapshot: null,
             suspenseEvent,
             userTimingMark: null,
           });
@@ -508,6 +541,7 @@ function AutoSizedCanvas({
             measure,
             nativeEvent: null,
             schedulingEvent: null,
+            snapshot: null,
             suspenseEvent: null,
             userTimingMark: null,
           });
@@ -529,6 +563,26 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent: null,
             schedulingEvent: null,
+            snapshot: null,
+            suspenseEvent: null,
+            userTimingMark: null,
+          });
+        }
+      };
+    }
+
+    const {current: snapshotsView} = snapshotsViewRef;
+    if (snapshotsView) {
+      snapshotsView.onHover = snapshot => {
+        if (!hoveredEvent || hoveredEvent.snapshot !== snapshot) {
+          setHoveredEvent({
+            componentMeasure: null,
+            data,
+            flamechartStackFrame: null,
+            measure: null,
+            nativeEvent: null,
+            schedulingEvent: null,
+            snapshot,
             suspenseEvent: null,
             userTimingMark: null,
           });
@@ -550,6 +604,7 @@ function AutoSizedCanvas({
             measure: null,
             nativeEvent: null,
             schedulingEvent: null,
+            snapshot: null,
             suspenseEvent: null,
             userTimingMark: null,
           });
