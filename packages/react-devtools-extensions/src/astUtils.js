@@ -7,6 +7,7 @@
  * @flow
  */
 
+import {__PERFORMANCE_PROFILE__} from 'react-devtools-shared/src/constants';
 import traverse, {NodePath, Node} from '@babel/traverse';
 import {File} from '@babel/types';
 
@@ -26,6 +27,15 @@ export type SourceFileASTWithHookDetails = {
 };
 
 export const NO_HOOK_NAME = '<no-hook>';
+
+function mark(markName: string): void {
+  performance.mark(markName + '-start');
+}
+
+function measure(markName: string): void {
+  performance.mark(markName + '-end');
+  performance.measure(markName, markName + '-start', markName + '-end');
+}
 
 const AST_NODE_TYPES = Object.freeze({
   PROGRAM: 'Program',
@@ -78,9 +88,10 @@ function filterMemberNodesOfTargetHook(
 ): boolean {
   const targetHookName = targetHookNode.node.id.name;
   return (
-    targetHookName ===
+    targetHookName != null &&
+    (targetHookName ===
       (hookNode.node.init.object && hookNode.node.init.object.name) ||
-    targetHookName === hookNode.node.init.name
+      targetHookName === hookNode.node.init.name)
   );
 }
 
@@ -130,7 +141,13 @@ export function getHookName(
   originalSourceLineNumber: number,
   originalSourceColumnNumber: number,
 ): string | null {
+  if (__PERFORMANCE_PROFILE__) {
+    mark('getPotentialHookDeclarationsFromAST(originalSourceAST)');
+  }
   const hooksFromAST = getPotentialHookDeclarationsFromAST(originalSourceAST);
+  if (__PERFORMANCE_PROFILE__) {
+    measure('getPotentialHookDeclarationsFromAST(originalSourceAST)');
+  }
 
   let potentialReactHookASTNode = null;
   if (originalSourceColumnNumber === 0) {
@@ -143,6 +160,7 @@ export function getHookName(
         node,
         originalSourceLineNumber,
       );
+
       const hookDeclaractionCheck = isConfirmedHookDeclaration(node);
       return nodeLocationCheck && hookDeclaractionCheck;
     });
@@ -157,6 +175,7 @@ export function getHookName(
         originalSourceLineNumber,
         originalSourceColumnNumber,
       );
+
       const hookDeclaractionCheck = isConfirmedHookDeclaration(node);
       return nodeLocationCheck && hookDeclaractionCheck;
     });
@@ -169,17 +188,31 @@ export function getHookName(
   // nodesAssociatedWithReactHookASTNode could directly be used to obtain the hook variable name
   // depending on the type of potentialReactHookASTNode
   try {
+    if (__PERFORMANCE_PROFILE__) {
+      mark('getFilteredHookASTNodes()');
+    }
     const nodesAssociatedWithReactHookASTNode = getFilteredHookASTNodes(
       potentialReactHookASTNode,
       hooksFromAST,
       originalSourceCode,
     );
+    if (__PERFORMANCE_PROFILE__) {
+      measure('getFilteredHookASTNodes()');
+    }
 
-    return getHookNameFromNode(
+    if (__PERFORMANCE_PROFILE__) {
+      mark('getHookNameFromNode()');
+    }
+    const name = getHookNameFromNode(
       hook,
       nodesAssociatedWithReactHookASTNode,
       potentialReactHookASTNode,
     );
+    if (__PERFORMANCE_PROFILE__) {
+      measure('getHookNameFromNode()');
+    }
+
+    return name;
   } catch (error) {
     console.error(error);
     return null;
@@ -270,18 +303,21 @@ function getHookVariableName(
   const nodeType = hook.node.id.type;
   switch (nodeType) {
     case AST_NODE_TYPES.ARRAY_PATTERN:
-      return !isCustomHook ? hook.node.id.elements[0].name : null;
+      return !isCustomHook ? hook.node.id.elements[0]?.name ?? null : null;
 
     case AST_NODE_TYPES.IDENTIFIER:
       return hook.node.id.name;
 
     default:
-      throw new Error(`Invalid node type: ${nodeType}`);
+      return null;
   }
 }
 
 function getPotentialHookDeclarationsFromAST(sourceAST: File): NodePath[] {
   const potentialHooksFound: NodePath[] = [];
+  if (__PERFORMANCE_PROFILE__) {
+    mark('traverse(sourceAST)');
+  }
   traverse(sourceAST, {
     enter(path) {
       if (path.isVariableDeclarator() && isPotentialHookDeclaration(path)) {
@@ -289,6 +325,9 @@ function getPotentialHookDeclarationsFromAST(sourceAST: File): NodePath[] {
       }
     },
   });
+  if (__PERFORMANCE_PROFILE__) {
+    measure('traverse(sourceAST)');
+  }
   return potentialHooksFound;
 }
 

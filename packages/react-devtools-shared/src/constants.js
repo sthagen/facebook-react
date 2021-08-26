@@ -10,6 +10,9 @@
 // Flip this flag to true to enable verbose console debug logging.
 export const __DEBUG__ = false;
 
+// Flip this flag to true to enable performance.mark() and performance.measure() timings.
+export const __PERFORMANCE_PROFILE__ = false;
+
 export const TREE_OPERATION_ADD = 1;
 export const TREE_OPERATION_REMOVE = 2;
 export const TREE_OPERATION_REORDER_CHILDREN = 3;
@@ -43,6 +46,9 @@ export const LOCAL_STORAGE_SHOW_INLINE_WARNINGS_AND_ERRORS_KEY =
 
 export const LOCAL_STORAGE_TRACE_UPDATES_ENABLED_KEY =
   'React::DevTools::traceUpdatesEnabled';
+
+export const LOCAL_STORAGE_HIDE_CONSOLE_LOGS_IN_STRICT_MODE =
+  'React::DevTools::hideConsoleLogsInStrictMode';
 
 export const PROFILER_EXPORT_VERSION = 5;
 
@@ -141,6 +147,10 @@ export const THEME_STYLES: {[style: Theme | DisplayDensity]: any} = {
     '--color-resize-bar-dot': '#333333',
     '--color-scheduling-profiler-native-event': '#ccc',
     '--color-scheduling-profiler-native-event-hover': '#aaa',
+    '--color-scheduling-profiler-network-primary': '#fcf3dc',
+    '--color-scheduling-profiler-network-primary-hover': '#f0e7d1',
+    '--color-scheduling-profiler-network-secondary': '#efc457',
+    '--color-scheduling-profiler-network-secondary-hover': '#e3ba52',
     '--color-scheduling-profiler-priority-background': '#f6f6f6',
     '--color-scheduling-profiler-priority-border': '#eeeeee',
     '--color-scheduling-profiler-user-timing': '#c9cacd',
@@ -276,6 +286,10 @@ export const THEME_STYLES: {[style: Theme | DisplayDensity]: any} = {
     '--color-resize-bar-dot': '#cfd1d5',
     '--color-scheduling-profiler-native-event': '#b2b2b2',
     '--color-scheduling-profiler-native-event-hover': '#949494',
+    '--color-scheduling-profiler-network-primary': '#fcf3dc',
+    '--color-scheduling-profiler-network-primary-hover': '#e3dbc5',
+    '--color-scheduling-profiler-network-secondary': '#efc457',
+    '--color-scheduling-profiler-network-secondary-hover': '#d6af4d',
     '--color-scheduling-profiler-priority-background': '#1d2129',
     '--color-scheduling-profiler-priority-border': '#282c34',
     '--color-scheduling-profiler-user-timing': '#c9cacd',

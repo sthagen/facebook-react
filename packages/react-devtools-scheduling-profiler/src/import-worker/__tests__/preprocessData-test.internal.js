@@ -234,6 +234,29 @@ describe('preprocessData', () => {
     await expect(async () => preprocessData([randomSample])).rejects.toThrow();
   });
 
+  it('should throw given a timeline without an explicit profiler version mark nor any other React marks', async () => {
+    const cpuProfilerSample = creactCpuProfilerSample();
+
+    await expect(
+      async () => await preprocessData([cpuProfilerSample]),
+    ).rejects.toThrow(
+      'Please provide profiling data from an React application',
+    );
+  });
+
+  it('should throw given a timeline with React scheduling marks, but without an explicit profiler version mark', async () => {
+    const cpuProfilerSample = creactCpuProfilerSample();
+    const scheduleRenderSample = createUserTimingEntry({
+      cat: 'blink.user_timing',
+      name: '--schedule-render-512-',
+    });
+    const samples = [cpuProfilerSample, scheduleRenderSample];
+
+    await expect(async () => await preprocessData(samples)).rejects.toThrow(
+      'This version of profiling data is not supported',
+    );
+  });
+
   it('should return empty data given a timeline with no React scheduling profiling marks', async () => {
     const cpuProfilerSample = creactCpuProfilerSample();
     const randomSample = createUserTimingEntry({
@@ -324,6 +347,7 @@ describe('preprocessData', () => {
             30 => Array [],
           },
           "nativeEvents": Array [],
+          "networkMeasures": Array [],
           "otherUserTimingMarks": Array [],
           "reactVersion": "17.0.3",
           "schedulingEvents": Array [],
@@ -530,6 +554,7 @@ describe('preprocessData', () => {
             30 => Array [],
           },
           "nativeEvents": Array [],
+          "networkMeasures": Array [],
           "otherUserTimingMarks": Array [],
           "reactVersion": "17.0.3",
           "schedulingEvents": Array [
@@ -715,6 +740,7 @@ describe('preprocessData', () => {
             30 => Array [],
           },
           "nativeEvents": Array [],
+          "networkMeasures": Array [],
           "otherUserTimingMarks": Array [
             Object {
               "name": "__v3",
@@ -1051,6 +1077,7 @@ describe('preprocessData', () => {
             30 => Array [],
           },
           "nativeEvents": Array [],
+          "networkMeasures": Array [],
           "otherUserTimingMarks": Array [
             Object {
               "name": "__v3",
