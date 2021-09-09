@@ -41,6 +41,7 @@ import {
 } from './ReactTypeOfMode';
 import {
   NoLane,
+  SyncLane,
   NoLanes,
   isSubsetOfLanes,
   mergeLanes,
@@ -49,6 +50,7 @@ import {
   isTransitionLane,
   markRootEntangled,
   markRootMutableRead,
+  NoTimestamp,
 } from './ReactFiberLane.old';
 import {
   ContinuousEventPriority,
@@ -114,6 +116,7 @@ import {
 } from './ReactUpdateQueue.old';
 import {pushInterleavedQueue} from './ReactFiberInterleavedUpdates.old';
 import {getIsStrictModeForDevtools} from './ReactFiberReconciler.old';
+import {warnOnSubscriptionInsideStartTransition} from 'shared/ReactFeatureFlags';
 
 const {ReactCurrentDispatcher, ReactCurrentBatchConfig} = ReactSharedInternals;
 
@@ -136,6 +139,7 @@ export type UpdateQueue<S, A> = {|
 
 let didWarnAboutMismatchedHooksForComponent;
 let didWarnAboutUseOpaqueIdentifier;
+let didWarnUncachedGetSnapshot;
 if (__DEV__) {
   didWarnAboutUseOpaqueIdentifier = {};
   didWarnAboutMismatchedHooksForComponent = new Set();
@@ -145,7 +149,7 @@ export type Hook = {|
   memoizedState: any,
   baseState: any,
   baseQueue: Update<any, any> | null,
-  queue: UpdateQueue<any, any> | null,
+  queue: any,
   next: Hook | null,
 |};
 
@@ -155,6 +159,11 @@ export type Effect = {|
   destroy: (() => void) | void,
   deps: Array<mixed> | null,
   next: Effect,
+|};
+
+type StoreInstance<T> = {|
+  value: T,
+  getSnapshot: () => T,
 |};
 
 export type FunctionComponentUpdateQueue = {|lastEffect: Effect | null|};
@@ -701,14 +710,15 @@ function mountReducer<S, I, A>(
     initialState = ((initialArg: any): S);
   }
   hook.memoizedState = hook.baseState = initialState;
-  const queue = (hook.queue = {
+  const queue: UpdateQueue<S, A> = {
     pending: null,
     interleaved: null,
     lanes: NoLanes,
     dispatch: null,
     lastRenderedReducer: reducer,
     lastRenderedState: (initialState: any),
-  });
+  };
+  hook.queue = queue;
   const dispatch: Dispatch<A> = (queue.dispatch = (dispatchAction.bind(
     null,
     currentlyRenderingFiber,
@@ -1194,7 +1204,7 @@ function useMutableSource<Source, Snapshot>(
     // So if there are interleaved updates, they get pushed to the older queue.
     // When this becomes current, the previous queue and dispatch method will be discarded,
     // including any interleaving updates that occur.
-    const newQueue = {
+    const newQueue: UpdateQueue<Snapshot, BasicStateAction<Snapshot>> = {
       pending: null,
       interleaved: null,
       lanes: NoLanes,
@@ -1242,6 +1252,131 @@ function updateMutableSource<Source, Snapshot>(
   return useMutableSource(hook, source, getSnapshot, subscribe);
 }
 
+function mountSyncExternalStore<T>(
+  subscribe: (() => void) => () => void,
+  getSnapshot: () => T,
+): T {
+  const hook = mountWorkInProgressHook();
+  // Read the current snapshot from the store on every render. This breaks the
+  // normal rules of React, and only works because store updates are
+  // always synchronous.
+  const nextSnapshot = getSnapshot();
+  if (__DEV__) {
+    if (!didWarnUncachedGetSnapshot) {
+      if (nextSnapshot !== getSnapshot()) {
+        console.error(
+          'The result of getSnapshot should be cached to avoid an infinite loop',
+        );
+        didWarnUncachedGetSnapshot = true;
+      }
+    }
+  }
+  hook.memoizedState = nextSnapshot;
+  const inst: StoreInstance<T> = {
+    value: nextSnapshot,
+    getSnapshot,
+  };
+  hook.queue = inst;
+  return useSyncExternalStore(hook, inst, subscribe, getSnapshot, nextSnapshot);
+}
+
+function updateSyncExternalStore<T>(
+  subscribe: (() => void) => () => void,
+  getSnapshot: () => T,
+): T {
+  const hook = updateWorkInProgressHook();
+  // Read the current snapshot from the store on every render. This breaks the
+  // normal rules of React, and only works because store updates are
+  // always synchronous.
+  const nextSnapshot = getSnapshot();
+  if (__DEV__) {
+    if (!didWarnUncachedGetSnapshot) {
+      if (nextSnapshot !== getSnapshot()) {
+        console.error(
+          'The result of getSnapshot should be cached to avoid an infinite loop',
+        );
+        didWarnUncachedGetSnapshot = true;
+      }
+    }
+  }
+  const prevSnapshot = hook.memoizedState;
+  if (!is(prevSnapshot, nextSnapshot)) {
+    hook.memoizedState = nextSnapshot;
+    markWorkInProgressReceivedUpdate();
+  }
+  const inst = hook.queue;
+  return useSyncExternalStore(hook, inst, subscribe, getSnapshot, nextSnapshot);
+}
+
+function useSyncExternalStore<T>(
+  hook: Hook,
+  inst: StoreInstance<T>,
+  subscribe: (() => void) => () => void,
+  getSnapshot: () => T,
+  nextSnapshot: T,
+): T {
+  const fiber = currentlyRenderingFiber;
+  const dispatcher = ReactCurrentDispatcher.current;
+
+  // Track the latest getSnapshot function with a ref. This needs to be updated
+  // in the layout phase so we can access it during the tearing check that
+  // happens on subscribe.
+  // TODO: Circumvent SSR warning
+  dispatcher.useLayoutEffect(() => {
+    inst.value = nextSnapshot;
+    inst.getSnapshot = getSnapshot;
+
+    // Whenever getSnapshot or subscribe changes, we need to check in the
+    // commit phase if there was an interleaved mutation. In concurrent mode
+    // this can happen all the time, but even in synchronous mode, an earlier
+    // effect may have mutated the store.
+    // TODO: Move the tearing checks to an earlier, pre-commit phase so that the
+    // layout effects always observe a consistent tree.
+    if (checkIfSnapshotChanged(inst)) {
+      // Force a re-render.
+      forceStoreRerender(fiber);
+    }
+  }, [subscribe, nextSnapshot, getSnapshot]);
+
+  dispatcher.useEffect(() => {
+    const handleStoreChange = () => {
+      // TODO: Because there is no cross-renderer API for batching updates, it's
+      // up to the consumer of this library to wrap their subscription event
+      // with unstable_batchedUpdates. Should we try to detect when this isn't
+      // the case and print a warning in development?
+
+      // The store changed. Check if the snapshot changed since the last time we
+      // read from the store.
+      if (checkIfSnapshotChanged(inst)) {
+        // Force a re-render.
+        forceStoreRerender(fiber);
+      }
+    };
+    // Check for changes right before subscribing. Subsequent changes will be
+    // detected in the subscription handler.
+    handleStoreChange();
+    // Subscribe to the store and return a clean-up function.
+    return subscribe(handleStoreChange);
+  }, [subscribe]);
+
+  return nextSnapshot;
+}
+
+function checkIfSnapshotChanged(inst) {
+  const latestGetSnapshot = inst.getSnapshot;
+  const prevValue = inst.value;
+  try {
+    const nextValue = latestGetSnapshot();
+    return !is(prevValue, nextValue);
+  } catch (error) {
+    return true;
+  }
+}
+
+function forceStoreRerender(fiber) {
+  scheduleUpdateOnFiber(fiber, SyncLane, NoTimestamp);
+}
+
 function mountState<S>(
   initialState: (() => S) | S,
 ): [S, Dispatch<BasicStateAction<S>>] {
@@ -1251,14 +1386,15 @@ function mountState<S>(
     initialState = initialState();
   }
   hook.memoizedState = hook.baseState = initialState;
-  const queue = (hook.queue = {
+  const queue: UpdateQueue<S, BasicStateAction<S>> = {
     pending: null,
     interleaved: null,
     lanes: NoLanes,
     dispatch: null,
     lastRenderedReducer: basicStateReducer,
     lastRenderedState: (initialState: any),
-  });
+  };
+  hook.queue = queue;
   const dispatch: Dispatch<
     BasicStateAction<S>,
   > = (queue.dispatch = (dispatchAction.bind(
@@ -1726,6 +1862,23 @@ function startTransition(setPending, callback) {
   } finally {
     setCurrentUpdatePriority(previousPriority);
     ReactCurrentBatchConfig.transition = prevTransition;
+    if (__DEV__) {
+      if (
+        prevTransition !== 1 &&
+        warnOnSubscriptionInsideStartTransition &&
+        ReactCurrentBatchConfig._updatedFibers
+      ) {
+        const updatedFibersCount = ReactCurrentBatchConfig._updatedFibers.size;
+        if (updatedFibersCount > 10) {
+          console.warn(
+            'Detected a large number of updates inside startTransition. ' +
+              'If this is due to a subscription please re-write it to use React provided hooks. ' +
+              'Otherwise concurrent mode guarantees are off the table.',
+          );
+        }
+        ReactCurrentBatchConfig._updatedFibers.clear();
+      }
+    }
   }
 }
 
@@ -2079,6 +2232,7 @@ export const ContextOnlyDispatcher: Dispatcher = {
   useDeferredValue: throwInvalidHookError,
   useTransition: throwInvalidHookError,
   useMutableSource: throwInvalidHookError,
+  useSyncExternalStore: throwInvalidHookError,
   useOpaqueIdentifier: throwInvalidHookError,
 
   unstable_isNewReconciler: enableNewReconciler,
@@ -2104,6 +2258,7 @@ const HooksDispatcherOnMount: Dispatcher = {
   useDeferredValue: mountDeferredValue,
   useTransition: mountTransition,
   useMutableSource: mountMutableSource,
+  useSyncExternalStore: mountSyncExternalStore,
   useOpaqueIdentifier: mountOpaqueIdentifier,
 
   unstable_isNewReconciler: enableNewReconciler,
@@ -2129,6 +2284,7 @@ const HooksDispatcherOnUpdate: Dispatcher = {
   useDeferredValue: updateDeferredValue,
   useTransition: updateTransition,
   useMutableSource: updateMutableSource,
+  useSyncExternalStore: updateSyncExternalStore,
   useOpaqueIdentifier: updateOpaqueIdentifier,
 
   unstable_isNewReconciler: enableNewReconciler,
@@ -2154,6 +2310,7 @@ const HooksDispatcherOnRerender: Dispatcher = {
   useDeferredValue: rerenderDeferredValue,
   useTransition: rerenderTransition,
   useMutableSource: updateMutableSource,
+  useSyncExternalStore: mountSyncExternalStore,
   useOpaqueIdentifier: rerenderOpaqueIdentifier,
 
   unstable_isNewReconciler: enableNewReconciler,
@@ -2302,6 +2459,14 @@ if (__DEV__) {
       mountHookTypesDev();
       return mountMutableSource(source, getSnapshot, subscribe);
     },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      mountHookTypesDev();
+      return mountSyncExternalStore(subscribe, getSnapshot);
+    },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
       mountHookTypesDev();
@@ -2425,6 +2590,14 @@ if (__DEV__) {
       currentHookNameInDev = 'useMutableSource';
       updateHookTypesDev();
       return mountMutableSource(source, getSnapshot, subscribe);
+    },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      updateHookTypesDev();
+      return mountSyncExternalStore(subscribe, getSnapshot);
     },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
@@ -2550,6 +2723,14 @@ if (__DEV__) {
       updateHookTypesDev();
       return updateMutableSource(source, getSnapshot, subscribe);
     },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      updateHookTypesDev();
+      return updateSyncExternalStore(subscribe, getSnapshot);
+    },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
       updateHookTypesDev();
@@ -2674,6 +2855,14 @@ if (__DEV__) {
       currentHookNameInDev = 'useMutableSource';
       updateHookTypesDev();
       return updateMutableSource(source, getSnapshot, subscribe);
+    },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      updateHookTypesDev();
+      return updateSyncExternalStore(subscribe, getSnapshot);
     },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
@@ -2812,6 +3001,15 @@ if (__DEV__) {
       warnInvalidHookAccess();
       mountHookTypesDev();
       return mountMutableSource(source, getSnapshot, subscribe);
+    },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      warnInvalidHookAccess();
+      mountHookTypesDev();
+      return mountSyncExternalStore(subscribe, getSnapshot);
     },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
@@ -2952,6 +3150,15 @@ if (__DEV__) {
       updateHookTypesDev();
       return updateMutableSource(source, getSnapshot, subscribe);
     },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      warnInvalidHookAccess();
+      updateHookTypesDev();
+      return updateSyncExternalStore(subscribe, getSnapshot);
+    },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';
       warnInvalidHookAccess();
@@ -3091,6 +3298,15 @@ if (__DEV__) {
       warnInvalidHookAccess();
       updateHookTypesDev();
       return updateMutableSource(source, getSnapshot, subscribe);
+    },
+    useSyncExternalStore<T>(
+      subscribe: (() => void) => () => void,
+      getSnapshot: () => T,
+    ): T {
+      currentHookNameInDev = 'useSyncExternalStore';
+      warnInvalidHookAccess();
+      updateHookTypesDev();
+      return updateSyncExternalStore(subscribe, getSnapshot);
     },
     useOpaqueIdentifier(): OpaqueIDType | void {
       currentHookNameInDev = 'useOpaqueIdentifier';

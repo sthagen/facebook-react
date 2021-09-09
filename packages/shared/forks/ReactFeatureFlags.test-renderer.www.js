@@ -39,6 +39,7 @@ export const disableTextareaChildren = false;
 export const disableModulePatternComponents = true;
 export const warnUnstableRenderSubtreeIntoContainer = false;
 export const warnAboutSpreadingKeyToJSX = false;
+export const warnOnSubscriptionInsideStartTransition = false;
 export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = false;
@@ -61,7 +62,7 @@ export const enableSyncDefaultUpdates = true;
 export const allowConcurrentByDefault = true;
 export const enablePersistentOffscreenHostContainer = false;
 
-export const consoleManagedByDevToolsDuringStrictMode = true;
+export const consoleManagedByDevToolsDuringStrictMode = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars

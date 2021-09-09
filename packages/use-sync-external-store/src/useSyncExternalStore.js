@@ -17,8 +17,6 @@ const {
   useEffect,
   useLayoutEffect,
   useDebugValue,
-
-  // $FlowFixMe - useSyncExternalStore not yet part of React Flow types
   useSyncExternalStore: builtInAPI,
 } = React;
 
@@ -26,9 +24,12 @@ const {
 // we're in version 16 or 17, so rendering is always synchronous. The shim
 // does not support concurrent rendering, only the built-in API.
 export const useSyncExternalStore =
-  builtInAPI !== undefined ? builtInAPI : useSyncExternalStore_shim;
+  builtInAPI !== undefined
+    ? ((builtInAPI: any): typeof useSyncExternalStore_shim)
+    : useSyncExternalStore_shim;
 
 let didWarnOld18Alpha = false;
+let didWarnUncachedGetSnapshot = false;
 
 // Disclaimer: This shim breaks many of the rules of React, and only works
 // because of a very particular set of implementation details and assumptions
@@ -63,6 +64,16 @@ function useSyncExternalStore_shim<T>(
   // implementation details, most importantly that updates are
   // always synchronous.
   const value = getSnapshot();
+  if (__DEV__) {
+    if (!didWarnUncachedGetSnapshot) {
+      if (value !== getSnapshot()) {
+        console.error(
+          'The result of getSnapshot should be cached to avoid an infinite loop',
+        );
+        didWarnUncachedGetSnapshot = true;
+      }
+    }
+  }
 
   // Because updates are synchronous, we don't queue them. Instead we force a
   // re-render whenever the subscribed state changes by updating an some

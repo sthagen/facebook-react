@@ -49,7 +49,7 @@ export const enableSuspenseLayoutEffectSemantics = false;
 export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = false;
-
+export const warnOnSubscriptionInsideStartTransition = false;
 export const enableStrictEffects = false;
 export const createRootStrictEffectsByDefault = false;
 export const enableUseRefAccessWarning = false;
@@ -61,7 +61,7 @@ export const enableSyncDefaultUpdates = true;
 export const allowConcurrentByDefault = true;
 export const enablePersistentOffscreenHostContainer = false;
 
-export const consoleManagedByDevToolsDuringStrictMode = true;
+export const consoleManagedByDevToolsDuringStrictMode = false;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars
