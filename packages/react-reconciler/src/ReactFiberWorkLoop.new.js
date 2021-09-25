@@ -68,6 +68,9 @@ import {
 import {
   markCommitStarted,
   markCommitStopped,
+  markComponentRenderStopped,
+  markComponentSuspended,
+  markComponentErrored,
   markLayoutEffectsStarted,
   markLayoutEffectsStopped,
   markPassiveEffectsStarted,
@@ -856,8 +859,8 @@ function recoverFromConcurrentError(root, errorRetryLanes) {
 
   // If an error occurred during hydration, discard server response and fall
   // back to client side render.
-  if (root.hydrate) {
-    root.hydrate = false;
+  if (root.isDehydrated) {
+    root.isDehydrated = false;
     if (__DEV__) {
       errorHydratingContainer(root.containerInfo);
     }
@@ -1073,8 +1076,8 @@ function performSyncWorkOnRoot(root) {
 
     // If an error occurred during hydration,
     // discard server response and fall back to client side render.
-    if (root.hydrate) {
-      root.hydrate = false;
+    if (root.isDehydrated) {
+      root.isDehydrated = false;
       if (__DEV__) {
         errorHydratingContainer(root.containerInfo);
       }
@@ -1354,6 +1357,29 @@ function handleError(root, thrownValue): void {
         // avoids inaccurate Profiler durations in the case of a
         // suspended render.
         stopProfilerTimerIfRunningAndRecordDelta(erroredWork, true);
+      }
+
+      if (enableSchedulingProfiler) {
+        markComponentRenderStopped();
+
+        if (
+          thrownValue !== null &&
+          typeof thrownValue === 'object' &&
+          typeof thrownValue.then === 'function'
+        ) {
+          const wakeable: Wakeable = (thrownValue: any);
+          markComponentSuspended(
+            erroredWork,
+            wakeable,
+            workInProgressRootRenderLanes,
+          );
+        } else {
+          markComponentErrored(
+            erroredWork,
+            thrownValue,
+            workInProgressRootRenderLanes,
+          );
+        }
       }
 
       throwException(
@@ -2668,7 +2694,7 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
         }
       }
       // We always throw the original error in case the second render pass is not idempotent.
-      // This can happen if a memoized function or CommonJS module doesn't throw after first invokation.
+      // This can happen if a memoized function or CommonJS module doesn't throw after first invocation.
       throw originalError;
     }
   };

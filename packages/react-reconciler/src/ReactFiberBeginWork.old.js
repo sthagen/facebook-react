@@ -12,6 +12,7 @@ import type {LazyComponent as LazyComponentType} from 'react/src/ReactLazy';
 import type {Fiber, FiberRoot} from './ReactInternalTypes';
 import type {TypeOfMode} from './ReactTypeOfMode';
 import type {Lanes, Lane} from './ReactFiberLane.old';
+import type {MutableSource} from 'shared/ReactTypes';
 import type {
   SuspenseState,
   SuspenseListRenderState,
@@ -73,6 +74,7 @@ import {
   ForceUpdateForLegacySuspense,
   StaticMask,
   ShouldCapture,
+  ForceClientRender,
 } from './ReactFiberFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
@@ -144,16 +146,13 @@ import {
   isSuspenseInstancePending,
   isSuspenseInstanceFallback,
   registerSuspenseInstanceRetry,
+  supportsHydration,
   isPrimaryRenderer,
   supportsPersistence,
   getOffscreenContainerProps,
 } from './ReactFiberHostConfig';
 import type {SuspenseInstance} from './ReactFiberHostConfig';
-import {
-  shouldError,
-  shouldSuspend,
-  setIsStrictModeForDevtools,
-} from './ReactFiberReconciler';
+import {shouldError, shouldSuspend} from './ReactFiberReconciler';
 import {pushHostContext, pushHostContainer} from './ReactFiberHostContext.old';
 import {
   suspenseStackCursor,
@@ -222,6 +221,7 @@ import {
   RetryAfterError,
   NoContext,
 } from './ReactFiberWorkLoop.old';
+import {setWorkInProgressVersion} from './ReactMutableSource.old';
 import {
   requestCacheFromPool,
   pushCacheProvider,
@@ -235,6 +235,7 @@ import {createCapturedValue} from './ReactCapturedValue';
 import {createClassErrorUpdate} from './ReactFiberThrow.old';
 import {completeSuspendedOffscreenHostContainer} from './ReactFiberCompleteWork.old';
 import is from 'shared/objectIs';
+import {setIsStrictModeForDevtools} from './ReactFiberDevToolsHook.old';
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
 
@@ -1295,11 +1296,26 @@ function updateHostRoot(current, workInProgress, renderLanes) {
     resetHydrationState();
     return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
   }
-  if (root.hydrate && enterHydrationState(workInProgress)) {
+  if (root.isDehydrated && enterHydrationState(workInProgress)) {
     // If we don't have any current children this might be the first pass.
     // We always try to hydrate. If this isn't a hydration pass there won't
     // be any children to hydrate which is effectively the same thing as
     // not hydrating.
+
+    if (supportsHydration) {
+      const mutableSourceEagerHydrationData =
+        root.mutableSourceEagerHydrationData;
+      if (mutableSourceEagerHydrationData != null) {
+        for (let i = 0; i < mutableSourceEagerHydrationData.length; i += 2) {
+          const mutableSource = ((mutableSourceEagerHydrationData[
+            i
+          ]: any): MutableSource<any>);
+          const version = mutableSourceEagerHydrationData[i + 1];
+          setWorkInProgressVersion(mutableSource, version);
+        }
+      }
+    }
+
     const child = mountChildFibers(
       workInProgress,
       null,
@@ -2064,6 +2080,14 @@ function updateSuspenseComponent(current, workInProgress, renderLanes) {
               workInProgress,
               dehydrated,
               prevState,
+              renderLanes,
+            );
+          } else if (workInProgress.flags & ForceClientRender) {
+            // Something errored during hydration. Try again without hydrating.
+            workInProgress.flags &= ~ForceClientRender;
+            return retrySuspenseComponentWithoutHydrating(
+              current,
+              workInProgress,
               renderLanes,
             );
           } else if (
