@@ -242,7 +242,7 @@ const ReactNoopServer = ReactFizzServer({
 
 type Options = {
   progressiveChunkSize?: number,
-  onReadyToStream?: () => void,
+  onCompleteShell?: () => void,
   onCompleteAll?: () => void,
   onError?: (error: mixed) => void,
 };
@@ -259,16 +259,15 @@ function render(children: React$Element<any>, options?: Options): Destination {
   };
   const request = ReactNoopServer.createRequest(
     children,
-    destination,
     null,
     null,
     options ? options.progressiveChunkSize : undefined,
     options ? options.onError : undefined,
     options ? options.onCompleteAll : undefined,
-    options ? options.onReadyToStream : undefined,
+    options ? options.onCompleteShell : undefined,
   );
   ReactNoopServer.startWork(request);
-  ReactNoopServer.startFlowing(request);
+  ReactNoopServer.startFlowing(request, destination);
   return destination;
 }
 

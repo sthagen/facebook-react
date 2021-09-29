@@ -7,10 +7,6 @@
  * @flow
  */
 
-export function useSyncExternalStore<T>(
-  subscribe: (() => void) => () => void,
-  getSnapshot: () => T,
-  getServerSnapshot?: () => T,
-): T {
-  return getSnapshot();
-}
+const isArray = Array.isArray;
+
+export default isArray;

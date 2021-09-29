@@ -72,7 +72,9 @@ type Segment = {
 };
 
 export type Request = {
-  destination: Destination,
+  status: 0 | 1 | 2,
+  fatalError: mixed,
+  destination: null | Destination,
   bundlerConfig: BundlerConfig,
   cache: Map<Function, mixed>,
   nextChunkId: number,
@@ -84,25 +86,30 @@ export type Request = {
   writtenSymbols: Map<Symbol, number>,
   writtenModules: Map<ModuleKey, number>,
   onError: (error: mixed) => void,
-  flowing: boolean,
   toJSON: (key: string, value: ReactModel) => ReactJSONValue,
 };
 
 const ReactCurrentDispatcher = ReactSharedInternals.ReactCurrentDispatcher;
 
 function defaultErrorHandler(error: mixed) {
-  console['error'](error); // Don't transform to our wrapper
+  console['error'](error);
+  // Don't transform to our wrapper
 }
+
+const OPEN = 0;
+const CLOSING = 1;
+const CLOSED = 2;
 
 export function createRequest(
   model: ReactModel,
-  destination: Destination,
   bundlerConfig: BundlerConfig,
   onError: void | ((error: mixed) => void),
 ): Request {
   const pingedSegments = [];
   const request = {
-    destination,
+    status: OPEN,
+    fatalError: null,
+    destination: null,
     bundlerConfig,
     cache: new Map(),
     nextChunkId: 0,
@@ -114,7 +121,6 @@ export function createRequest(
     writtenSymbols: new Map(),
     writtenModules: new Map(),
     onError: onError === undefined ? defaultErrorHandler : onError,
-    flowing: false,
     toJSON: function(key: string, value: ReactModel): ReactJSONValue {
       return resolveModelToJSON(request, this, key, value);
     },
@@ -296,7 +302,7 @@ function describeValueForErrorMessage(value: ReactModel): string {
     case 'function':
       return 'function';
     default:
-      // eslint-disable-next-line
+      // eslint-disable-next-line react-internal/safe-string-coercion
       return String(value);
   }
 }
@@ -604,7 +610,13 @@ function reportError(request: Request, error: mixed): void {
 
 function fatalError(request: Request, error: mixed): void {
   // This is called outside error handling code such as if an error happens in React internals.
-  closeWithError(request.destination, error);
+  if (request.destination !== null) {
+    request.status = CLOSED;
+    closeWithError(request.destination, error);
+  } else {
+    request.status = CLOSING;
+    request.fatalError = error;
+  }
 }
 
 function emitErrorChunk(request: Request, id: number, error: mixed): void {
@@ -615,8 +627,10 @@ function emitErrorChunk(request: Request, id: number, error: mixed): void {
   let stack = '';
   try {
     if (error instanceof Error) {
-      message = '' + error.message;
-      stack = '' + error.stack;
+      // eslint-disable-next-line react-internal/safe-string-coercion
+      message = String(error.message);
+      // eslint-disable-next-line react-internal/safe-string-coercion
+      stack = String(error.stack);
     } else {
       message = 'Error: ' + (error: any);
     }
@@ -692,8 +706,8 @@ function performWork(request: Request): void {
       const segment = pingedSegments[i];
       retrySegment(request, segment);
     }
-    if (request.flowing) {
-      flushCompletedChunks(request);
+    if (request.destination !== null) {
+      flushCompletedChunks(request, request.destination);
     }
   } catch (error) {
     reportError(request, error);
@@ -704,13 +718,10 @@ function performWork(request: Request): void {
   }
 }
 
-let reentrant = false;
-function flushCompletedChunks(request: Request): void {
-  if (reentrant) {
-    return;
-  }
-  reentrant = true;
-  const destination = request.destination;
+function flushCompletedChunks(
+  request: Request,
+  destination: Destination,
+): void {
   beginWriting(destination);
   try {
     // We emit module chunks first in the stream so that
@@ -721,7 +732,7 @@ function flushCompletedChunks(request: Request): void {
       request.pendingChunks--;
       const chunk = moduleChunks[i];
       if (!writeChunk(destination, chunk)) {
-        request.flowing = false;
+        request.destination = null;
         i++;
         break;
       }
@@ -734,7 +745,7 @@ function flushCompletedChunks(request: Request): void {
       request.pendingChunks--;
       const chunk = jsonChunks[i];
       if (!writeChunk(destination, chunk)) {
-        request.flowing = false;
+        request.destination = null;
         i++;
         break;
       }
@@ -749,14 +760,13 @@ function flushCompletedChunks(request: Request): void {
       request.pendingChunks--;
       const chunk = errorChunks[i];
       if (!writeChunk(destination, chunk)) {
-        request.flowing = false;
+        request.destination = null;
         i++;
         break;
       }
     }
     errorChunks.splice(0, i);
   } finally {
-    reentrant = false;
     completeWriting(destination);
   }
   flushBuffered(destination);
@@ -767,14 +777,21 @@ function flushCompletedChunks(request: Request): void {
 }
 
 export function startWork(request: Request): void {
-  request.flowing = true;
   scheduleWork(() => performWork(request));
 }
 
-export function startFlowing(request: Request): void {
-  request.flowing = true;
+export function startFlowing(request: Request, destination: Destination): void {
+  if (request.status === CLOSING) {
+    request.status = CLOSED;
+    closeWithError(destination, request.fatalError);
+    return;
+  }
+  if (request.status === CLOSED) {
+    return;
+  }
+  request.destination = destination;
   try {
-    flushCompletedChunks(request);
+    flushCompletedChunks(request, destination);
   } catch (error) {
     reportError(request, error);
     fatalError(request, error);
