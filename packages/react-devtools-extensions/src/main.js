@@ -18,9 +18,10 @@ import {
   localStorageRemoveItem,
   localStorageSetItem,
 } from 'react-devtools-shared/src/storage';
-import {registerEventLogger} from 'react-devtools-shared/src/Logger';
 import DevTools from 'react-devtools-shared/src/devtools/views/DevTools';
 import {__DEBUG__} from 'react-devtools-shared/src/constants';
+import {registerExtensionsEventLogger} from './registerExtensionsEventLogger';
+import {logEvent} from 'react-devtools-shared/src/Logger';
 
 const LOCAL_STORAGE_SUPPORTS_PROFILING_KEY =
   'React::DevTools::supportsProfiling';
@@ -88,9 +89,7 @@ function createPanelIfReactLoaded() {
 
       const tabId = chrome.devtools.inspectedWindow.tabId;
 
-      registerEventLogger((event: LogEvent) => {
-        // TODO: hook up event logging
-      });
+      registerExtensionsEventLogger();
 
       function initBridgeAndStore() {
         const port = chrome.runtime.connect({
@@ -451,6 +450,7 @@ function createPanelIfReactLoaded() {
               ensureInitialHTMLIsCleared(componentsPortalContainer);
               render('components');
               panel.injectStyles(cloneStyleTags);
+              logEvent({event_name: 'selected-components-tab'});
             }
           });
           extensionPanel.onHidden.addListener(panel => {
@@ -476,6 +476,7 @@ function createPanelIfReactLoaded() {
               ensureInitialHTMLIsCleared(profilerPortalContainer);
               render('profiler');
               panel.injectStyles(cloneStyleTags);
+              logEvent({event_name: 'selected-profiler-tab'});
             }
           });
         },
