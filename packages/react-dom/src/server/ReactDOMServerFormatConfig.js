@@ -17,7 +17,10 @@ import {
 
 import {Children} from 'react';
 
-import {enableFilterEmptyStringAttributesDOM} from 'shared/ReactFeatureFlags';
+import {
+  enableFilterEmptyStringAttributesDOM,
+  enableCustomElementPropertySupport,
+} from 'shared/ReactFeatureFlags';
 
 import type {
   Destination,
@@ -27,6 +30,7 @@ import type {
 
 import {
   writeChunk,
+  writeChunkAndReturn,
   stringToChunk,
   stringToPrecomputedChunk,
 } from 'react-server/src/ReactServerStreamConfig';
@@ -59,30 +63,75 @@ export const isPrimaryRenderer = true;
 
 // Per response, global state that is not contextual to the rendering subtree.
 export type ResponseState = {
+  bootstrapChunks: Array<Chunk | PrecomputedChunk>,
+  startInlineScript: PrecomputedChunk,
   placeholderPrefix: PrecomputedChunk,
   segmentPrefix: PrecomputedChunk,
   boundaryPrefix: string,
-  opaqueIdentifierPrefix: string,
+  idPrefix: string,
   nextSuspenseID: number,
-  nextOpaqueID: number,
   sentCompleteSegmentFunction: boolean,
   sentCompleteBoundaryFunction: boolean,
   sentClientRenderFunction: boolean, // We allow the legacy renderer to extend this object.
   ...
 };
 
+const startInlineScript = stringToPrecomputedChunk('<script>');
+const endInlineScript = stringToPrecomputedChunk('</script>');
+
+const startScriptSrc = stringToPrecomputedChunk('<script src="');
+const startModuleSrc = stringToPrecomputedChunk('<script type="module" src="');
+const endAsyncScript = stringToPrecomputedChunk('" async=""></script>');
+
 // Allows us to keep track of what we've already written so we can refer back to it.
 export function createResponseState(
   identifierPrefix: string | void,
+  nonce: string | void,
+  bootstrapScriptContent: string | void,
+  bootstrapScripts: Array<string> | void,
+  bootstrapModules: Array<string> | void,
 ): ResponseState {
   const idPrefix = identifierPrefix === undefined ? '' : identifierPrefix;
+  const inlineScriptWithNonce =
+    nonce === undefined
+      ? startInlineScript
+      : stringToPrecomputedChunk(
+          '<script nonce="' + escapeTextForBrowser(nonce) + '">',
+        );
+  const bootstrapChunks = [];
+  if (bootstrapScriptContent !== undefined) {
+    bootstrapChunks.push(
+      inlineScriptWithNonce,
+      stringToChunk(escapeTextForBrowser(bootstrapScriptContent)),
+      endInlineScript,
+    );
+  }
+  if (bootstrapScripts !== undefined) {
+    for (let i = 0; i < bootstrapScripts.length; i++) {
+      bootstrapChunks.push(
+        startScriptSrc,
+        stringToChunk(escapeTextForBrowser(bootstrapScripts[i])),
+        endAsyncScript,
+      );
+    }
+  }
+  if (bootstrapModules !== undefined) {
+    for (let i = 0; i < bootstrapModules.length; i++) {
+      bootstrapChunks.push(
+        startModuleSrc,
+        stringToChunk(escapeTextForBrowser(bootstrapModules[i])),
+        endAsyncScript,
+      );
+    }
+  }
   return {
+    bootstrapChunks: bootstrapChunks,
+    startInlineScript: inlineScriptWithNonce,
     placeholderPrefix: stringToPrecomputedChunk(idPrefix + 'P:'),
     segmentPrefix: stringToPrecomputedChunk(idPrefix + 'S:'),
     boundaryPrefix: idPrefix + 'B:',
-    opaqueIdentifierPrefix: idPrefix + 'R:',
+    idPrefix: idPrefix,
     nextSuspenseID: 0,
-    nextOpaqueID: 0,
     sentCompleteSegmentFunction: false,
     sentCompleteBoundaryFunction: false,
     sentClientRenderFunction: false,
@@ -186,22 +235,23 @@ export function assignSuspenseBoundaryID(
   );
 }
 
-export type OpaqueIDType = string;
+export function makeId(
+  responseState: ResponseState,
+  treeId: string,
+  localId: number,
+): string {
+  const idPrefix = responseState.idPrefix;
 
-export function makeServerID(
-  responseState: null | ResponseState,
-): OpaqueIDType {
-  if (responseState === null) {
-    throw new Error(
-      'Invalid hook call. Hooks can only be called inside of the body of a function component.',
-    );
+  let id = ':' + idPrefix + 'R' + treeId;
+
+  // Unless this is the first id at this level, append a number at the end
+  // that represents the position of this useId hook among all the useId
+  // hooks for this fiber.
+  if (localId > 0) {
+    id += 'H' + localId.toString(32);
   }
 
-  // TODO: This is not deterministic since it's created during render.
-  return (
-    responseState.opaqueIdentifierPrefix +
-    (responseState.nextOpaqueID++).toString(36)
-  );
+  return id + ':';
 }
 
 function encodeHTMLTextNode(text: string): string {
@@ -424,7 +474,7 @@ function pushAttribute(
             attributeSeparator,
             attributeNameChunk,
             attributeAssign,
-            escapeTextForBrowser(value),
+            stringToChunk(escapeTextForBrowser(value)),
             attributeEnd,
           );
         }
@@ -435,7 +485,7 @@ function pushAttribute(
             attributeSeparator,
             attributeNameChunk,
             attributeAssign,
-            escapeTextForBrowser(value),
+            stringToChunk(escapeTextForBrowser(value)),
             attributeEnd,
           );
         }
@@ -446,7 +496,7 @@ function pushAttribute(
             attributeSeparator,
             attributeNameChunk,
             attributeAssign,
-            escapeTextForBrowser(value),
+            stringToChunk(escapeTextForBrowser(value)),
             attributeEnd,
           );
         }
@@ -463,7 +513,7 @@ function pushAttribute(
           attributeSeparator,
           attributeNameChunk,
           attributeAssign,
-          escapeTextForBrowser(value),
+          stringToChunk(escapeTextForBrowser(value)),
           attributeEnd,
         );
     }
@@ -485,7 +535,7 @@ function pushAttribute(
       attributeSeparator,
       stringToChunk(name),
       attributeAssign,
-      escapeTextForBrowser(value),
+      stringToChunk(escapeTextForBrowser(value)),
       attributeEnd,
     );
   }
@@ -699,7 +749,7 @@ function pushStartOption(
     }
   }
 
-  if (selectedValue !== null) {
+  if (selectedValue != null) {
     let stringValue;
     if (value !== null) {
       if (__DEV__) {
@@ -732,8 +782,13 @@ function pushStartOption(
           break;
         }
       }
-    } else if (selectedValue === stringValue) {
-      target.push(selectedMarkerAttribute);
+    } else {
+      if (__DEV__) {
+        checkAttributeStringCoercion(selectedValue, 'select.value');
+      }
+      if ('' + selectedValue === stringValue) {
+        target.push(selectedMarkerAttribute);
+      }
     }
   } else if (selected) {
     target.push(selectedMarkerAttribute);
@@ -951,7 +1006,17 @@ function pushStartTextArea(
     target.push(leadingNewline);
   }
 
-  return value;
+  // ToString and push directly instead of recurse over children.
+  // We don't really support complex children in the value anyway.
+  // This also currently avoids a trailing comment node which breaks textarea.
+  if (value !== null) {
+    if (__DEV__) {
+      checkAttributeStringCoercion(value, 'value');
+    }
+    target.push(stringToChunk(encodeHTMLTextNode('' + value)));
+  }
+
+  return null;
 }
 
 function pushSelfClosing(
@@ -1069,11 +1134,25 @@ function pushStartCustomElement(
 
   let children = null;
   let innerHTML = null;
-  for (const propKey in props) {
+  for (let propKey in props) {
     if (hasOwnProperty.call(props, propKey)) {
       const propValue = props[propKey];
       if (propValue == null) {
         continue;
+      }
+      if (
+        enableCustomElementPropertySupport &&
+        (typeof propValue === 'function' || typeof propValue === 'object')
+      ) {
+        // It is normal to render functions and objects on custom elements when
+        // client rendering, but when server rendering the output isn't useful,
+        // so skip it.
+        continue;
+      }
+      if (enableCustomElementPropertySupport && propKey === 'className') {
+        // className gets rendered as class on the client, so it should be
+        // rendered as class on the server.
+        propKey = 'class';
       }
       switch (propKey) {
         case 'children':
@@ -1099,7 +1178,7 @@ function pushStartCustomElement(
               attributeSeparator,
               stringToChunk(propKey),
               attributeAssign,
-              escapeTextForBrowser(propValue),
+              stringToChunk(escapeTextForBrowser(propValue)),
               attributeEnd,
             );
           }
@@ -1359,6 +1438,21 @@ export function pushEndInstance(
   }
 }
 
+export function writeCompletedRoot(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
+  const bootstrapChunks = responseState.bootstrapChunks;
+  let i = 0;
+  for (; i < bootstrapChunks.length - 1; i++) {
+    writeChunk(destination, bootstrapChunks[i]);
+  }
+  if (i < bootstrapChunks.length) {
+    return writeChunkAndReturn(destination, bootstrapChunks[i]);
+  }
+  return true;
+}
+
 // Structural Nodes
 
 // A placeholder is a node inside a hidden partial tree that can be filled in later, but before
@@ -1375,7 +1469,7 @@ export function writePlaceholder(
   writeChunk(destination, responseState.placeholderPrefix);
   const formattedID = stringToChunk(id.toString(16));
   writeChunk(destination, formattedID);
-  return writeChunk(destination, placeholder2);
+  return writeChunkAndReturn(destination, placeholder2);
 }
 
 // Suspense boundaries are encoded as comments.
@@ -1405,7 +1499,7 @@ export function writeStartCompletedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, startCompletedSuspenseBoundary);
+  return writeChunkAndReturn(destination, startCompletedSuspenseBoundary);
 }
 export function writeStartPendingSuspenseBoundary(
   destination: Destination,
@@ -1421,31 +1515,31 @@ export function writeStartPendingSuspenseBoundary(
   }
 
   writeChunk(destination, id);
-  return writeChunk(destination, startPendingSuspenseBoundary2);
+  return writeChunkAndReturn(destination, startPendingSuspenseBoundary2);
 }
 export function writeStartClientRenderedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, startClientRenderedSuspenseBoundary);
+  return writeChunkAndReturn(destination, startClientRenderedSuspenseBoundary);
 }
 export function writeEndCompletedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, endSuspenseBoundary);
+  return writeChunkAndReturn(destination, endSuspenseBoundary);
 }
 export function writeEndPendingSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, endSuspenseBoundary);
+  return writeChunkAndReturn(destination, endSuspenseBoundary);
 }
 export function writeEndClientRenderedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, endSuspenseBoundary);
+  return writeChunkAndReturn(destination, endSuspenseBoundary);
 }
 
 const startSegmentHTML = stringToPrecomputedChunk('<div hidden id="');
@@ -1496,25 +1590,25 @@ export function writeStartSegment(
       writeChunk(destination, startSegmentHTML);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentHTML2);
+      return writeChunkAndReturn(destination, startSegmentHTML2);
     }
     case SVG_MODE: {
       writeChunk(destination, startSegmentSVG);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentSVG2);
+      return writeChunkAndReturn(destination, startSegmentSVG2);
     }
     case MATHML_MODE: {
       writeChunk(destination, startSegmentMathML);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentMathML2);
+      return writeChunkAndReturn(destination, startSegmentMathML2);
     }
     case HTML_TABLE_MODE: {
       writeChunk(destination, startSegmentTable);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentTable2);
+      return writeChunkAndReturn(destination, startSegmentTable2);
     }
     // TODO: For the rest of these, there will be extra wrapper nodes that never
     // get deleted from the document. We need to delete the table too as part
@@ -1524,19 +1618,19 @@ export function writeStartSegment(
       writeChunk(destination, startSegmentTableBody);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentTableBody2);
+      return writeChunkAndReturn(destination, startSegmentTableBody2);
     }
     case HTML_TABLE_ROW_MODE: {
       writeChunk(destination, startSegmentTableRow);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentTableRow2);
+      return writeChunkAndReturn(destination, startSegmentTableRow2);
     }
     case HTML_COLGROUP_MODE: {
       writeChunk(destination, startSegmentColGroup);
       writeChunk(destination, responseState.segmentPrefix);
       writeChunk(destination, stringToChunk(id.toString(16)));
-      return writeChunk(destination, startSegmentColGroup2);
+      return writeChunkAndReturn(destination, startSegmentColGroup2);
     }
     default: {
       throw new Error('Unknown insertion mode. This is a bug in React.');
@@ -1550,25 +1644,25 @@ export function writeEndSegment(
   switch (formatContext.insertionMode) {
     case ROOT_HTML_MODE:
     case HTML_MODE: {
-      return writeChunk(destination, endSegmentHTML);
+      return writeChunkAndReturn(destination, endSegmentHTML);
     }
     case SVG_MODE: {
-      return writeChunk(destination, endSegmentSVG);
+      return writeChunkAndReturn(destination, endSegmentSVG);
     }
     case MATHML_MODE: {
-      return writeChunk(destination, endSegmentMathML);
+      return writeChunkAndReturn(destination, endSegmentMathML);
     }
     case HTML_TABLE_MODE: {
-      return writeChunk(destination, endSegmentTable);
+      return writeChunkAndReturn(destination, endSegmentTable);
     }
     case HTML_TABLE_BODY_MODE: {
-      return writeChunk(destination, endSegmentTableBody);
+      return writeChunkAndReturn(destination, endSegmentTableBody);
     }
     case HTML_TABLE_ROW_MODE: {
-      return writeChunk(destination, endSegmentTableRow);
+      return writeChunkAndReturn(destination, endSegmentTableRow);
     }
     case HTML_COLGROUP_MODE: {
-      return writeChunk(destination, endSegmentColGroup);
+      return writeChunkAndReturn(destination, endSegmentColGroup);
     }
     default: {
       throw new Error('Unknown insertion mode. This is a bug in React.');
@@ -1689,9 +1783,9 @@ const clientRenderFunction =
   'function $RX(a){if(a=document.getElementById(a))a=a.previousSibling,a.data="$!",a._reactRetry&&a._reactRetry()}';
 
 const completeSegmentScript1Full = stringToPrecomputedChunk(
-  '<script>' + completeSegmentFunction + ';$RS("',
+  completeSegmentFunction + ';$RS("',
 );
-const completeSegmentScript1Partial = stringToPrecomputedChunk('<script>$RS("');
+const completeSegmentScript1Partial = stringToPrecomputedChunk('$RS("');
 const completeSegmentScript2 = stringToPrecomputedChunk('","');
 const completeSegmentScript3 = stringToPrecomputedChunk('")</script>');
 
@@ -1700,6 +1794,7 @@ export function writeCompletedSegmentInstruction(
   responseState: ResponseState,
   contentSegmentID: number,
 ): boolean {
+  writeChunk(destination, responseState.startInlineScript);
   if (!responseState.sentCompleteSegmentFunction) {
     // The first time we write this, we'll need to include the full implementation.
     responseState.sentCompleteSegmentFunction = true;
@@ -1714,15 +1809,13 @@ export function writeCompletedSegmentInstruction(
   writeChunk(destination, completeSegmentScript2);
   writeChunk(destination, responseState.placeholderPrefix);
   writeChunk(destination, formattedID);
-  return writeChunk(destination, completeSegmentScript3);
+  return writeChunkAndReturn(destination, completeSegmentScript3);
 }
 
 const completeBoundaryScript1Full = stringToPrecomputedChunk(
-  '<script>' + completeBoundaryFunction + ';$RC("',
+  completeBoundaryFunction + ';$RC("',
 );
-const completeBoundaryScript1Partial = stringToPrecomputedChunk(
-  '<script>$RC("',
-);
+const completeBoundaryScript1Partial = stringToPrecomputedChunk('$RC("');
 const completeBoundaryScript2 = stringToPrecomputedChunk('","');
 const completeBoundaryScript3 = stringToPrecomputedChunk('")</script>');
 
@@ -1732,6 +1825,7 @@ export function writeCompletedBoundaryInstruction(
   boundaryID: SuspenseBoundaryID,
   contentSegmentID: number,
 ): boolean {
+  writeChunk(destination, responseState.startInlineScript);
   if (!responseState.sentCompleteBoundaryFunction) {
     // The first time we write this, we'll need to include the full implementation.
     responseState.sentCompleteBoundaryFunction = true;
@@ -1752,13 +1846,13 @@ export function writeCompletedBoundaryInstruction(
   writeChunk(destination, completeBoundaryScript2);
   writeChunk(destination, responseState.segmentPrefix);
   writeChunk(destination, formattedContentID);
-  return writeChunk(destination, completeBoundaryScript3);
+  return writeChunkAndReturn(destination, completeBoundaryScript3);
 }
 
 const clientRenderScript1Full = stringToPrecomputedChunk(
-  '<script>' + clientRenderFunction + ';$RX("',
+  clientRenderFunction + ';$RX("',
 );
-const clientRenderScript1Partial = stringToPrecomputedChunk('<script>$RX("');
+const clientRenderScript1Partial = stringToPrecomputedChunk('$RX("');
 const clientRenderScript2 = stringToPrecomputedChunk('")</script>');
 
 export function writeClientRenderBoundaryInstruction(
@@ -1766,6 +1860,7 @@ export function writeClientRenderBoundaryInstruction(
   responseState: ResponseState,
   boundaryID: SuspenseBoundaryID,
 ): boolean {
+  writeChunk(destination, responseState.startInlineScript);
   if (!responseState.sentClientRenderFunction) {
     // The first time we write this, we'll need to include the full implementation.
     responseState.sentClientRenderFunction = true;
@@ -1782,5 +1877,5 @@ export function writeClientRenderBoundaryInstruction(
   }
 
   writeChunk(destination, boundaryID);
-  return writeChunk(destination, clientRenderScript2);
+  return writeChunkAndReturn(destination, clientRenderScript2);
 }

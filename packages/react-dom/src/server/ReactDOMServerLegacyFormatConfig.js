@@ -29,12 +29,13 @@ export const isPrimaryRenderer = false;
 
 export type ResponseState = {
   // Keep this in sync with ReactDOMServerFormatConfig
+  bootstrapChunks: Array<Chunk | PrecomputedChunk>,
+  startInlineScript: PrecomputedChunk,
   placeholderPrefix: PrecomputedChunk,
   segmentPrefix: PrecomputedChunk,
   boundaryPrefix: string,
-  opaqueIdentifierPrefix: string,
+  idPrefix: string,
   nextSuspenseID: number,
-  nextOpaqueID: number,
   sentCompleteSegmentFunction: boolean,
   sentCompleteBoundaryFunction: boolean,
   sentClientRenderFunction: boolean,
@@ -46,15 +47,16 @@ export function createResponseState(
   generateStaticMarkup: boolean,
   identifierPrefix: string | void,
 ): ResponseState {
-  const responseState = createResponseStateImpl(identifierPrefix);
+  const responseState = createResponseStateImpl(identifierPrefix, undefined);
   return {
     // Keep this in sync with ReactDOMServerFormatConfig
+    bootstrapChunks: responseState.bootstrapChunks,
+    startInlineScript: responseState.startInlineScript,
     placeholderPrefix: responseState.placeholderPrefix,
     segmentPrefix: responseState.segmentPrefix,
     boundaryPrefix: responseState.boundaryPrefix,
-    opaqueIdentifierPrefix: responseState.opaqueIdentifierPrefix,
+    idPrefix: responseState.idPrefix,
     nextSuspenseID: responseState.nextSuspenseID,
-    nextOpaqueID: responseState.nextOpaqueID,
     sentCompleteSegmentFunction: responseState.sentCompleteSegmentFunction,
     sentCompleteBoundaryFunction: responseState.sentCompleteBoundaryFunction,
     sentClientRenderFunction: responseState.sentClientRenderFunction,
@@ -73,14 +75,13 @@ export function createRootFormatContext(): FormatContext {
 export type {
   FormatContext,
   SuspenseBoundaryID,
-  OpaqueIDType,
 } from './ReactDOMServerFormatConfig';
 
 export {
   getChildFormatContext,
   UNINITIALIZED_SUSPENSE_BOUNDARY_ID,
   assignSuspenseBoundaryID,
-  makeServerID,
+  makeId,
   pushStartInstance,
   pushEndInstance,
   pushStartCompletedSuspenseBoundary,
@@ -93,6 +94,7 @@ export {
   writeStartPendingSuspenseBoundary,
   writeEndPendingSuspenseBoundary,
   writePlaceholder,
+  writeCompletedRoot,
 } from './ReactDOMServerFormatConfig';
 
 import {stringToChunk} from 'react-server/src/ReactServerStreamConfig';

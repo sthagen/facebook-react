@@ -17,6 +17,7 @@ import type {
 
 import {
   writeChunk,
+  writeChunkAndReturn,
   stringToChunk,
   stringToPrecomputedChunk,
 } from 'react-server/src/ReactServerStreamConfig';
@@ -59,14 +60,12 @@ SUSPENSE_UPDATE_TO_CLIENT_RENDER[0] = SUSPENSE_UPDATE_TO_CLIENT_RENDER_TAG;
 // Per response,
 export type ResponseState = {
   nextSuspenseID: number,
-  nextOpaqueID: number,
 };
 
 // Allows us to keep track of what we've already written so we can refer back to it.
 export function createResponseState(): ResponseState {
   return {
     nextSuspenseID: 0,
-    nextOpaqueID: 0,
   };
 }
 
@@ -109,19 +108,12 @@ export function assignSuspenseBoundaryID(
   return responseState.nextSuspenseID++;
 }
 
-export type OpaqueIDType = number;
-
-export function makeServerID(
-  responseState: null | ResponseState,
-): OpaqueIDType {
-  if (responseState === null) {
-    throw new Error(
-      'Invalid hook call. Hooks can only be called inside of the body of a function component.',
-    );
-  }
-
-  // TODO: This is not deterministic since it's created during render.
-  return responseState.nextOpaqueID++;
+export function makeId(
+  responseState: ResponseState,
+  treeId: string,
+  localId: number,
+): string {
+  throw new Error('Not implemented');
 }
 
 const RAW_TEXT = stringToPrecomputedChunk('RCTRawText');
@@ -164,6 +156,13 @@ export function pushEndInstance(
   target.push(END);
 }
 
+export function writeCompletedRoot(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
+  return true;
+}
+
 // IDs are formatted as little endian Uint16
 function formatID(id: number): Uint8Array {
   if (id > 0xffff) {
@@ -187,7 +186,7 @@ export function writePlaceholder(
   id: number,
 ): boolean {
   writeChunk(destination, PLACEHOLDER);
-  return writeChunk(destination, formatID(id));
+  return writeChunkAndReturn(destination, formatID(id));
 }
 
 // Suspense boundaries are encoded as comments.
@@ -195,7 +194,7 @@ export function writeStartCompletedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, SUSPENSE_COMPLETE);
+  return writeChunkAndReturn(destination, SUSPENSE_COMPLETE);
 }
 
 export function pushStartCompletedSuspenseBoundary(
@@ -210,19 +209,19 @@ export function writeStartPendingSuspenseBoundary(
   id: SuspenseBoundaryID,
 ): boolean {
   writeChunk(destination, SUSPENSE_PENDING);
-  return writeChunk(destination, formatID(id));
+  return writeChunkAndReturn(destination, formatID(id));
 }
 export function writeStartClientRenderedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, SUSPENSE_CLIENT_RENDER);
+  return writeChunkAndReturn(destination, SUSPENSE_CLIENT_RENDER);
 }
 export function writeEndCompletedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, END);
+  return writeChunkAndReturn(destination, END);
 }
 export function pushEndCompletedSuspenseBoundary(
   target: Array<Chunk | PrecomputedChunk>,
@@ -233,13 +232,13 @@ export function writeEndPendingSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, END);
+  return writeChunkAndReturn(destination, END);
 }
 export function writeEndClientRenderedSuspenseBoundary(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
-  return writeChunk(destination, END);
+  return writeChunkAndReturn(destination, END);
 }
 
 export function writeStartSegment(
@@ -249,13 +248,13 @@ export function writeStartSegment(
   id: number,
 ): boolean {
   writeChunk(destination, SEGMENT);
-  return writeChunk(destination, formatID(id));
+  return writeChunkAndReturn(destination, formatID(id));
 }
 export function writeEndSegment(
   destination: Destination,
   formatContext: FormatContext,
 ): boolean {
-  return writeChunk(destination, END);
+  return writeChunkAndReturn(destination, END);
 }
 
 // Instruction Set
@@ -278,7 +277,7 @@ export function writeCompletedBoundaryInstruction(
 ): boolean {
   writeChunk(destination, SUSPENSE_UPDATE_TO_COMPLETE);
   writeChunk(destination, formatID(boundaryID));
-  return writeChunk(destination, formatID(contentSegmentID));
+  return writeChunkAndReturn(destination, formatID(contentSegmentID));
 }
 
 export function writeClientRenderBoundaryInstruction(
@@ -287,5 +286,5 @@ export function writeClientRenderBoundaryInstruction(
   boundaryID: SuspenseBoundaryID,
 ): boolean {
   writeChunk(destination, SUSPENSE_UPDATE_TO_CLIENT_RENDER);
-  return writeChunk(destination, formatID(boundaryID));
+  return writeChunkAndReturn(destination, formatID(boundaryID));
 }

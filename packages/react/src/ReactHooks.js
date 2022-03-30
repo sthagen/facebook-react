@@ -13,8 +13,8 @@ import type {
   MutableSourceGetSnapshotFn,
   MutableSourceSubscribeFn,
   ReactContext,
+  StartTransitionOptions,
 } from 'shared/ReactTypes';
-import type {OpaqueIDType} from 'react-reconciler/src/ReactFiberHostConfig';
 
 import ReactCurrentDispatcher from './ReactCurrentDispatcher';
 
@@ -39,6 +39,12 @@ function resolveDispatcher() {
   // intentionally don't throw our own error because this is in a hot path.
   // Also helps ensure this is inlined.
   return ((dispatcher: any): Dispatcher);
+}
+
+export function getCacheSignal(): AbortSignal {
+  const dispatcher = resolveDispatcher();
+  // $FlowFixMe This is unstable, thus optional
+  return dispatcher.getCacheSignal();
 }
 
 export function getCacheForType<T>(resourceType: () => T): T {
@@ -153,7 +159,10 @@ export function useDebugValue<T>(
 
 export const emptyObject = {};
 
-export function useTransition(): [boolean, (() => void) => void] {
+export function useTransition(): [
+  boolean,
+  (callback: () => void, options?: StartTransitionOptions) => void,
+] {
   const dispatcher = resolveDispatcher();
   return dispatcher.useTransition();
 }
@@ -163,9 +172,9 @@ export function useDeferredValue<T>(value: T): T {
   return dispatcher.useDeferredValue(value);
 }
 
-export function useOpaqueIdentifier(): OpaqueIDType | void {
+export function useId(): string {
   const dispatcher = resolveDispatcher();
-  return dispatcher.useOpaqueIdentifier();
+  return dispatcher.useId();
 }
 
 export function useMutableSource<Source, Snapshot>(

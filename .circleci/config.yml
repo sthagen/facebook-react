@@ -2,7 +2,7 @@ version: 2.1
 
 aliases:
   - &docker
-    - image: circleci/openjdk:8-jdk-node-browsers
+    - image: cimg/openjdk:17.0.0-node
 
   - &environment
     TZ: /usr/share/zoneinfo/America/Los_Angeles
@@ -127,22 +127,19 @@ jobs:
     environment: *environment
     steps:
       - checkout
-      - run: yarn workspaces info | head -n -1 > workspace_info.txt
-      - *restore_node_modules
       - run:
           name: Download artifacts for base revision
+          # TODO: We can't use the normal download-build script here because it
+          # depends on the CircleCI artifacts API, which was recently changed to
+          # require authorization. And we can't pass an authorization token
+          # without possibly leaking it to the public, since we run sizebot on
+          # PRs from external contributors. As a temporary workaround, this job
+          # will pull the artifacts from a public mirror that I set up. But we
+          # should find some other solution so we don't have to maintain
+          # the mirror.
           command: |
-              git fetch origin main
-              cd ./scripts/release && yarn && cd ../../
-              scripts/release/download-experimental-build.js --commit=$(git merge-base HEAD origin/main)
-              mv ./build ./base-build
-      - run:
-          # TODO: The `download-experimental-build` script copies the npm
-          # packages into the `node_modules` directory. This is a historical
-          # quirk of how the release script works. Let's pretend they
-          # don't exist.
-          name: Delete extraneous files
-          command: rm -rf ./base-build/node_modules
+            curl -L --retry 60 --retry-delay 10 --retry-max-time 600 https://react-builds.vercel.app/api/commits/$(git merge-base HEAD origin/main)/artifacts/build.tgz | tar -xz
+            mv ./build ./base-build
 
       - persist_to_workspace:
           root: .
@@ -200,7 +197,52 @@ jobs:
       - store_artifacts:
           path: ./build/devtools.tgz
 
+  run_devtools_e2e_tests:
+    docker: *docker
+    environment: *environment
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run: yarn workspaces info | head -n -1 > workspace_info.txt
+      - *restore_node_modules
+      - run:
+          name: Install Packages
+          command: yarn --frozen-lockfile --cache-folder ~/.cache/yarn
+      - run:
+          name: Playwright install deps
+          command: |
+            npx playwright install
+            sudo npx playwright install-deps
+      - run:
+          environment:
+            RELEASE_CHANNEL: experimental
+          command: ./scripts/circleci/run_devtools_e2e_tests.js
+
   yarn_lint_build:
+    docker: *docker
+    environment: *environment
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run: yarn workspaces info | head -n -1 > workspace_info.txt
+      - *restore_node_modules
+      - run: yarn lint-build
+
+  yarn_check_release_dependencies:
+    docker: *docker
+    environment: *environment
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run: yarn workspaces info | head -n -1 > workspace_info.txt
+      - *restore_node_modules
+      - run: yarn check-release-dependencies
+
+
+  check_error_codes:
     docker: *docker
     environment: *environment
     steps:
@@ -208,8 +250,11 @@ jobs:
       - attach_workspace: *attach_workspace
       - run: yarn workspaces info | head -n -1 > workspace_info.txt
       - *restore_node_modules
-      - run: yarn lint-build
-      - run: scripts/circleci/check_minified_errors.sh
+      - run:
+          name: Search build artifacts for unminified errors
+          command: |
+            yarn extract-errors
+            git diff || (echo "Found unminified errors. Either update the error codes map or disable error minification for the affected build, if appropriate." && false)
 
   yarn_test:
     docker: *docker
@@ -414,12 +459,21 @@ workflows:
       - yarn_lint_build:
           requires:
             - yarn_build_combined
+      - yarn_check_release_dependencies:
+          requires:
+            - yarn_build_combined
+      - check_error_codes:
+          requires:
+            - yarn_build_combined
       - RELEASE_CHANNEL_stable_yarn_test_dom_fixtures:
           requires:
             - yarn_build_combined
       - build_devtools_and_process_artifacts:
           requires:
             - yarn_build_combined
+      - run_devtools_e2e_tests:
+          requires:
+            - build_devtools_and_process_artifacts
 
   fuzz_tests:
     unless: << pipeline.parameters.prerelease_commit_sha >>
@@ -448,7 +502,7 @@ workflows:
             - setup
           commit_sha: << pipeline.parameters.prerelease_commit_sha >>
           release_channel: stable
-          dist_tag: "next,alpha"
+          dist_tag: "next"
       - publish_prerelease:
           name: Publish to Experimental channel
           requires:
@@ -480,7 +534,7 @@ workflows:
             - setup
           commit_sha: << pipeline.git.revision >>
           release_channel: stable
-          dist_tag: "next,alpha"
+          dist_tag: "next"
       - publish_prerelease:
           name: Publish to Experimental channel
           requires:

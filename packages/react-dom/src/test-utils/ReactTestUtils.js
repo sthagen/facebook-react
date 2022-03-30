@@ -21,6 +21,7 @@ import {
   rethrowCaughtError,
   invokeGuardedCallbackAndCatchFirstError,
 } from 'shared/ReactErrorUtils';
+import assign from 'shared/assign';
 import isArray from 'shared/isArray';
 
 // Keep in sync with ReactDOM.js:
@@ -178,7 +179,7 @@ function findAllInRenderedTree(inst, test) {
 }
 
 /**
- * Finds all instance of components in the rendered tree that are DOM
+ * Finds all instances of components in the rendered tree that are DOM
  * components with the class name matching `className`.
  * @return {array} an array of all the matches.
  */
@@ -233,7 +234,7 @@ function findRenderedDOMComponentWithClass(root, className) {
 }
 
 /**
- * Finds all instance of components in the rendered tree that are DOM
+ * Finds all instances of components in the rendered tree that are DOM
  * components with the tag name matching `tagName`.
  * @return {array} an array of all the matches.
  */
@@ -596,7 +597,7 @@ function makeSimulator(eventType) {
     // Since we aren't using pooling, always persist the event. This will make
     // sure it's marked and won't warn when setting additional properties.
     event.persist();
-    Object.assign(event, eventData);
+    assign(event, eventData);
 
     if (directDispatchEventTypes.has(eventType)) {
       accumulateDirectDispatchesSingle(event);

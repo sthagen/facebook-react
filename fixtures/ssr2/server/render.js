@@ -42,11 +42,17 @@ module.exports = function render(url, res) {
       <App assets={assets} />
     </DataProvider>,
     {
+      bootstrapScripts: [assets['main.js']],
       onCompleteShell() {
         // If something errored before we started streaming, we set the error code appropriately.
         res.statusCode = didError ? 500 : 200;
         res.setHeader('Content-type', 'text/html');
         pipe(res);
+      },
+      onShellError(x) {
+        // Something errored before we could complete the shell so we emit an alternative shell.
+        res.statusCode = 500;
+        res.send('<!doctype><p>Error</p>');
       },
       onError(x) {
         didError = true;

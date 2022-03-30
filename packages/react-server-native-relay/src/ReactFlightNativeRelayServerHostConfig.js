@@ -122,6 +122,14 @@ export function processModuleChunk(
   return ['M', id, moduleMetaData];
 }
 
+export function processProviderChunk(
+  request: Request,
+  id: number,
+  contextName: string,
+): Chunk {
+  return ['P', id, contextName];
+}
+
 export function processSymbolChunk(
   request: Request,
   id: number,
@@ -138,7 +146,14 @@ export function flushBuffered(destination: Destination) {}
 
 export function beginWriting(destination: Destination) {}
 
-export function writeChunk(destination: Destination, chunk: Chunk): boolean {
+export function writeChunk(destination: Destination, chunk: Chunk): void {
+  emitRow(destination, chunk);
+}
+
+export function writeChunkAndReturn(
+  destination: Destination,
+  chunk: Chunk,
+): boolean {
   emitRow(destination, chunk);
   return true;
 }

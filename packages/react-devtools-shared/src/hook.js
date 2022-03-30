@@ -9,13 +9,12 @@
  */
 
 import type {BrowserTheme} from 'react-devtools-shared/src/devtools/views/DevTools';
+import type {DevToolsHook} from 'react-devtools-shared/src/backend/types';
 
 import {
   patch as patchConsole,
   registerRenderer as registerRendererWithConsole,
 } from './backend/console';
-
-import type {DevToolsHook} from 'react-devtools-shared/src/backend/types';
 
 declare var window: any;
 
@@ -490,6 +489,40 @@ export function installHook(target: any): DevToolsHook | null {
     }
   }
 
+  type StackFrameString = string;
+
+  const openModuleRangesStack: Array<StackFrameString> = [];
+  const moduleRanges: Array<[StackFrameString, StackFrameString]> = [];
+
+  function getTopStackFrameString(error: Error): StackFrameString | null {
+    const frames = error.stack.split('\n');
+    const frame = frames.length > 1 ? frames[1] : null;
+    return frame;
+  }
+
+  function getInternalModuleRanges(): Array<
+    [StackFrameString, StackFrameString],
+  > {
+    return moduleRanges;
+  }
+
+  function registerInternalModuleStart(error: Error) {
+    const startStackFrame = getTopStackFrameString(error);
+    if (startStackFrame !== null) {
+      openModuleRangesStack.push(startStackFrame);
+    }
+  }
+
+  function registerInternalModuleStop(error: Error) {
+    if (openModuleRangesStack.length > 0) {
+      const startStackFrame = openModuleRangesStack.pop();
+      const stopStackFrame = getTopStackFrameString(error);
+      if (stopStackFrame !== null) {
+        moduleRanges.push([startStackFrame, stopStackFrame]);
+      }
+    }
+  }
+
   // TODO: More meaningful names for "rendererInterfaces" and "renderers".
   const fiberRoots = {};
   const rendererInterfaces = new Map();
@@ -520,6 +553,13 @@ export function installHook(target: any): DevToolsHook | null {
     onCommitFiberRoot,
     onPostCommitFiberRoot,
     setStrictMode,
+
+    // Schedule Profiler runtime helpers.
+    // These internal React modules to report their own boundaries
+    // which in turn enables the profiler to dim or filter internal frames.
+    getInternalModuleRanges,
+    registerInternalModuleStart,
+    registerInternalModuleStop,
   };
 
   if (__TEST__) {

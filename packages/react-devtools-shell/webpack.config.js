@@ -24,6 +24,8 @@ if (!TARGET) {
   process.exit(1);
 }
 
+const EDITOR_URL = process.env.EDITOR_URL || null;
+
 const builtModulesDir = resolve(
   __dirname,
   '..',
@@ -40,8 +42,13 @@ const config = {
   mode: __DEV__ ? 'development' : 'production',
   devtool: __DEV__ ? 'cheap-source-map' : 'source-map',
   entry: {
-    app: './src/app/index.js',
-    devtools: './src/devtools.js',
+    'app-index': './src/app/index.js',
+    'app-devtools': './src/app/devtools.js',
+    'e2e-app': './src/e2e/app.js',
+    'e2e-devtools': './src/e2e/devtools.js',
+    'multi-left': './src/multi/left.js',
+    'multi-devtools': './src/multi/devtools.js',
+    'multi-right': './src/multi/right.js',
   },
   node: {
     // source-maps package has a dependency on 'fs'
@@ -53,7 +60,8 @@ const config = {
       react: resolve(builtModulesDir, 'react'),
       'react-debug-tools': resolve(builtModulesDir, 'react-debug-tools'),
       'react-devtools-feature-flags': resolveFeatureFlags('shell'),
-      'react-dom': resolve(builtModulesDir, 'react-dom'),
+      'react-dom/client': resolve(builtModulesDir, 'react-dom/client'),
+      'react-dom': resolve(builtModulesDir, 'react-dom/unstable_testing'),
       'react-is': resolve(builtModulesDir, 'react-is'),
       scheduler: resolve(builtModulesDir, 'scheduler'),
     },
@@ -69,6 +77,7 @@ const config = {
       __PROFILE__: false,
       __TEST__: NODE_ENV === 'test',
       'process.env.GITHUB_URL': `"${GITHUB_URL}"`,
+      'process.env.EDITOR_URL': EDITOR_URL != null ? `"${EDITOR_URL}"` : null,
       'process.env.DEVTOOLS_PACKAGE': `"react-devtools-shell"`,
       'process.env.DEVTOOLS_VERSION': `"${DEVTOOLS_VERSION}"`,
       'process.env.DARK_MODE_DIMMED_WARNING_COLOR': `"${DARK_MODE_DIMMED_WARNING_COLOR}"`,
@@ -104,7 +113,7 @@ const config = {
             options: {
               sourceMap: true,
               modules: true,
-              localIdentName: '[local]___[hash:base64:5]',
+              localIdentName: '[local]',
             },
           },
         ],

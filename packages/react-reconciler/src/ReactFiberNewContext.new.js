@@ -44,7 +44,9 @@ import {markWorkInProgressReceivedUpdate} from './ReactFiberBeginWork.new';
 import {
   enableSuspenseServerRenderer,
   enableLazyContextPropagation,
+  enableServerContext,
 } from 'shared/ReactFeatureFlags';
+import {REACT_SERVER_CONTEXT_DEFAULT_VALUE_NOT_LOADED} from 'shared/ReactSymbols';
 
 const valueCursor: StackCursor<mixed> = createCursor(null);
 
@@ -132,15 +134,30 @@ export function popProvider(
   const currentValue = valueCursor.current;
   pop(valueCursor, providerFiber);
   if (isPrimaryRenderer) {
-    context._currentValue = currentValue;
+    if (
+      enableServerContext &&
+      currentValue === REACT_SERVER_CONTEXT_DEFAULT_VALUE_NOT_LOADED
+    ) {
+      context._currentValue = context._defaultValue;
+    } else {
+      context._currentValue = currentValue;
+    }
   } else {
-    context._currentValue2 = currentValue;
+    if (
+      enableServerContext &&
+      currentValue === REACT_SERVER_CONTEXT_DEFAULT_VALUE_NOT_LOADED
+    ) {
+      context._currentValue2 = context._defaultValue;
+    } else {
+      context._currentValue2 = currentValue;
+    }
   }
 }
 
-export function scheduleWorkOnParentPath(
+export function scheduleContextWorkOnParentPath(
   parent: Fiber | null,
   renderLanes: Lanes,
+  propagationRoot: Fiber,
 ) {
   // Update the child lanes of all the ancestors, including the alternates.
   let node = parent;
@@ -157,11 +174,25 @@ export function scheduleWorkOnParentPath(
     ) {
       alternate.childLanes = mergeLanes(alternate.childLanes, renderLanes);
     } else {
-      // Neither alternate was updated, which means the rest of the
+      // Neither alternate was updated.
+      // Normally, this would mean that the rest of the
       // ancestor path already has sufficient priority.
+      // However, this is not necessarily true inside offscreen
+      // or fallback trees because childLanes may be inconsistent
+      // with the surroundings. This is why we continue the loop.
+    }
+    if (node === propagationRoot) {
       break;
     }
     node = node.return;
+  }
+  if (__DEV__) {
+    if (node !== propagationRoot) {
+      console.error(
+        'Expected to find the propagation root when scheduling context work. ' +
+          'This error is likely caused by a bug in React. Please file an issue.',
+      );
+    }
   }
 }
 
@@ -246,7 +277,11 @@ function propagateContextChange_eager<T>(
           if (alternate !== null) {
             alternate.lanes = mergeLanes(alternate.lanes, renderLanes);
           }
-          scheduleWorkOnParentPath(fiber.return, renderLanes);
+          scheduleContextWorkOnParentPath(
+            fiber.return,
+            renderLanes,
+            workInProgress,
+          );
 
           // Mark the updated lanes on the list, too.
           list.lanes = mergeLanes(list.lanes, renderLanes);
@@ -284,7 +319,11 @@ function propagateContextChange_eager<T>(
       // because we want to schedule this fiber as having work
       // on its children. We'll use the childLanes on
       // this fiber to indicate that a context has changed.
-      scheduleWorkOnParentPath(parentSuspense, renderLanes);
+      scheduleContextWorkOnParentPath(
+        parentSuspense,
+        renderLanes,
+        workInProgress,
+      );
       nextFiber = fiber.sibling;
     } else {
       // Traverse down.
@@ -365,7 +404,11 @@ function propagateContextChanges<T>(
             if (alternate !== null) {
               alternate.lanes = mergeLanes(alternate.lanes, renderLanes);
             }
-            scheduleWorkOnParentPath(consumer.return, renderLanes);
+            scheduleContextWorkOnParentPath(
+              consumer.return,
+              renderLanes,
+              workInProgress,
+            );
 
             if (!forcePropagateEntireTree) {
               // During lazy propagation, when we find a match, we can defer
@@ -406,7 +449,11 @@ function propagateContextChanges<T>(
       // because we want to schedule this fiber as having work
       // on its children. We'll use the childLanes on
       // this fiber to indicate that a context has changed.
-      scheduleWorkOnParentPath(parentSuspense, renderLanes);
+      scheduleContextWorkOnParentPath(
+        parentSuspense,
+        renderLanes,
+        workInProgress,
+      );
       nextFiber = null;
     } else {
       // Traverse down.

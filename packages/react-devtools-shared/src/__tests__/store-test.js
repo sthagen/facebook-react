@@ -10,6 +10,7 @@
 describe('Store', () => {
   let React;
   let ReactDOM;
+  let ReactDOMClient;
   let agent;
   let act;
   let bridge;
@@ -25,6 +26,7 @@ describe('Store', () => {
 
     React = require('react');
     ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
 
     const utils = require('./utils');
     act = utils.act;
@@ -39,7 +41,10 @@ describe('Store', () => {
     act(() =>
       legacyRender(<Component count={4} />, document.createElement('div')),
     );
-    expect(store).toMatchSnapshot('1: mount');
+    expect(store).toMatchInlineSnapshot(`
+      [root]
+          <Component>
+    `);
 
     expect(store.roots).toHaveLength(1);
 
@@ -56,10 +61,13 @@ describe('Store', () => {
     const container = document.createElement('div');
 
     act(() => legacyRender(<Root>{null}</Root>, container));
-    expect(store).toMatchSnapshot('1: mount');
+    expect(store).toMatchInlineSnapshot(`
+      [root]
+          <Root>
+    `);
 
     act(() => legacyRender(<div />, container));
-    expect(store).toMatchSnapshot('2: add host nodes');
+    expect(store).toMatchInlineSnapshot(`[root]`);
   });
 
   // This test is not the same cause as what's reported on GitHub,
@@ -114,6 +122,56 @@ describe('Store', () => {
     `);
   });
 
+  describe('StrictMode compliance', () => {
+    it('should mark strict root elements as strict', () => {
+      const App = () => <Component />;
+      const Component = () => null;
+
+      const container = document.createElement('div');
+      const root = ReactDOMClient.createRoot(container, {
+        unstable_strictMode: true,
+      });
+      act(() => {
+        root.render(<App />);
+      });
+
+      expect(store.getElementAtIndex(0).isStrictModeNonCompliant).toBe(false);
+      expect(store.getElementAtIndex(1).isStrictModeNonCompliant).toBe(false);
+    });
+
+    it('should mark non strict root elements as not strict', () => {
+      const App = () => <Component />;
+      const Component = () => null;
+
+      const container = document.createElement('div');
+      const root = ReactDOMClient.createRoot(container);
+      act(() => {
+        root.render(<App />);
+      });
+
+      expect(store.getElementAtIndex(0).isStrictModeNonCompliant).toBe(true);
+      expect(store.getElementAtIndex(1).isStrictModeNonCompliant).toBe(true);
+    });
+
+    it('should mark StrictMode subtree elements as strict', () => {
+      const App = () => (
+        <React.StrictMode>
+          <Component />
+        </React.StrictMode>
+      );
+      const Component = () => null;
+
+      const container = document.createElement('div');
+      const root = ReactDOMClient.createRoot(container);
+      act(() => {
+        root.render(<App />);
+      });
+
+      expect(store.getElementAtIndex(0).isStrictModeNonCompliant).toBe(true);
+      expect(store.getElementAtIndex(1).isStrictModeNonCompliant).toBe(false);
+    });
+  });
+
   describe('collapseNodesByDefault:false', () => {
     beforeEach(() => {
       store.collapseNodesByDefault = false;
@@ -133,13 +191,35 @@ describe('Store', () => {
       const container = document.createElement('div');
 
       act(() => legacyRender(<Grandparent count={4} />, container));
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+                <Child key="2">
+                <Child key="3">
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+                <Child key="2">
+                <Child key="3">
+      `);
 
       act(() => legacyRender(<Grandparent count={2} />, container));
-      expect(store).toMatchSnapshot('2: update');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(container));
-      expect(store).toMatchSnapshot('3: unmount');
+      expect(store).toMatchInlineSnapshot(``);
     });
 
     it('should support mount and update operations for multiple roots', () => {
@@ -154,19 +234,46 @@ describe('Store', () => {
         legacyRender(<Parent key="A" count={3} />, containerA);
         legacyRender(<Parent key="B" count={2} />, containerB);
       });
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Parent key="A">
+              <Child key="0">
+              <Child key="1">
+              <Child key="2">
+        [root]
+          ▾ <Parent key="B">
+              <Child key="0">
+              <Child key="1">
+      `);
 
       act(() => {
         legacyRender(<Parent key="A" count={4} />, containerA);
         legacyRender(<Parent key="B" count={1} />, containerB);
       });
-      expect(store).toMatchSnapshot('2: update');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Parent key="A">
+              <Child key="0">
+              <Child key="1">
+              <Child key="2">
+              <Child key="3">
+        [root]
+          ▾ <Parent key="B">
+              <Child key="0">
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(containerB));
-      expect(store).toMatchSnapshot('3: unmount B');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Parent key="A">
+              <Child key="0">
+              <Child key="1">
+              <Child key="2">
+              <Child key="3">
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(containerA));
-      expect(store).toMatchSnapshot('4: unmount A');
+      expect(store).toMatchInlineSnapshot(``);
     });
 
     it('should filter DOM nodes from the store tree', () => {
@@ -188,7 +295,14 @@ describe('Store', () => {
       act(() =>
         legacyRender(<Grandparent count={4} />, document.createElement('div')),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child>
+            ▾ <Parent>
+                <Child>
+      `);
     });
 
     it('should display Suspense nodes properly in various states', () => {
@@ -214,12 +328,24 @@ describe('Store', () => {
 
       const container = document.createElement('div');
       act(() => legacyRender(<Wrapper shouldSuspense={true} />, container));
-      expect(store).toMatchSnapshot('1: loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Loading>
+      `);
 
       act(() => {
         legacyRender(<Wrapper shouldSuspense={false} />, container);
       });
-      expect(store).toMatchSnapshot('2: resolved');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Inside">
+      `);
     });
 
     it('should support nested Suspense nodes', () => {
@@ -272,7 +398,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('1: third child is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Component key="Suspense 1 Content">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -283,7 +422,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('2: first and third child are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -294,7 +446,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('3: second and third child are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Component key="Suspense 1 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 2 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -305,7 +470,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('4: first and third child are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -316,7 +494,13 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('5: parent is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Loading key="Parent Fallback">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -327,7 +511,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('6: all children are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 2 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -338,7 +535,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('7: only third child is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Component key="Suspense 1 Content">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
 
       const rendererID = getRendererID();
       act(() =>
@@ -348,7 +558,20 @@ describe('Store', () => {
           forceFallback: true,
         }),
       );
-      expect(store).toMatchSnapshot('8: first and third child are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         agent.overrideSuspense({
           id: store.getElementIDAtIndex(2),
@@ -356,7 +579,13 @@ describe('Store', () => {
           forceFallback: true,
         }),
       );
-      expect(store).toMatchSnapshot('9: parent is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Loading key="Parent Fallback">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -367,7 +596,13 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('10: parent is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Loading key="Parent Fallback">
+      `);
       act(() =>
         agent.overrideSuspense({
           id: store.getElementIDAtIndex(2),
@@ -375,7 +610,20 @@ describe('Store', () => {
           forceFallback: false,
         }),
       );
-      expect(store).toMatchSnapshot('11: all children are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 2 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         agent.overrideSuspense({
           id: store.getElementIDAtIndex(4),
@@ -383,7 +631,20 @@ describe('Store', () => {
           forceFallback: false,
         }),
       );
-      expect(store).toMatchSnapshot('12: all children are suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Loading key="Suspense 1 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 2 Fallback">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
       act(() =>
         legacyRender(
           <Wrapper
@@ -394,7 +655,20 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('13: third child is suspended');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Unrelated at Start">
+              ▾ <Suspense>
+                  <Component key="Suspense 1 Content">
+              ▾ <Suspense>
+                  <Component key="Suspense 2 Content">
+              ▾ <Suspense>
+                  <Loading key="Suspense 3 Fallback">
+                <Component key="Unrelated at End">
+      `);
     });
 
     it('should display a partially rendered SuspenseList', () => {
@@ -418,16 +692,31 @@ describe('Store', () => {
       );
 
       const container = document.createElement('div');
-      const root = ReactDOM.createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
       act(() => {
         root.render(<Wrapper shouldSuspense={true} />);
       });
-      expect(store).toMatchSnapshot('1: loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▾ <SuspenseList>
+                <Component key="A">
+              ▾ <Suspense>
+                  <Loading>
+      `);
 
       act(() => {
         root.render(<Wrapper shouldSuspense={false} />);
       });
-      expect(store).toMatchSnapshot('2: resolved');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▾ <SuspenseList>
+                <Component key="A">
+              ▾ <Suspense>
+                  <Component key="B">
+                <Component key="C">
+      `);
     });
 
     it('should support collapsing parts of the tree', () => {
@@ -444,26 +733,64 @@ describe('Store', () => {
       act(() =>
         legacyRender(<Grandparent count={2} />, document.createElement('div')),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+      `);
 
       const grandparentID = store.getElementIDAtIndex(0);
       const parentOneID = store.getElementIDAtIndex(1);
       const parentTwoID = store.getElementIDAtIndex(4);
 
       act(() => store.toggleIsCollapsed(parentOneID, true));
-      expect(store).toMatchSnapshot('2: collapse first Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+      `);
 
       act(() => store.toggleIsCollapsed(parentTwoID, true));
-      expect(store).toMatchSnapshot('3: collapse second Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▸ <Parent>
+      `);
 
       act(() => store.toggleIsCollapsed(parentOneID, false));
-      expect(store).toMatchSnapshot('4: expand first Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▸ <Parent>
+      `);
 
       act(() => store.toggleIsCollapsed(grandparentID, true));
-      expect(store).toMatchSnapshot('5: collapse Grandparent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Grandparent>
+      `);
 
       act(() => store.toggleIsCollapsed(grandparentID, false));
-      expect(store).toMatchSnapshot('6: expand Grandparent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▸ <Parent>
+      `);
     });
 
     it('should support reordering of children', () => {
@@ -478,16 +805,43 @@ describe('Store', () => {
       const container = document.createElement('div');
 
       act(() => legacyRender(<Root>{[foo, bar]}</Root>, container));
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Root>
+            ▾ <Foo key="foo">
+                <Component key="0">
+            ▾ <Bar key="bar">
+                <Component key="0">
+                <Component key="1">
+      `);
 
       act(() => legacyRender(<Root>{[bar, foo]}</Root>, container));
-      expect(store).toMatchSnapshot('3: reorder children');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Root>
+            ▾ <Bar key="bar">
+                <Component key="0">
+                <Component key="1">
+            ▾ <Foo key="foo">
+                <Component key="0">
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), true));
-      expect(store).toMatchSnapshot('4: collapse root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Root>
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), false));
-      expect(store).toMatchSnapshot('5: expand root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Root>
+            ▾ <Bar key="bar">
+                <Component key="0">
+                <Component key="1">
+            ▾ <Foo key="foo">
+                <Component key="0">
+      `);
     });
   });
 
@@ -512,7 +866,11 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Parent>
+          ▸ <Parent>
+      `);
 
       act(() =>
         legacyRender(
@@ -523,10 +881,14 @@ describe('Store', () => {
           container,
         ),
       );
-      expect(store).toMatchSnapshot('2: update');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Parent>
+          ▸ <Parent>
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(container));
-      expect(store).toMatchSnapshot('3: unmount');
+      expect(store).toMatchInlineSnapshot(``);
     });
 
     it('should support mount and update operations for multiple roots', () => {
@@ -541,19 +903,32 @@ describe('Store', () => {
         legacyRender(<Parent key="A" count={3} />, containerA);
         legacyRender(<Parent key="B" count={2} />, containerB);
       });
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Parent key="A">
+        [root]
+          ▸ <Parent key="B">
+      `);
 
       act(() => {
         legacyRender(<Parent key="A" count={4} />, containerA);
         legacyRender(<Parent key="B" count={1} />, containerB);
       });
-      expect(store).toMatchSnapshot('2: update');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Parent key="A">
+        [root]
+          ▸ <Parent key="B">
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(containerB));
-      expect(store).toMatchSnapshot('3: unmount B');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Parent key="A">
+      `);
 
       act(() => ReactDOM.unmountComponentAtNode(containerA));
-      expect(store).toMatchSnapshot('4: unmount A');
+      expect(store).toMatchInlineSnapshot(``);
     });
 
     it('should filter DOM nodes from the store tree', () => {
@@ -575,13 +950,27 @@ describe('Store', () => {
       act(() =>
         legacyRender(<Grandparent count={4} />, document.createElement('div')),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Grandparent>
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), false));
-      expect(store).toMatchSnapshot('2: expand Grandparent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▸ <Parent>
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(1), false));
-      expect(store).toMatchSnapshot('3: expand Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child>
+            ▸ <Parent>
+      `);
     });
 
     it('should display Suspense nodes properly in various states', () => {
@@ -607,17 +996,32 @@ describe('Store', () => {
 
       const container = document.createElement('div');
       act(() => legacyRender(<Wrapper shouldSuspense={true} />, container));
-      expect(store).toMatchSnapshot('1: loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Wrapper>
+      `);
 
       // This test isn't meaningful unless we expand the suspended tree
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), false));
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(2), false));
-      expect(store).toMatchSnapshot('2: expand Wrapper and Suspense');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Loading>
+      `);
 
       act(() => {
         legacyRender(<Wrapper shouldSuspense={false} />, container);
       });
-      expect(store).toMatchSnapshot('2: resolved');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+              <Component key="Outside">
+            ▾ <Suspense>
+                <Component key="Inside">
+      `);
     });
 
     it('should support expanding parts of the tree', () => {
@@ -634,30 +1038,69 @@ describe('Store', () => {
       act(() =>
         legacyRender(<Grandparent count={2} />, document.createElement('div')),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Grandparent>
+      `);
 
       const grandparentID = store.getElementIDAtIndex(0);
 
       act(() => store.toggleIsCollapsed(grandparentID, false));
-      expect(store).toMatchSnapshot('2: expand Grandparent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▸ <Parent>
+      `);
 
       const parentOneID = store.getElementIDAtIndex(1);
       const parentTwoID = store.getElementIDAtIndex(2);
 
       act(() => store.toggleIsCollapsed(parentOneID, false));
-      expect(store).toMatchSnapshot('3: expand first Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▸ <Parent>
+      `);
 
       act(() => store.toggleIsCollapsed(parentTwoID, false));
-      expect(store).toMatchSnapshot('4: expand second Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+      `);
 
       act(() => store.toggleIsCollapsed(parentOneID, true));
-      expect(store).toMatchSnapshot('5: collapse first Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▾ <Parent>
+                <Child key="0">
+                <Child key="1">
+      `);
 
       act(() => store.toggleIsCollapsed(parentTwoID, true));
-      expect(store).toMatchSnapshot('6: collapse second Parent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Grandparent>
+            ▸ <Parent>
+            ▸ <Parent>
+      `);
 
       act(() => store.toggleIsCollapsed(grandparentID, true));
-      expect(store).toMatchSnapshot('7: collapse Grandparent');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Grandparent>
+      `);
     });
 
     it('should support expanding deep parts of the tree', () => {
@@ -679,28 +1122,59 @@ describe('Store', () => {
           document.createElement('div'),
         ),
       );
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Wrapper>
+      `);
 
       const deepestedNodeID = agent.getIDForNode(ref.current);
 
       act(() => store.toggleIsCollapsed(deepestedNodeID, false));
-      expect(store).toMatchSnapshot('2: expand deepest node');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▾ <Nested>
+              ▾ <Nested>
+                ▾ <Nested>
+                    <Nested>
+      `);
 
       const rootID = store.getElementIDAtIndex(0);
 
       act(() => store.toggleIsCollapsed(rootID, true));
-      expect(store).toMatchSnapshot('3: collapse root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Wrapper>
+      `);
 
       act(() => store.toggleIsCollapsed(rootID, false));
-      expect(store).toMatchSnapshot('4: expand root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▾ <Nested>
+              ▾ <Nested>
+                ▾ <Nested>
+                    <Nested>
+      `);
 
       const id = store.getElementIDAtIndex(1);
 
       act(() => store.toggleIsCollapsed(id, true));
-      expect(store).toMatchSnapshot('5: collapse middle node');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▸ <Nested>
+      `);
 
       act(() => store.toggleIsCollapsed(id, false));
-      expect(store).toMatchSnapshot('6: expand middle node');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Wrapper>
+            ▾ <Nested>
+              ▾ <Nested>
+                ▾ <Nested>
+                    <Nested>
+      `);
     });
 
     it('should support reordering of children', () => {
@@ -715,22 +1189,44 @@ describe('Store', () => {
       const container = document.createElement('div');
 
       act(() => legacyRender(<Root>{[foo, bar]}</Root>, container));
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Root>
+      `);
 
       act(() => legacyRender(<Root>{[bar, foo]}</Root>, container));
-      expect(store).toMatchSnapshot('3: reorder children');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Root>
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), false));
-      expect(store).toMatchSnapshot('4: expand root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Root>
+            ▸ <Bar key="bar">
+            ▸ <Foo key="foo">
+      `);
 
       act(() => {
         store.toggleIsCollapsed(store.getElementIDAtIndex(2), false);
         store.toggleIsCollapsed(store.getElementIDAtIndex(1), false);
       });
-      expect(store).toMatchSnapshot('5: expand leaves');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <Root>
+            ▾ <Bar key="bar">
+                <Component key="0">
+                <Component key="1">
+            ▾ <Foo key="foo">
+                <Component key="0">
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), true));
-      expect(store).toMatchSnapshot('6: collapse root');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <Root>
+      `);
     });
 
     it('should not add new nodes when suspense is toggled', () => {
@@ -747,11 +1243,19 @@ describe('Store', () => {
       const Child = () => null;
 
       act(() => legacyRender(<SuspenseTree />, document.createElement('div')));
-      expect(store).toMatchSnapshot('1: mount');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▸ <SuspenseTree>
+      `);
 
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(0), false));
       act(() => store.toggleIsCollapsed(store.getElementIDAtIndex(1), false));
-      expect(store).toMatchSnapshot('2: expand tree');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <SuspenseTree>
+            ▾ <Suspense>
+              ▸ <Parent>
+      `);
 
       const rendererID = getRendererID();
       const suspenseID = store.getElementIDAtIndex(1);
@@ -763,7 +1267,12 @@ describe('Store', () => {
           forceFallback: true,
         }),
       );
-      expect(store).toMatchSnapshot('3: toggle fallback on');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <SuspenseTree>
+            ▾ <Suspense>
+                <Fallback>
+      `);
 
       act(() =>
         agent.overrideSuspense({
@@ -772,7 +1281,12 @@ describe('Store', () => {
           forceFallback: false,
         }),
       );
-      expect(store).toMatchSnapshot('4: toggle fallback on');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <SuspenseTree>
+            ▾ <Suspense>
+              ▸ <Parent>
+      `);
     });
   });
 
@@ -867,17 +1381,17 @@ describe('Store', () => {
     const containerA = document.createElement('div');
     const containerB = document.createElement('div');
 
-    expect(store.supportsProfiling).toBe(false);
+    expect(store.rootSupportsBasicProfiling).toBe(false);
 
     act(() => legacyRender(<Component />, containerA));
-    expect(store.supportsProfiling).toBe(true);
+    expect(store.rootSupportsBasicProfiling).toBe(true);
 
     act(() => legacyRender(<Component />, containerB));
     act(() => ReactDOM.unmountComponentAtNode(containerA));
-    expect(store.supportsProfiling).toBe(true);
+    expect(store.rootSupportsBasicProfiling).toBe(true);
 
     act(() => ReactDOM.unmountComponentAtNode(containerB));
-    expect(store.supportsProfiling).toBe(false);
+    expect(store.rootSupportsBasicProfiling).toBe(false);
   });
 
   it('should properly serialize non-string key values', () => {
@@ -888,7 +1402,10 @@ describe('Store', () => {
     const fauxElement = Object.assign({}, <Child />, {key: 123});
 
     act(() => legacyRender([fauxElement], document.createElement('div')));
-    expect(store).toMatchSnapshot('1: mount');
+    expect(store).toMatchInlineSnapshot(`
+      [root]
+          <Child key="123">
+    `);
   });
 
   it('should show the right display names for special component types', async () => {
@@ -1005,41 +1522,65 @@ describe('Store', () => {
       // Render once to start fetching the lazy component
       act(() => legacyRender(<App renderChildren={true} />, container));
 
-      expect(store).toMatchSnapshot('1: mounted + loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+              <Suspense>
+      `);
 
       await Promise.resolve();
 
       // Render again after it resolves
       act(() => legacyRender(<App renderChildren={true} />, container));
 
-      expect(store).toMatchSnapshot('2: mounted + loaded');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+            ▾ <Suspense>
+                <LazyInnerComponent>
+      `);
 
       // Render again to unmount it
       act(() => legacyRender(<App renderChildren={false} />, container));
 
-      expect(store).toMatchSnapshot('3: unmounted');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+            <App>
+      `);
     });
 
     it('should support Lazy components in (createRoot)', async () => {
       const container = document.createElement('div');
-      const root = ReactDOM.createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
 
       // Render once to start fetching the lazy component
       act(() => root.render(<App renderChildren={true} />));
 
-      expect(store).toMatchSnapshot('1: mounted + loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+              <Suspense>
+      `);
 
       await Promise.resolve();
 
       // Render again after it resolves
       act(() => root.render(<App renderChildren={true} />));
 
-      expect(store).toMatchSnapshot('2: mounted + loaded');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+            ▾ <Suspense>
+                <LazyInnerComponent>
+      `);
 
       // Render again to unmount it
       act(() => root.render(<App renderChildren={false} />));
 
-      expect(store).toMatchSnapshot('3: unmounted');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+            <App>
+      `);
     });
 
     it('should support Lazy components that are unmounted before they finish loading (legacy render)', async () => {
@@ -1048,27 +1589,41 @@ describe('Store', () => {
       // Render once to start fetching the lazy component
       act(() => legacyRender(<App renderChildren={true} />, container));
 
-      expect(store).toMatchSnapshot('1: mounted + loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+              <Suspense>
+      `);
 
       // Render again to unmount it before it finishes loading
       act(() => legacyRender(<App renderChildren={false} />, container));
 
-      expect(store).toMatchSnapshot('2: unmounted');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+            <App>
+      `);
     });
 
     it('should support Lazy components that are unmounted before they finish loading in (createRoot)', async () => {
       const container = document.createElement('div');
-      const root = ReactDOM.createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
 
       // Render once to start fetching the lazy component
       act(() => root.render(<App renderChildren={true} />));
 
-      expect(store).toMatchSnapshot('1: mounted + loading');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+          ▾ <App>
+              <Suspense>
+      `);
 
       // Render again to unmount it before it finishes loading
       act(() => root.render(<App renderChildren={false} />));
 
-      expect(store).toMatchSnapshot('2: unmounted');
+      expect(store).toMatchInlineSnapshot(`
+        [root]
+            <App>
+      `);
     });
   });
 

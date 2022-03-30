@@ -14,7 +14,10 @@
  * environment.
  */
 
-import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
+import type {
+  Fiber,
+  TransitionTracingCallbacks,
+} from 'react-reconciler/src/ReactInternalTypes';
 import type {UpdateQueue} from 'react-reconciler/src/ReactUpdateQueue';
 import type {ReactNodeList, OffscreenMode} from 'shared/ReactTypes';
 import type {RootTag} from 'react-reconciler/src/ReactRootTags';
@@ -64,6 +67,10 @@ type TextInstance = {|
   context: HostContext,
 |};
 type HostContext = Object;
+type CreateRootOptions = {
+  transitionCallbacks?: TransitionTracingCallbacks,
+  ...
+};
 
 const NO_CONTEXT = {};
 const UPPERCASE_CONTEXT = {};
@@ -466,6 +473,10 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     },
 
     detachDeletedInstance() {},
+
+    logRecoverableError() {
+      // no-op
+    },
   };
 
   const hostConfig = useMutation
@@ -934,6 +945,12 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     return NoopRenderer.flushSync(fn);
   }
 
+  function onRecoverableError(error) {
+    // TODO: Turn this on once tests are fixed
+    // eslint-disable-next-line react-internal/no-production-logging, react-internal/warning-args
+    // console.error(error);
+  }
+
   let idCounter = 0;
 
   const ReactNoop = {
@@ -954,14 +971,22 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       if (!root) {
         const container = {rootID: rootID, pendingChildren: [], children: []};
         rootContainers.set(rootID, container);
-        root = NoopRenderer.createContainer(container, tag, false, null, null);
+        root = NoopRenderer.createContainer(
+          container,
+          tag,
+          null,
+          null,
+          false,
+          '',
+          onRecoverableError,
+        );
         roots.set(rootID, root);
       }
       return root.current.stateNode.containerInfo;
     },
 
     // TODO: Replace ReactNoop.render with createRoot + root.render
-    createRoot() {
+    createRoot(options?: CreateRootOptions) {
       const container = {
         rootID: '' + idCounter++,
         pendingChildren: [],
@@ -970,9 +995,14 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       const fiberRoot = NoopRenderer.createContainer(
         container,
         ConcurrentRoot,
+        null,
+        null,
         false,
-        null,
-        null,
+        '',
+        onRecoverableError,
+        options && options.transitionCallbacks
+          ? options.transitionCallbacks
+          : null,
       );
       return {
         _Scheduler: Scheduler,
@@ -997,9 +1027,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       const fiberRoot = NoopRenderer.createContainer(
         container,
         LegacyRoot,
+        null,
+        null,
         false,
-        null,
-        null,
+        '',
+        onRecoverableError,
       );
       return {
         _Scheduler: Scheduler,

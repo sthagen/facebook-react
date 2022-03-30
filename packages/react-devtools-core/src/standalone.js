@@ -8,12 +8,8 @@
  */
 
 import {createElement} from 'react';
-import {
-  // $FlowFixMe Flow does not yet know about flushSync()
-  flushSync,
-  // $FlowFixMe Flow does not yet know about createRoot()
-  createRoot,
-} from 'react-dom';
+import {flushSync} from 'react-dom';
+import {createRoot} from 'react-dom/client';
 import Bridge from 'react-devtools-shared/src/bridge';
 import Store from 'react-devtools-shared/src/devtools/store';
 import {
@@ -30,19 +26,29 @@ import {readFileSync} from 'fs';
 import {installHook} from 'react-devtools-shared/src/hook';
 import DevTools from 'react-devtools-shared/src/devtools/views/DevTools';
 import {doesFilePathExist, launchEditor} from './editor';
-import {__DEBUG__} from 'react-devtools-shared/src/constants';
+import {
+  __DEBUG__,
+  LOCAL_STORAGE_DEFAULT_TAB_KEY,
+} from 'react-devtools-shared/src/constants';
+import {localStorageSetItem} from '../../react-devtools-shared/src/storage';
 
 import type {FrontendBridge} from 'react-devtools-shared/src/bridge';
 import type {InspectedElement} from 'react-devtools-shared/src/devtools/views/Components/types';
 
 installHook(window);
 
-export type StatusListener = (message: string) => void;
+export type StatusTypes = 'server-connected' | 'devtools-connected' | 'error';
+export type StatusListener = (message: string, status: StatusTypes) => void;
+export type OnDisconnectedCallback = () => void;
 
 let node: HTMLElement = ((null: any): HTMLElement);
 let nodeWaitingToConnectHTML: string = '';
 let projectRoots: Array<string> = [];
-let statusListener: StatusListener = (message: string) => {};
+let statusListener: StatusListener = (
+  message: string,
+  status?: StatusTypes,
+) => {};
+let disconnectedCallback: OnDisconnectedCallback = () => {};
 
 // TODO (Webpack 5) Hopefully we can remove this prop after the Webpack 5 migration.
 function hookNamesModuleLoaderFunction() {
@@ -69,6 +75,11 @@ function setStatusListener(value: StatusListener) {
   return DevtoolsUI;
 }
 
+function setDisconnectedCallback(value: OnDisconnectedCallback) {
+  disconnectedCallback = value;
+  return DevtoolsUI;
+}
+
 let bridge: FrontendBridge | null = null;
 let store: Store | null = null;
 let root = null;
@@ -92,9 +103,9 @@ function safeUnmount() {
   flushSync(() => {
     if (root !== null) {
       root.unmount();
+      root = null;
     }
   });
-  root = null;
 }
 
 function reload() {
@@ -149,6 +160,8 @@ function onDisconnected() {
   safeUnmount();
 
   node.innerHTML = nodeWaitingToConnectHTML;
+
+  disconnectedCallback();
 }
 
 function onError({code, message}) {
@@ -177,6 +190,20 @@ function onError({code, message}) {
       </div>
     `;
   }
+}
+
+function openProfiler() {
+  // Mocked up bridge and store to allow the DevTools to be rendered
+  bridge = new Bridge({listen: () => {}, send: () => {}});
+  store = new Store(bridge, {});
+
+  // Ensure the Profiler tab is shown initially.
+  localStorageSetItem(
+    LOCAL_STORAGE_DEFAULT_TAB_KEY,
+    JSON.stringify('profiler'),
+  );
+
+  reload();
 }
 
 function initialize(socket: WebSocket) {
@@ -233,6 +260,7 @@ function initialize(socket: WebSocket) {
   });
 
   log('Connected');
+  statusListener('DevTools initialized.', 'devtools-connected');
   reload();
 }
 
@@ -345,12 +373,15 @@ function startServer(
 
   httpServer.on('error', event => {
     onError(event);
-    statusListener('Failed to start the server.');
+    statusListener('Failed to start the server.', 'error');
     startServerTimeoutID = setTimeout(() => startServer(port), 1000);
   });
 
   httpServer.listen(port, () => {
-    statusListener('The server is listening on the port ' + port + '.');
+    statusListener(
+      'The server is listening on the port ' + port + '.',
+      'server-connected',
+    );
   });
 
   return {
@@ -371,7 +402,9 @@ const DevtoolsUI = {
   setContentDOMNode,
   setProjectRoots,
   setStatusListener,
+  setDisconnectedCallback,
   startServer,
+  openProfiler,
 };
 
 export default DevtoolsUI;

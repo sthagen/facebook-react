@@ -80,11 +80,8 @@ import warnValidStyle from '../shared/warnValidStyle';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
 import {validateProperties as validateInputProperties} from '../shared/ReactDOMNullInputValuePropHook';
 import {validateProperties as validateUnknownProperties} from '../shared/ReactDOMUnknownPropertyHook';
+import assign from 'shared/assign';
 import hasOwnProperty from 'shared/hasOwnProperty';
-
-export type ServerOptions = {
-  identifierPrefix?: string,
-};
 
 // Based on reading the React.Children implementation. TODO: type this somewhere?
 type ReactNode = string | number | ReactElement;
@@ -567,7 +564,7 @@ function resolve(
         }
 
         if (partialState != null) {
-          inst.state = Object.assign({}, inst.state, partialState);
+          inst.state = assign({}, inst.state, partialState);
         }
       }
     } else {
@@ -699,9 +696,9 @@ function resolve(
             if (partialState != null) {
               if (dontMutate) {
                 dontMutate = false;
-                nextState = Object.assign({}, nextState, partialState);
+                nextState = assign({}, nextState, partialState);
               } else {
-                Object.assign(nextState, partialState);
+                assign(nextState, partialState);
               }
             }
           }
@@ -749,7 +746,7 @@ function resolve(
         }
       }
       if (childContext) {
-        context = Object.assign({}, context, childContext);
+        context = assign({}, context, childContext);
       }
     }
   }
@@ -784,14 +781,7 @@ class ReactDOMServerRenderer {
   contextValueStack: Array<any>;
   contextProviderStack: ?Array<ReactProvider<any>>; // DEV-only
 
-  uniqueID: number;
-  identifierPrefix: string;
-
-  constructor(
-    children: mixed,
-    makeStaticMarkup: boolean,
-    options?: ServerOptions,
-  ) {
+  constructor(children: mixed, makeStaticMarkup: boolean) {
     const flatChildren = flattenTopLevelChildren(children);
 
     const topFrame: Frame = {
@@ -819,10 +809,6 @@ class ReactDOMServerRenderer {
     this.contextIndex = -1;
     this.contextStack = [];
     this.contextValueStack = [];
-
-    // useOpaqueIdentifier ID
-    this.uniqueID = 0;
-    this.identifierPrefix = (options && options.identifierPrefix) || '';
 
     if (__DEV__) {
       this.contextProviderStack = [];
@@ -1207,7 +1193,7 @@ class ReactDOMServerRenderer {
             const nextChildren = [
               React.createElement(
                 elementType.type,
-                Object.assign({ref: element.ref}, element.props),
+                assign({ref: element.ref}, element.props),
               ),
             ];
             const frame: Frame = {
@@ -1306,7 +1292,7 @@ class ReactDOMServerRenderer {
             const nextChildren = [
               React.createElement(
                 result,
-                Object.assign({ref: element.ref}, element.props),
+                assign({ref: element.ref}, element.props),
               ),
             ];
             const frame: Frame = {
@@ -1428,7 +1414,7 @@ class ReactDOMServerRenderer {
         }
       }
 
-      props = Object.assign(
+      props = assign(
         {
           type: undefined,
         },
@@ -1500,7 +1486,7 @@ class ReactDOMServerRenderer {
       if (__DEV__) {
         checkFormFieldValueStringCoercion(initialValue);
       }
-      props = Object.assign({}, props, {
+      props = assign({}, props, {
         value: undefined,
         children: '' + initialValue,
       });
@@ -1546,7 +1532,7 @@ class ReactDOMServerRenderer {
       }
       this.currentSelectValue =
         props.value != null ? props.value : props.defaultValue;
-      props = Object.assign({}, props, {
+      props = assign({}, props, {
         value: undefined,
       });
     } else if (tag === 'option') {
@@ -1592,7 +1578,7 @@ class ReactDOMServerRenderer {
           selected = '' + selectValue === value;
         }
 
-        props = Object.assign(
+        props = assign(
           {
             selected: undefined,
           },
