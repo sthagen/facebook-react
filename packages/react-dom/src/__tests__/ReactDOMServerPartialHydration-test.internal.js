@@ -2137,10 +2137,7 @@ describe('ReactDOMServerPartialHydration', () => {
     });
 
     suspend = true;
-    expect(Scheduler).toFlushAndYield([
-      'The server could not finish this Suspense boundary, likely due to ' +
-        'an error during server rendering. Switched to client rendering.',
-    ]);
+    expect(Scheduler).toFlushAndYield([]);
 
     // We haven't hydrated the second child but the placeholder is still in the list.
     expect(container.textContent).toBe('ALoading B');
@@ -2418,8 +2415,18 @@ describe('ReactDOMServerPartialHydration', () => {
       await promise;
     });
 
-    expect(clicks).toBe(0);
-    expect(container.textContent).toBe('Click meHello');
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(clicks).toBe(0);
+      expect(container.textContent).toBe('Click meHello');
+    } else {
+      expect(clicks).toBe(1);
+      expect(container.textContent).toBe('Hello');
+    }
     document.body.removeChild(container);
   });
 
@@ -2501,7 +2508,17 @@ describe('ReactDOMServerPartialHydration', () => {
       await promise;
     });
 
-    expect(onEvent).toHaveBeenCalledTimes(0);
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(onEvent).toHaveBeenCalledTimes(0);
+    } else {
+      expect(onEvent).toHaveBeenCalledTimes(2);
+    }
+
     document.body.removeChild(container);
   });
 
@@ -2581,7 +2598,16 @@ describe('ReactDOMServerPartialHydration', () => {
       await promise;
     });
 
-    expect(clicks).toBe(0);
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(clicks).toBe(0);
+    } else {
+      expect(clicks).toBe(2);
+    }
 
     document.body.removeChild(container);
   });
@@ -2666,7 +2692,17 @@ describe('ReactDOMServerPartialHydration', () => {
       resolve();
       await promise;
     });
-    expect(onEvent).toHaveBeenCalledTimes(0);
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(onEvent).toHaveBeenCalledTimes(0);
+    } else {
+      expect(onEvent).toHaveBeenCalledTimes(2);
+    }
+
     document.body.removeChild(container);
   });
 
@@ -2737,8 +2773,19 @@ describe('ReactDOMServerPartialHydration', () => {
       await promise;
     });
 
-    expect(clicksOnChild).toBe(0);
-    expect(clicksOnParent).toBe(0);
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(clicksOnChild).toBe(0);
+      expect(clicksOnParent).toBe(0);
+    } else {
+      expect(clicksOnChild).toBe(1);
+      // This will be zero due to the stopPropagation.
+      expect(clicksOnParent).toBe(0);
+    }
 
     document.body.removeChild(container);
   });
@@ -2814,7 +2861,16 @@ describe('ReactDOMServerPartialHydration', () => {
     });
 
     // We're now full hydrated.
-    expect(clicks).toBe(0);
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      expect(clicks).toBe(0);
+    } else {
+      expect(clicks).toBe(1);
+    }
 
     document.body.removeChild(parentContainer);
   });
@@ -3083,9 +3139,19 @@ describe('ReactDOMServerPartialHydration', () => {
       await promise;
     });
 
-    // discrete event not replayed
-    expect(submits).toBe(0);
-    expect(container.textContent).toBe('Click meHello');
+    if (
+      gate(
+        flags =>
+          flags.enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
+      )
+    ) {
+      // discrete event not replayed
+      expect(submits).toBe(0);
+      expect(container.textContent).toBe('Click meHello');
+    } else {
+      expect(submits).toBe(1);
+      expect(container.textContent).toBe('Hello');
+    }
 
     document.body.removeChild(container);
   });
