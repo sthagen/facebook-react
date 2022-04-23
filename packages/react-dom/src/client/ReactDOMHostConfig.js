@@ -62,8 +62,6 @@ import dangerousStyleValue from '../shared/dangerousStyleValue';
 import {retryIfBlockedOn} from '../events/ReactDOMEventReplaying';
 
 import {
-  enableClientRenderFallbackOnHydrationMismatch,
-  enableSuspenseServerRenderer,
   enableCreateEventHandleAPI,
   enableScopeAPI,
 } from 'shared/ReactFeatureFlags';
@@ -747,19 +745,17 @@ function getNextHydratable(node) {
     if (nodeType === ELEMENT_NODE || nodeType === TEXT_NODE) {
       break;
     }
-    if (enableSuspenseServerRenderer) {
-      if (nodeType === COMMENT_NODE) {
-        const nodeData = (node: any).data;
-        if (
-          nodeData === SUSPENSE_START_DATA ||
-          nodeData === SUSPENSE_FALLBACK_START_DATA ||
-          nodeData === SUSPENSE_PENDING_START_DATA
-        ) {
-          break;
-        }
-        if (nodeData === SUSPENSE_END_DATA) {
-          return null;
-        }
+    if (nodeType === COMMENT_NODE) {
+      const nodeData = (node: any).data;
+      if (
+        nodeData === SUSPENSE_START_DATA ||
+        nodeData === SUSPENSE_FALLBACK_START_DATA ||
+        nodeData === SUSPENSE_PENDING_START_DATA
+      ) {
+        break;
+      }
+      if (nodeData === SUSPENSE_END_DATA) {
+        return null;
       }
     }
   }
@@ -1008,10 +1004,7 @@ export function didNotHydrateInstance(
   isConcurrentMode: boolean,
 ) {
   if (__DEV__) {
-    if (
-      (enableClientRenderFallbackOnHydrationMismatch && isConcurrentMode) ||
-      parentProps[SUPPRESS_HYDRATION_WARNING] !== true
-    ) {
+    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
       if (instance.nodeType === ELEMENT_NODE) {
         warnForDeletedHydratableElement(parentInstance, (instance: any));
       } else if (instance.nodeType === COMMENT_NODE) {
@@ -1092,10 +1085,7 @@ export function didNotFindHydratableInstance(
   isConcurrentMode: boolean,
 ) {
   if (__DEV__) {
-    if (
-      (enableClientRenderFallbackOnHydrationMismatch && isConcurrentMode) ||
-      parentProps[SUPPRESS_HYDRATION_WARNING] !== true
-    ) {
+    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
       warnForInsertedHydratedElement(parentInstance, type, props);
     }
   }
@@ -1109,10 +1099,7 @@ export function didNotFindHydratableTextInstance(
   isConcurrentMode: boolean,
 ) {
   if (__DEV__) {
-    if (
-      (enableClientRenderFallbackOnHydrationMismatch && isConcurrentMode) ||
-      parentProps[SUPPRESS_HYDRATION_WARNING] !== true
-    ) {
+    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
       warnForInsertedHydratedText(parentInstance, text);
     }
   }

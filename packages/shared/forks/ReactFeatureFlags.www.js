@@ -32,7 +32,6 @@ export const {
   enableLazyContextPropagation,
   enableSyncDefaultUpdates,
   enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay,
-  enableClientRenderFallbackOnHydrationMismatch,
   enableClientRenderFallbackOnTextMismatch,
 } = dynamicFeatureFlags;
 
@@ -67,10 +66,7 @@ export const disableLegacyContext = __EXPERIMENTAL__;
 export const warnAboutStringRefs = false;
 export const warnAboutDefaultPropsOnFunctionComponents = false;
 export const enableGetInspectorDataForInstanceInProduction = false;
-export const enableSuspenseServerRenderer = true;
-export const enableSelectiveHydration = true;
 
-export const enableLazyElements = true;
 export const enableCache = true;
 export const enableCacheElement = true;
 

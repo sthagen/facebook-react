@@ -13,10 +13,7 @@
 // Flags that can likely be deleted or landed without consequences
 // -----------------------------------------------------------------------------
 
-export const enableSuspenseServerRenderer = true;
-export const enableSelectiveHydration = true;
 export const warnAboutDeprecatedLifecycles = true;
-export const enableLazyElements = true;
 export const enableComponentStackLocations = true;
 export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
 export const enablePersistentOffscreenHostContainer = false;
@@ -44,7 +41,6 @@ export const skipUnmountedBoundaries = true;
 export const enableSuspenseLayoutEffectSemantics = true;
 
 // TODO: Finish rolling out in www
-export const enableClientRenderFallbackOnHydrationMismatch = true;
 export const enableClientRenderFallbackOnTextMismatch = true;
 
 // TODO: Need to review this code one more time before landing
