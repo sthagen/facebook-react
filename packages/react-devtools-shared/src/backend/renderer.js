@@ -1570,6 +1570,7 @@ export function attach(
       case ContextConsumer:
       case MemoComponent:
       case SimpleMemoComponent:
+      case ForwardRef:
         // For types that execute user code, we check PerformedWork effect.
         // We don't reflect bailouts (either referential or sCU) in DevTools.
         // eslint-disable-next-line no-bitwise
@@ -2629,6 +2630,10 @@ export function attach(
   }
 
   function handleCommitFiberUnmount(fiber) {
+    // Flush any pending Fibers that we are untracking before processing the new commit.
+    // If we don't do this, we might end up double-deleting Fibers in some cases (like Legacy Suspense).
+    untrackFibers();
+
     // This is not recursive.
     // We can't traverse fibers after unmounting so instead
     // we rely on React telling us about each unmount.
@@ -3606,10 +3611,58 @@ export function attach(
     try {
       mostRecentlyInspectedElement = inspectElementRaw(id);
     } catch (error) {
+      // the error name is synced with ReactDebugHooks
+      if (error.name === 'ReactDebugToolsRenderError') {
+        let message = 'Error rendering inspected element.';
+        let stack;
+        // Log error & cause for user to debug
+        console.error(message + '\n\n', error);
+        if (error.cause != null) {
+          const fiber = findCurrentFiberUsingSlowPathById(id);
+          const componentName =
+            fiber != null ? getDisplayNameForFiber(fiber) : null;
+          console.error(
+            'React DevTools encountered an error while trying to inspect hooks. ' +
+              'This is most likely caused by an error in current inspected component' +
+              (componentName != null ? `: "${componentName}".` : '.') +
+              '\nThe error thrown in the component is: \n\n',
+            error.cause,
+          );
+          if (error.cause instanceof Error) {
+            message = error.cause.message || message;
+            stack = error.cause.stack;
+          }
+        }
+
+        return {
+          type: 'error',
+          errorType: 'user',
+          id,
+          responseID: requestID,
+          message,
+          stack,
+        };
+      }
+
+      // the error name is synced with ReactDebugHooks
+      if (error.name === 'ReactDebugToolsUnsupportedHookError') {
+        return {
+          type: 'error',
+          errorType: 'unknown-hook',
+          id,
+          responseID: requestID,
+          message:
+            'Unsupported hook in the react-debug-tools package: ' +
+            error.message,
+        };
+      }
+
+      // Log Uncaught Error
       console.error('Error inspecting element.\n\n', error);
 
       return {
         type: 'error',
+        errorType: 'uncaught',
         id,
         responseID: requestID,
         message: error.message,
