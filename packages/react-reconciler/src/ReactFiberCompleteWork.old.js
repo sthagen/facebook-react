@@ -29,6 +29,7 @@ import type {
 } from './ReactFiberSuspenseComponent.old';
 import type {SuspenseContext} from './ReactFiberSuspenseContext.old';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
+import type {TracingMarkerInstance} from './ReactFiberTracingMarkerComponent.old';
 import type {Cache} from './ReactFiberCacheComponent.old';
 import {
   enableSuspenseAvoidThisFallback,
@@ -164,7 +165,10 @@ import {transferActualDuration} from './ReactProfilerTimer.old';
 import {popCacheProvider} from './ReactFiberCacheComponent.old';
 import {popTreeContext} from './ReactFiberTreeContext.old';
 import {popRootTransition, popTransition} from './ReactFiberTransition.old';
-import {popTracingMarker} from './ReactFiberTracingMarkerComponent.old';
+import {
+  popMarkerInstance,
+  popRootMarkerInstance,
+} from './ReactFiberTracingMarkerComponent.old';
 
 function markUpdate(workInProgress: Fiber) {
   // Tag the fiber with an update effect. This turns a Placement into
@@ -900,6 +904,11 @@ function completeWork(
         }
         popCacheProvider(workInProgress, cache);
       }
+
+      if (enableTransitionTracing) {
+        popRootMarkerInstance(workInProgress);
+      }
+
       popRootTransition(workInProgress, fiberRoot, renderLanes);
       popHostContainer(workInProgress);
       popTopLevelLegacyContextObject(workInProgress);
@@ -1522,17 +1531,15 @@ function completeWork(
         // at offscreen priority.
         if (includesSomeLane(subtreeRenderLanes, (OffscreenLane: Lane))) {
           bubbleProperties(workInProgress);
-          if (supportsMutation) {
-            // Check if there was an insertion or update in the hidden subtree.
-            // If so, we need to hide those nodes in the commit phase, so
-            // schedule a visibility effect.
-            if (
-              (!enableLegacyHidden ||
-                workInProgress.tag !== LegacyHiddenComponent) &&
-              workInProgress.subtreeFlags & (Placement | Update)
-            ) {
-              workInProgress.flags |= Visibility;
-            }
+          // Check if there was an insertion or update in the hidden subtree.
+          // If so, we need to hide those nodes in the commit phase, so
+          // schedule a visibility effect.
+          if (
+            (!enableLegacyHidden ||
+              workInProgress.tag !== LegacyHiddenComponent) &&
+            workInProgress.subtreeFlags & (Placement | Update)
+          ) {
+            workInProgress.flags |= Visibility;
           }
         }
       }
@@ -1581,7 +1588,10 @@ function completeWork(
     }
     case TracingMarkerComponent: {
       if (enableTransitionTracing) {
-        popTracingMarker(workInProgress);
+        const instance: TracingMarkerInstance | null = workInProgress.stateNode;
+        if (instance !== null) {
+          popMarkerInstance(workInProgress);
+        }
         bubbleProperties(workInProgress);
 
         if (

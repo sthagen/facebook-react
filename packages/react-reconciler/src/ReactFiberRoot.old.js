@@ -74,6 +74,8 @@ function FiberRootNode(
   this.entangledLanes = NoLanes;
   this.entanglements = createLaneMap(NoLanes);
 
+  this.hiddenUpdates = createLaneMap(null);
+
   this.identifierPrefix = identifierPrefix;
   this.onRecoverableError = onRecoverableError;
 
@@ -90,13 +92,13 @@ function FiberRootNode(
     this.hydrationCallbacks = null;
   }
 
+  this.incompleteTransitions = new Map();
   if (enableTransitionTracing) {
     this.transitionCallbacks = null;
     const transitionLanesMap = (this.transitionLanes = []);
     for (let i = 0; i < TotalLanes; i++) {
       transitionLanesMap.push(null);
     }
-    this.incompleteTransitions = null;
   }
 
   if (enableProfilerTimer && enableProfilerCommitHooks) {
