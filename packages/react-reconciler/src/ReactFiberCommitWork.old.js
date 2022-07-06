@@ -25,6 +25,7 @@ import type {Wakeable} from 'shared/ReactTypes';
 import type {
   OffscreenState,
   OffscreenInstance,
+  OffscreenQueue,
 } from './ReactFiberOffscreenComponent';
 import type {HookFlags} from './ReactHookEffectTags';
 import type {Cache} from './ReactFiberCacheComponent.old';
@@ -2815,10 +2816,7 @@ function commitPassiveMountOnFiber(
         // Initial render
         if (committedTransitions !== null) {
           committedTransitions.forEach(transition => {
-            addTransitionStartCallbackToPendingTransition({
-              transitionName: transition.name,
-              startTime: transition.startTime,
-            });
+            addTransitionStartCallbackToPendingTransition(transition);
           });
 
           clearTransitionsForLanes(finishedRoot, committedLanes);
@@ -2830,10 +2828,7 @@ function commitPassiveMountOnFiber(
               pendingSuspenseBoundaries === null ||
               pendingSuspenseBoundaries.size === 0
             ) {
-              addTransitionCompleteCallbackToPendingTransition({
-                transitionName: transition.name,
-                startTime: transition.startTime,
-              });
+              addTransitionCompleteCallbackToPendingTransition(transition);
               incompleteTransitions.delete(transition);
             }
           },
@@ -2877,43 +2872,43 @@ function commitPassiveMountOnFiber(
 
       if (enableTransitionTracing) {
         const isFallback = finishedWork.memoizedState;
-        const queue = (finishedWork.updateQueue: any);
-        const instance = finishedWork.stateNode;
+        const queue: OffscreenQueue | null = (finishedWork.updateQueue: any);
+        const instance: OffscreenInstance = finishedWork.stateNode;
 
         if (queue !== null) {
           if (isFallback) {
             const transitions = queue.transitions;
-            let prevTransitions = instance.transitions;
-            if (instance.pendingMarkers === null) {
-              instance.pendingMarkers = new Set();
-            }
-            if (transitions !== null && prevTransitions === null) {
-              instance.transitions = prevTransitions = new Set();
-            }
-
             if (transitions !== null) {
               transitions.forEach(transition => {
                 // Add all the transitions saved in the update queue during
                 // the render phase (ie the transitions associated with this boundary)
                 // into the transitions set.
-                prevTransitions.add(transition);
+                if (instance.transitions === null) {
+                  instance.transitions = new Set();
+                }
+                instance.transitions.add(transition);
               });
             }
 
             const markerInstances = queue.markerInstances;
             if (markerInstances !== null) {
               markerInstances.forEach(markerInstance => {
-                if (markerInstance.pendingSuspenseBoundaries === null) {
-                  markerInstance.pendingSuspenseBoundaries = new Map();
-                }
-
                 const markerTransitions = markerInstance.transitions;
                 // There should only be a few tracing marker transitions because
                 // they should be only associated with the transition that
                 // caused them
                 if (markerTransitions !== null) {
                   markerTransitions.forEach(transition => {
-                    if (instance.transitions.has(transition)) {
+                    if (instance.transitions === null) {
+                      instance.transitions = new Set();
+                    } else if (instance.transitions.has(transition)) {
+                      if (markerInstance.pendingSuspenseBoundaries === null) {
+                        markerInstance.pendingSuspenseBoundaries = new Map();
+                      }
+                      if (instance.pendingMarkers === null) {
+                        instance.pendingMarkers = new Set();
+                      }
+
                       instance.pendingMarkers.add(
                         markerInstance.pendingSuspenseBoundaries,
                       );
@@ -2964,9 +2959,8 @@ function commitPassiveMountOnFiber(
         ) {
           instance.transitions.forEach(transition => {
             addMarkerCompleteCallbackToPendingTransition({
-              transitionName: transition.name,
-              startTime: transition.startTime,
-              markerName: finishedWork.memoizedProps.name,
+              transition,
+              name: finishedWork.memoizedProps.name,
             });
           });
           instance.transitions = null;
