@@ -17,16 +17,12 @@ import {getWorkInProgressTransitions} from './ReactFiberWorkLoop.old';
 
 export type SuspenseInfo = {name: string | null};
 
-export type MarkerTransition = {
-  transition: Transition,
-  name: string,
-};
-
 export type PendingTransitionCallbacks = {
   transitionStart: Array<Transition> | null,
-  transitionProgress: Map<Transition, PendingSuspenseBoundaries> | null,
+  transitionProgress: Map<Transition, PendingBoundaries> | null,
   transitionComplete: Array<Transition> | null,
-  markerComplete: Array<MarkerTransition> | null,
+  markerProgress: Map<string, TracingMarkerInstance> | null,
+  markerComplete: Map<string, Set<Transition>> | null,
 };
 
 export type Transition = {
@@ -41,11 +37,12 @@ export type BatchConfigTransition = {
 };
 
 export type TracingMarkerInstance = {|
-  pendingSuspenseBoundaries: PendingSuspenseBoundaries | null,
+  pendingBoundaries: PendingBoundaries | null,
   transitions: Set<Transition> | null,
+  name?: string,
 |};
 
-export type PendingSuspenseBoundaries = Map<OffscreenInstance, SuspenseInfo>;
+export type PendingBoundaries = Map<OffscreenInstance, SuspenseInfo>;
 
 export function processTransitionCallbacks(
   pendingTransitions: PendingTransitionCallbacks,
@@ -55,25 +52,47 @@ export function processTransitionCallbacks(
   if (enableTransitionTracing) {
     if (pendingTransitions !== null) {
       const transitionStart = pendingTransitions.transitionStart;
-      if (transitionStart !== null) {
-        transitionStart.forEach(transition => {
-          if (callbacks.onTransitionStart != null) {
-            callbacks.onTransitionStart(transition.name, transition.startTime);
+      const onTransitionStart = callbacks.onTransitionStart;
+      if (transitionStart !== null && onTransitionStart != null) {
+        transitionStart.forEach(transition =>
+          onTransitionStart(transition.name, transition.startTime),
+        );
+      }
+
+      const markerProgress = pendingTransitions.markerProgress;
+      const onMarkerProgress = callbacks.onMarkerProgress;
+      if (onMarkerProgress != null && markerProgress !== null) {
+        markerProgress.forEach((markerInstance, markerName) => {
+          if (markerInstance.transitions !== null) {
+            const pending =
+              markerInstance.pendingBoundaries !== null
+                ? Array.from(markerInstance.pendingBoundaries.values())
+                : [];
+            markerInstance.transitions.forEach(transition => {
+              onMarkerProgress(
+                transition.name,
+                markerName,
+                transition.startTime,
+                endTime,
+                pending,
+              );
+            });
           }
         });
       }
 
       const markerComplete = pendingTransitions.markerComplete;
-      if (markerComplete !== null) {
-        markerComplete.forEach(marker => {
-          if (callbacks.onMarkerComplete != null) {
-            callbacks.onMarkerComplete(
-              marker.transition.name,
-              marker.name,
-              marker.transition.startTime,
+      const onMarkerComplete = callbacks.onMarkerComplete;
+      if (markerComplete !== null && onMarkerComplete != null) {
+        markerComplete.forEach((transitions, markerName) => {
+          transitions.forEach(transition => {
+            onMarkerComplete(
+              transition.name,
+              markerName,
+              transition.startTime,
               endTime,
             );
-          }
+          });
         });
       }
 
@@ -91,16 +110,11 @@ export function processTransitionCallbacks(
       }
 
       const transitionComplete = pendingTransitions.transitionComplete;
-      if (transitionComplete !== null) {
-        transitionComplete.forEach(transition => {
-          if (callbacks.onTransitionComplete != null) {
-            callbacks.onTransitionComplete(
-              transition.name,
-              transition.startTime,
-              endTime,
-            );
-          }
-        });
+      const onTransitionComplete = callbacks.onTransitionComplete;
+      if (transitionComplete !== null && onTransitionComplete != null) {
+        transitionComplete.forEach(transition =>
+          onTransitionComplete(transition.name, transition.startTime, endTime),
+        );
       }
     }
   }
@@ -133,7 +147,7 @@ export function pushRootMarkerInstance(workInProgress: Fiber): void {
         if (!root.incompleteTransitions.has(transition)) {
           const markerInstance: TracingMarkerInstance = {
             transitions: new Set([transition]),
-            pendingSuspenseBoundaries: null,
+            pendingBoundaries: null,
           };
           root.incompleteTransitions.set(transition, markerInstance);
         }

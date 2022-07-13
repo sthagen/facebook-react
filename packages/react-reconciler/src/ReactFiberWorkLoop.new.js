@@ -16,8 +16,7 @@ import type {FunctionComponentUpdateQueue} from './ReactFiberHooks.new';
 import type {EventPriority} from './ReactEventPriorities.new';
 import type {
   PendingTransitionCallbacks,
-  MarkerTransition,
-  PendingSuspenseBoundaries,
+  PendingBoundaries,
   Transition,
 } from './ReactFiberTracingMarkerComponent.new';
 import type {OffscreenInstance} from './ReactFiberOffscreenComponent';
@@ -342,6 +341,7 @@ export function addTransitionStartCallbackToPendingTransition(
         transitionStart: [],
         transitionProgress: null,
         transitionComplete: null,
+        markerProgress: null,
         markerComplete: null,
       };
     }
@@ -354,8 +354,10 @@ export function addTransitionStartCallbackToPendingTransition(
   }
 }
 
-export function addMarkerCompleteCallbackToPendingTransition(
-  transition: MarkerTransition,
+export function addMarkerProgressCallbackToPendingTransition(
+  markerName: string,
+  transitions: Set<Transition>,
+  pendingBoundaries: PendingBoundaries | null,
 ) {
   if (enableTransitionTracing) {
     if (currentPendingTransitionCallbacks === null) {
@@ -363,21 +365,51 @@ export function addMarkerCompleteCallbackToPendingTransition(
         transitionStart: null,
         transitionProgress: null,
         transitionComplete: null,
-        markerComplete: [],
+        markerProgress: new Map(),
+        markerComplete: null,
+      };
+    }
+
+    if (currentPendingTransitionCallbacks.markerProgress === null) {
+      currentPendingTransitionCallbacks.markerProgress = new Map();
+    }
+
+    currentPendingTransitionCallbacks.markerProgress.set(markerName, {
+      pendingBoundaries,
+      transitions,
+    });
+  }
+}
+
+export function addMarkerCompleteCallbackToPendingTransition(
+  markerName: string,
+  transitions: Set<Transition>,
+) {
+  if (enableTransitionTracing) {
+    if (currentPendingTransitionCallbacks === null) {
+      currentPendingTransitionCallbacks = {
+        transitionStart: null,
+        transitionProgress: null,
+        transitionComplete: null,
+        markerProgress: null,
+        markerComplete: new Map(),
       };
     }
 
     if (currentPendingTransitionCallbacks.markerComplete === null) {
-      currentPendingTransitionCallbacks.markerComplete = [];
+      currentPendingTransitionCallbacks.markerComplete = new Map();
     }
 
-    currentPendingTransitionCallbacks.markerComplete.push(transition);
+    currentPendingTransitionCallbacks.markerComplete.set(
+      markerName,
+      transitions,
+    );
   }
 }
 
 export function addTransitionProgressCallbackToPendingTransition(
   transition: Transition,
-  boundaries: PendingSuspenseBoundaries,
+  boundaries: PendingBoundaries,
 ) {
   if (enableTransitionTracing) {
     if (currentPendingTransitionCallbacks === null) {
@@ -385,6 +417,7 @@ export function addTransitionProgressCallbackToPendingTransition(
         transitionStart: null,
         transitionProgress: new Map(),
         transitionComplete: null,
+        markerProgress: null,
         markerComplete: null,
       };
     }
@@ -409,6 +442,7 @@ export function addTransitionCompleteCallbackToPendingTransition(
         transitionStart: null,
         transitionProgress: null,
         transitionComplete: [],
+        markerProgress: null,
         markerComplete: null,
       };
     }
