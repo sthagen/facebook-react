@@ -31,16 +31,25 @@ export type LogEvent =
       +duration_ms: number,
       +inspected_element_display_name: string | null,
       +inspected_element_number_of_hooks: number | null,
+    |}
+  | {|
+      +event_name: 'select-element',
+    |}
+  | {|
+      +event_name: 'inspect-element-button-clicked',
+    |}
+  | {|
+      +event_name: 'profiling-start',
     |};
 
-export type LogFunction = LogEvent => void | Promise<void>;
+export type LogFunction = (LogEvent, ?Object) => void | Promise<void>;
 
 let logFunctions: Array<LogFunction> = [];
 export const logEvent: LogFunction =
   enableLogger === true
-    ? function logEvent(event: LogEvent): void {
+    ? function logEvent(event: LogEvent, metadata: ?Object): void {
         logFunctions.forEach(log => {
-          log(event);
+          log(event, metadata);
         });
       }
     : function logEvent() {};
