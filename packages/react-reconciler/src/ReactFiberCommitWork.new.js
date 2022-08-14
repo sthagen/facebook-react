@@ -177,6 +177,10 @@ import {
   OffscreenVisible,
   OffscreenPassiveEffectsConnected,
 } from './ReactFiberOffscreenComponent';
+import {
+  TransitionRoot,
+  TransitionTracingMarker,
+} from './ReactFiberTracingMarkerComponent.new';
 
 let didWarnAboutUndefinedSnapshotBeforeUpdate: Set<mixed> | null = null;
 if (__DEV__) {
@@ -1099,7 +1103,6 @@ function commitLayoutEffectOnFiber(
             recursivelyTraverseReappearLayoutEffects(
               finishedRoot,
               finishedWork,
-              committedLanes,
               includeWorkInProgressEffects,
             );
           } else {
@@ -1185,13 +1188,16 @@ function commitTransitionProgress(offscreenFiber: Fiber) {
               name,
             });
             if (transitions !== null) {
-              if (markerInstance.name) {
+              if (
+                markerInstance.tag === TransitionTracingMarker &&
+                markerInstance.name !== undefined
+              ) {
                 addMarkerProgressCallbackToPendingTransition(
                   markerInstance.name,
                   transitions,
                   pendingBoundaries,
                 );
-              } else {
+              } else if (markerInstance.tag === TransitionRoot) {
                 transitions.forEach(transition => {
                   addTransitionProgressCallbackToPendingTransition(
                     transition,
@@ -1217,13 +1223,16 @@ function commitTransitionProgress(offscreenFiber: Fiber) {
           ) {
             pendingBoundaries.delete(offscreenInstance);
             if (transitions !== null) {
-              if (markerInstance.name) {
+              if (
+                markerInstance.tag === TransitionTracingMarker &&
+                markerInstance.name !== undefined
+              ) {
                 addMarkerProgressCallbackToPendingTransition(
                   markerInstance.name,
                   transitions,
                   pendingBoundaries,
                 );
-              } else {
+              } else if (markerInstance.tag === TransitionRoot) {
                 transitions.forEach(transition => {
                   addTransitionProgressCallbackToPendingTransition(
                     transition,
@@ -2704,7 +2713,6 @@ function reappearLayoutEffects(
   finishedRoot: FiberRoot,
   current: Fiber | null,
   finishedWork: Fiber,
-  committedLanes: Lanes,
   // This function visits both newly finished work and nodes that were re-used
   // from a previously committed tree. We cannot check non-static flags if the
   // node was reused.
@@ -2719,7 +2727,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
       // TODO: Check flags & LayoutStatic
@@ -2730,7 +2737,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
 
@@ -2772,7 +2778,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
 
@@ -2792,7 +2797,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
       // TODO: Figure out how Profiler updates should work with Offscreen
@@ -2805,7 +2809,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
 
@@ -2825,7 +2828,6 @@ function reappearLayoutEffects(
         recursivelyTraverseReappearLayoutEffects(
           finishedRoot,
           finishedWork,
-          committedLanes,
           includeWorkInProgressEffects,
         );
       }
@@ -2835,7 +2837,6 @@ function reappearLayoutEffects(
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
         finishedWork,
-        committedLanes,
         includeWorkInProgressEffects,
       );
       break;
@@ -2846,7 +2847,6 @@ function reappearLayoutEffects(
 function recursivelyTraverseReappearLayoutEffects(
   finishedRoot: FiberRoot,
   parentFiber: Fiber,
-  committedLanes: Lanes,
   includeWorkInProgressEffects: boolean,
 ) {
   // This function visits both newly finished work and nodes that were re-used
@@ -2865,7 +2865,6 @@ function recursivelyTraverseReappearLayoutEffects(
       finishedRoot,
       current,
       child,
-      committedLanes,
       childShouldIncludeWorkInProgressEffects,
     );
     child = child.sibling;
