@@ -124,7 +124,7 @@ import type {
 } from 'react-devtools-shared/src/types';
 
 type getDisplayNameForFiberType = (fiber: Fiber) => string | null;
-type getTypeSymbolType = (type: any) => Symbol | number;
+type getTypeSymbolType = (type: any) => symbol | number;
 
 type ReactPriorityLevelsType = {|
   ImmediatePriority: number,
@@ -382,13 +382,14 @@ export function getInternalReactConstants(
   // End of copied code.
   // **********************************************************
 
-  function getTypeSymbol(type: any): Symbol | number {
+  function getTypeSymbol(type: any): symbol | number {
     const symbolOrNumber =
       typeof type === 'object' && type !== null ? type.$$typeof : type;
 
     // $FlowFixMe Flow doesn't know about typeof "symbol"
     return typeof symbolOrNumber === 'symbol'
-      ? symbolOrNumber.toString()
+      ? // $FlowFixMe `toString()` doesn't match the type signature?
+        symbolOrNumber.toString()
       : symbolOrNumber;
   }
 
@@ -468,8 +469,9 @@ export function getInternalReactConstants(
         return type;
       case HostPortal:
       case HostText:
-      case Fragment:
         return null;
+      case Fragment:
+        return 'Fragment';
       case LazyComponent:
         // This display name will not be user visible.
         // Once a Lazy component loads its inner component, React replaces the tag and type.
@@ -810,32 +812,28 @@ export function attach(
   // Patching the console enables DevTools to do a few useful things:
   // * Append component stacks to warnings and error messages
   // * Disable logging during re-renders to inspect hooks (see inspectHooksOfFiber)
-  //
-  // Don't patch in test environments because we don't want to interfere with Jest's own console overrides.
-  if (process.env.NODE_ENV !== 'test') {
-    registerRendererWithConsole(renderer, onErrorOrWarning);
+  registerRendererWithConsole(renderer, onErrorOrWarning);
 
-    // The renderer interface can't read these preferences directly,
-    // because it is stored in localStorage within the context of the extension.
-    // It relies on the extension to pass the preference through via the global.
-    const appendComponentStack =
-      window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false;
-    const breakOnConsoleErrors =
-      window.__REACT_DEVTOOLS_BREAK_ON_CONSOLE_ERRORS__ === true;
-    const showInlineWarningsAndErrors =
-      window.__REACT_DEVTOOLS_SHOW_INLINE_WARNINGS_AND_ERRORS__ !== false;
-    const hideConsoleLogsInStrictMode =
-      window.__REACT_DEVTOOLS_HIDE_CONSOLE_LOGS_IN_STRICT_MODE__ === true;
-    const browserTheme = window.__REACT_DEVTOOLS_BROWSER_THEME__;
+  // The renderer interface can't read these preferences directly,
+  // because it is stored in localStorage within the context of the extension.
+  // It relies on the extension to pass the preference through via the global.
+  const appendComponentStack =
+    window.__REACT_DEVTOOLS_APPEND_COMPONENT_STACK__ !== false;
+  const breakOnConsoleErrors =
+    window.__REACT_DEVTOOLS_BREAK_ON_CONSOLE_ERRORS__ === true;
+  const showInlineWarningsAndErrors =
+    window.__REACT_DEVTOOLS_SHOW_INLINE_WARNINGS_AND_ERRORS__ !== false;
+  const hideConsoleLogsInStrictMode =
+    window.__REACT_DEVTOOLS_HIDE_CONSOLE_LOGS_IN_STRICT_MODE__ === true;
+  const browserTheme = window.__REACT_DEVTOOLS_BROWSER_THEME__;
 
-    patchConsole({
-      appendComponentStack,
-      breakOnConsoleErrors,
-      showInlineWarningsAndErrors,
-      hideConsoleLogsInStrictMode,
-      browserTheme,
-    });
-  }
+  patchConsole({
+    appendComponentStack,
+    breakOnConsoleErrors,
+    showInlineWarningsAndErrors,
+    hideConsoleLogsInStrictMode,
+    browserTheme,
+  });
 
   const debug = (
     name: string,
@@ -981,7 +979,7 @@ export function attach(
 
   // NOTICE Keep in sync with get*ForFiber methods
   function shouldFilterFiber(fiber: Fiber): boolean {
-    const {_debugSource, tag, type} = fiber;
+    const {_debugSource, tag, type, key} = fiber;
 
     switch (tag) {
       case DehydratedSuspenseComponent:
@@ -993,13 +991,14 @@ export function attach(
         return true;
       case HostPortal:
       case HostText:
-      case Fragment:
       case LegacyHiddenComponent:
       case OffscreenComponent:
         return true;
       case HostRoot:
         // It is never valid to filter the root element.
         return false;
+      case Fragment:
+        return key === null;
       default:
         const typeSymbol = getTypeSymbol(type);
 

@@ -19,9 +19,9 @@ import {
   close,
 } from 'react-client/src/ReactFlightClientStream';
 
-export type Options = {
+export type Options = {|
   moduleMap?: BundlerConfig,
-};
+|};
 
 function startReadingFromStream(
   response: FlightResponse,
@@ -35,12 +35,18 @@ function startReadingFromStream(
     }
     const buffer: Uint8Array = (value: any);
     processBinaryChunk(response, buffer);
-    return reader.read().then(progress, error);
+    return reader
+      .read()
+      .then(progress)
+      .catch(error);
   }
   function error(e) {
     reportGlobalError(response, e);
   }
-  reader.read().then(progress, error);
+  reader
+    .read()
+    .then(progress)
+    .catch(error);
 }
 
 function createFromReadableStream(

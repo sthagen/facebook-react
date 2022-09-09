@@ -15,6 +15,7 @@ import type {
 } from './ReactInternalTypes';
 import type {RootTag} from './ReactRootTags';
 import type {Cache} from './ReactFiberCacheComponent.new';
+import type {Container} from './ReactFiberHostConfig';
 
 import {noTimeout, supportsHydration} from './ReactFiberHostConfig';
 import {createHostRootFiber} from './ReactFiber.new';
@@ -37,11 +38,11 @@ import {initializeUpdateQueue} from './ReactFiberClassUpdateQueue.new';
 import {LegacyRoot, ConcurrentRoot} from './ReactRootTags';
 import {createCache, retainCache} from './ReactFiberCacheComponent.new';
 
-export type RootState = {
+export type RootState = {|
   element: any,
   isDehydrated: boolean,
   cache: Cache,
-};
+|};
 
 function FiberRootNode(
   containerInfo,
@@ -128,7 +129,7 @@ function FiberRootNode(
 }
 
 export function createFiberRoot(
-  containerInfo: any,
+  containerInfo: Container,
   tag: RootTag,
   hydrate: boolean,
   initialChildren: ReactNodeList,
