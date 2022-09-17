@@ -39,25 +39,29 @@ import {
   enableUseMemoCacheHook,
 } from 'shared/ReactFeatureFlags';
 import is from 'shared/objectIs';
+import {
+  REACT_SERVER_CONTEXT_TYPE,
+  REACT_CONTEXT_TYPE,
+} from 'shared/ReactSymbols';
 
 type BasicStateAction<S> = (S => S) | S;
 type Dispatch<A> = A => void;
 
-type Update<A> = {|
+type Update<A> = {
   action: A,
   next: Update<A> | null,
-|};
+};
 
-type UpdateQueue<A> = {|
+type UpdateQueue<A> = {
   last: Update<A> | null,
   dispatch: any,
-|};
+};
 
-type Hook = {|
+type Hook = {
   memoizedState: any,
   queue: UpdateQueue<any> | null,
   next: Hook | null,
-|};
+};
 
 let currentlyRenderingComponent: Object | null = null;
 let currentlyRenderingTask: Task | null = null;
@@ -235,13 +239,13 @@ export function finishHooks(
   return children;
 }
 
-export function getThenableStateAfterSuspending() {
+export function getThenableStateAfterSuspending(): null | ThenableState {
   const state = thenableState;
   thenableState = null;
   return state;
 }
 
-export function checkDidRenderIdHook() {
+export function checkDidRenderIdHook(): boolean {
   // This should be called immediately after every finishHooks call.
   // Conceptually, it's part of the return value of finishHooks; it's only a
   // separate function to avoid using an array tuple.
@@ -416,7 +420,7 @@ function useMemo<T>(nextCreate: () => T, deps: Array<mixed> | void | null): T {
   return nextValue;
 }
 
-function useRef<T>(initialValue: T): {|current: T|} {
+function useRef<T>(initialValue: T): {current: T} {
   currentlyRenderingComponent = resolveCurrentlyRenderingComponent();
   workInProgressHook = createWorkInProgressHook();
   const previousRef = workInProgressHook.memoizedState;
@@ -616,8 +620,12 @@ function use<T>(usable: Usable<T>): T {
           }
         }
       }
-    } else {
-      // TODO: Add support for Context
+    } else if (
+      usable.$$typeof === REACT_CONTEXT_TYPE ||
+      usable.$$typeof === REACT_SERVER_CONTEXT_TYPE
+    ) {
+      const context: ReactContext<T> = (usable: any);
+      return readContext(context);
     }
   }
 

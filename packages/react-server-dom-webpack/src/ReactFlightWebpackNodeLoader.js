@@ -7,39 +7,39 @@
  * @flow
  */
 
-import {acorn} from 'acorn';
+import * as acorn from 'acorn';
 
-type ResolveContext = {|
+type ResolveContext = {
   conditions: Array<string>,
   parentURL: string | void,
-|};
+};
 
 type ResolveFunction = (
   string,
   ResolveContext,
   ResolveFunction,
-) => {|url: string|} | Promise<{|url: string|}>;
+) => {url: string} | Promise<{url: string}>;
 
-type GetSourceContext = {|
+type GetSourceContext = {
   format: string,
-|};
+};
 
 type GetSourceFunction = (
   string,
   GetSourceContext,
   GetSourceFunction,
-) => Promise<{|source: Source|}>;
+) => Promise<{source: Source}>;
 
-type TransformSourceContext = {|
+type TransformSourceContext = {
   format: string,
   url: string,
-|};
+};
 
 type TransformSourceFunction = (
   Source,
   TransformSourceContext,
   TransformSourceFunction,
-) => Promise<{|source: Source|}>;
+) => Promise<{source: Source}>;
 
 type Source = string | ArrayBuffer | Uint8Array;
 
@@ -52,7 +52,7 @@ export async function resolve(
   specifier: string,
   context: ResolveContext,
   defaultResolve: ResolveFunction,
-): Promise<{|url: string|}> {
+): Promise<{url: string}> {
   // We stash this in case we end up needing to resolve export * statements later.
   stashedResolve = defaultResolve;
 
@@ -94,7 +94,7 @@ export async function getSource(
   url: string,
   context: GetSourceContext,
   defaultGetSource: GetSourceFunction,
-) {
+): Promise<{source: Source}> {
   // We stash this in case we end up needing to resolve export * statements later.
   stashedGetSource = defaultGetSource;
   return defaultGetSource(url, context, defaultGetSource);
@@ -133,7 +133,7 @@ function addExportNames(names, node) {
 function resolveClientImport(
   specifier: string,
   parentURL: string,
-): {|url: string|} | Promise<{|url: string|}> {
+): {url: string} | Promise<{url: string}> {
   // Resolve an import specifier as if it was loaded by the client. This doesn't use
   // the overrides that this loader does but instead reverts to the default.
   // This resolution algorithm will not necessarily have the same configuration
@@ -151,7 +151,7 @@ function resolveClientImport(
 async function loadClientImport(
   url: string,
   defaultTransformSource: TransformSourceFunction,
-): Promise<{|source: Source|}> {
+): Promise<{source: Source}> {
   if (stashedGetSource === null) {
     throw new Error(
       'Expected getSource to have been called before transformSource',
@@ -225,7 +225,7 @@ export async function transformSource(
   source: Source,
   context: TransformSourceContext,
   defaultTransformSource: TransformSourceFunction,
-): Promise<{|source: Source|}> {
+): Promise<{source: Source}> {
   const transformed = await defaultTransformSource(
     source,
     context,

@@ -12,7 +12,7 @@ type JSONValue =
   | boolean
   | number
   | null
-  | {|+[key: string]: JSONValue|}
+  | {+[key: string]: JSONValue}
   | $ReadOnlyArray<JSONValue>;
 
 declare module 'JSResourceReference' {
@@ -62,7 +62,7 @@ declare module 'ReactFlightDOMRelayClientIntegration' {
   ): JSResourceReference<T>;
   declare export function preloadModule<T>(
     moduleReference: JSResourceReference<T>,
-  ): void;
+  ): null | Promise<void>;
   declare export function requireModule<T>(
     moduleReference: JSResourceReference<T>,
   ): T;
@@ -95,7 +95,7 @@ declare module 'ReactFlightNativeRelayClientIntegration' {
   ): JSResourceReference<T>;
   declare export function preloadModule<T>(
     moduleReference: JSResourceReference<T>,
-  ): void;
+  ): null | Promise<void>;
   declare export function requireModule<T>(
     moduleReference: JSResourceReference<T>,
   ): T;

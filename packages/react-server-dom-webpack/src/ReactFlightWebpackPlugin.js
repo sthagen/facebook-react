@@ -29,7 +29,7 @@ class ClientReferenceDependency extends ModuleDependency {
     super(request);
   }
 
-  get type() {
+  get type(): string {
     return 'client-reference';
   }
 }
@@ -42,21 +42,21 @@ class ClientReferenceDependency extends ModuleDependency {
 const clientImportName = 'react-server-dom-webpack';
 const clientFileName = require.resolve('../');
 
-type ClientReferenceSearchPath = {|
+type ClientReferenceSearchPath = {
   directory: string,
   recursive?: boolean,
   include: RegExp,
   exclude?: RegExp,
-|};
+};
 
 type ClientReferencePath = string | ClientReferenceSearchPath;
 
-type Options = {|
+type Options = {
   isServer: boolean,
   clientReferences?: ClientReferencePath | $ReadOnlyArray<ClientReferencePath>,
   chunkName?: string,
   manifestFilename?: string,
-|};
+};
 
 const PLUGIN_NAME = 'React Server Plugin';
 
@@ -327,7 +327,7 @@ export default class ReactFlightWebpackPlugin {
             contextModuleFactory.resolveDependencies(
               fs,
               options,
-              (err2: null | Error, deps: Array<ModuleDependency>) => {
+              (err2: null | Error, deps: Array<any /*ModuleDependency*/>) => {
                 if (err2) return cb(err2);
                 const clientRefDeps = deps.map(dep => {
                   // use userRequest instead of request. request always end with undefined which is wrong
