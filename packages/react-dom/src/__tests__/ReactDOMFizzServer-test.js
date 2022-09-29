@@ -92,7 +92,7 @@ describe('ReactDOMFizzServer', () => {
   function expectErrors(errorsArr, toBeDevArr, toBeProdArr) {
     const mappedErrows = errorsArr.map(({error, errorInfo}) => {
       const stack = errorInfo && errorInfo.componentStack;
-      const digest = errorInfo && errorInfo.digest;
+      const digest = error.digest;
       if (stack) {
         return [error.message, digest, normalizeCodeLocInfo(stack)];
       } else if (digest) {
@@ -3230,6 +3230,47 @@ describe('ReactDOMFizzServer', () => {
     );
   });
 
+  it('warns in dev if you access digest from errorInfo in onRecoverableError', async () => {
+    await act(async () => {
+      const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
+        <div>
+          <Suspense fallback={'loading...'}>
+            <AsyncText text={'hello'} />
+          </Suspense>
+        </div>,
+        {
+          onError(error) {
+            return 'a digest';
+          },
+        },
+      );
+      rejectText('hello');
+      pipe(writable);
+    });
+    expect(getVisibleChildren(container)).toEqual(<div>loading...</div>);
+
+    ReactDOMClient.hydrateRoot(
+      container,
+      <div>
+        <Suspense fallback={'loading...'}>hello</Suspense>
+      </div>,
+      {
+        onRecoverableError(error, errorInfo) {
+          expect(() => {
+            expect(error.digest).toBe('a digest');
+            expect(errorInfo.digest).toBe('a digest');
+          }).toErrorDev(
+            'Warning: You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
+              ' This property is deprecated and will be removed in a future version of React.' +
+              ' To access the digest of an Error look for this property on the Error instance itself.',
+            {withoutStack: true},
+          );
+        },
+      },
+    );
+    expect(Scheduler).toFlushWithoutYielding();
+  });
+
   describe('error escaping', () => {
     it('escapes error hash, message, and component stack values in directly flushed errors (html escaping)', async () => {
       window.__outlet = {};
@@ -5502,6 +5543,107 @@ describe('ReactDOMFizzServer', () => {
       ReactDOMClient.hydrateRoot(container, <App />);
       expect(Scheduler).toFlushAndYield([]);
       expect(getVisibleChildren(container)).toEqual('Hi');
+    });
+  });
+
+  describe('useEvent', () => {
+    // @gate enableUseEventHook
+    it('can server render a component with useEvent', async () => {
+      const ref = React.createRef();
+      function App() {
+        const [count, setCount] = React.useState(0);
+        const onClick = React.experimental_useEvent(() => {
+          setCount(c => c + 1);
+        });
+        return (
+          <button ref={ref} onClick={() => onClick()}>
+            {count}
+          </button>
+        );
+      }
+      await act(async () => {
+        const {pipe} = ReactDOMFizzServer.renderToPipeableStream(<App />);
+        pipe(writable);
+      });
+      expect(getVisibleChildren(container)).toEqual(<button>0</button>);
+
+      ReactDOMClient.hydrateRoot(container, <App />);
+      expect(Scheduler).toFlushAndYield([]);
+      expect(getVisibleChildren(container)).toEqual(<button>0</button>);
+
+      ref.current.dispatchEvent(
+        new window.MouseEvent('click', {bubbles: true}),
+      );
+      await jest.runAllTimers();
+      expect(getVisibleChildren(container)).toEqual(<button>1</button>);
+    });
+
+    // @gate enableUseEventHook
+    it('throws if useEvent is called during a server render', async () => {
+      const logs = [];
+      function App() {
+        const onRender = React.experimental_useEvent(() => {
+          logs.push('rendered');
+        });
+        onRender();
+        return <p>Hello</p>;
+      }
+
+      const reportedServerErrors = [];
+      let caughtError;
+      try {
+        await act(async () => {
+          const {pipe} = ReactDOMFizzServer.renderToPipeableStream(<App />, {
+            onError(e) {
+              reportedServerErrors.push(e);
+            },
+          });
+          pipe(writable);
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+      expect(logs).toEqual([]);
+      expect(caughtError.message).toContain(
+        "A function wrapped in useEvent can't be called during rendering.",
+      );
+      expect(reportedServerErrors).toEqual([caughtError]);
+    });
+
+    // @gate enableUseEventHook
+    it('does not guarantee useEvent return values during server rendering are distinct', async () => {
+      function App() {
+        const onClick1 = React.experimental_useEvent(() => {});
+        const onClick2 = React.experimental_useEvent(() => {});
+        if (onClick1 === onClick2) {
+          return <div />;
+        } else {
+          return <span />;
+        }
+      }
+      await act(async () => {
+        const {pipe} = ReactDOMFizzServer.renderToPipeableStream(<App />);
+        pipe(writable);
+      });
+      expect(getVisibleChildren(container)).toEqual(<div />);
+
+      const errors = [];
+      ReactDOMClient.hydrateRoot(container, <App />, {
+        onRecoverableError(error) {
+          errors.push(error);
+        },
+      });
+      expect(() => {
+        expect(Scheduler).toFlushAndYield([]);
+      }).toErrorDev(
+        [
+          'Expected server HTML to contain a matching <span> in <div>',
+          'An error occurred during hydration',
+        ],
+        {withoutStack: 1},
+      );
+      expect(errors.length).toEqual(2);
+      expect(getVisibleChildren(container)).toEqual(<span />);
     });
   });
 });
