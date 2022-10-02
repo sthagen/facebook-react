@@ -21,6 +21,7 @@ import type {
   Dispatcher,
   HookType,
   MemoCache,
+  EventFunctionWrapper,
 } from './ReactInternalTypes';
 import type {Lanes, Lane} from './ReactFiberLane.old';
 import type {HookFlags} from './ReactHookEffectTags';
@@ -41,13 +42,19 @@ import {
   enableUseHook,
   enableUseMemoCacheHook,
   enableUseEventHook,
+  enableStrictEffects,
 } from 'shared/ReactFeatureFlags';
 import {
   REACT_CONTEXT_TYPE,
   REACT_SERVER_CONTEXT_TYPE,
 } from 'shared/ReactSymbols';
 
-import {NoMode, ConcurrentMode, DebugTracingMode} from './ReactTypeOfMode';
+import {
+  NoMode,
+  ConcurrentMode,
+  DebugTracingMode,
+  StrictEffectsMode,
+} from './ReactTypeOfMode';
 import {
   NoLane,
   SyncLane,
@@ -80,13 +87,14 @@ import {
   StaticMask as StaticMaskEffect,
   Update as UpdateEffect,
   StoreConsistency,
+  MountLayoutDev as MountLayoutDevEffect,
+  MountPassiveDev as MountPassiveDevEffect,
 } from './ReactFiberFlags';
 import {
   HasEffect as HookHasEffect,
   Layout as HookLayout,
   Passive as HookPassive,
   Insertion as HookInsertion,
-  Snapshot as HookSnapshot,
 } from './ReactHookEffectTags';
 import {
   getWorkInProgressRoot,
@@ -184,6 +192,7 @@ type StoreConsistencyCheck<T> = {
 
 export type FunctionComponentUpdateQueue = {
   lastEffect: Effect | null,
+  events: Array<() => mixed> | null,
   stores: Array<StoreConsistencyCheck<any>> | null,
   // NOTE: optional, only set when enableUseMemoCacheHook is enabled
   memoCache?: MemoCache | null,
@@ -589,7 +598,22 @@ export function bailoutHooks(
   lanes: Lanes,
 ) {
   workInProgress.updateQueue = current.updateQueue;
-  workInProgress.flags &= ~(PassiveEffect | UpdateEffect);
+  // TODO: Don't need to reset the flags here, because they're reset in the
+  // complete phase (bubbleProperties).
+  if (
+    __DEV__ &&
+    enableStrictEffects &&
+    (workInProgress.mode & StrictEffectsMode) !== NoMode
+  ) {
+    workInProgress.flags &= ~(
+      MountPassiveDevEffect |
+      MountLayoutDevEffect |
+      PassiveEffect |
+      UpdateEffect
+    );
+  } else {
+    workInProgress.flags &= ~(PassiveEffect | UpdateEffect);
+  }
   current.lanes = removeLanes(current.lanes, lanes);
 }
 
@@ -727,6 +751,7 @@ if (enableUseMemoCacheHook) {
   createFunctionComponentUpdateQueue = () => {
     return {
       lastEffect: null,
+      events: null,
       stores: null,
       memoCache: null,
     };
@@ -735,6 +760,7 @@ if (enableUseMemoCacheHook) {
   createFunctionComponentUpdateQueue = () => {
     return {
       lastEffect: null,
+      events: null,
       stores: null,
     };
   };
@@ -1856,12 +1882,25 @@ function mountEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
-  return mountEffectImpl(
-    PassiveEffect | PassiveStaticEffect,
-    HookPassive,
-    create,
-    deps,
-  );
+  if (
+    __DEV__ &&
+    enableStrictEffects &&
+    (currentlyRenderingFiber.mode & StrictEffectsMode) !== NoMode
+  ) {
+    return mountEffectImpl(
+      MountPassiveDevEffect | PassiveEffect | PassiveStaticEffect,
+      HookPassive,
+      create,
+      deps,
+    );
+  } else {
+    return mountEffectImpl(
+      PassiveEffect | PassiveStaticEffect,
+      HookPassive,
+      create,
+      deps,
+    );
+  }
 }
 
 function updateEffect(
@@ -1871,49 +1910,52 @@ function updateEffect(
   return updateEffectImpl(PassiveEffect, HookPassive, create, deps);
 }
 
-function mountEvent<T>(callback: () => T): () => T {
-  const hook = mountWorkInProgressHook();
-  const ref = {current: callback};
+function useEventImpl<Args, Return, F: (...Array<Args>) => Return>(
+  event: EventFunctionWrapper<Args, Return, F>,
+  nextImpl: F,
+) {
+  currentlyRenderingFiber.flags |= UpdateEffect;
+  let componentUpdateQueue: null | FunctionComponentUpdateQueue = (currentlyRenderingFiber.updateQueue: any);
+  if (componentUpdateQueue === null) {
+    componentUpdateQueue = createFunctionComponentUpdateQueue();
+    currentlyRenderingFiber.updateQueue = (componentUpdateQueue: any);
+    componentUpdateQueue.events = [event, nextImpl];
+  } else {
+    const events = componentUpdateQueue.events;
+    if (events === null) {
+      componentUpdateQueue.events = [event, nextImpl];
+    } else {
+      events.push(event, nextImpl);
+    }
+  }
+}
 
-  function event() {
+function mountEvent<Args, Return, F: (...Array<Args>) => Return>(
+  callback: F,
+): EventFunctionWrapper<Args, Return, F> {
+  const hook = mountWorkInProgressHook();
+  const eventFn: EventFunctionWrapper<Args, Return, F> = function eventFn() {
     if (isInvalidExecutionContextForEventFunction()) {
       throw new Error(
         "A function wrapped in useEvent can't be called during rendering.",
       );
     }
-    return ref.current.apply(undefined, arguments);
-  }
+    return eventFn._impl.apply(undefined, arguments);
+  };
+  eventFn._impl = callback;
 
-  // TODO: We don't need all the overhead of an effect object since there are no deps and no
-  // clean up functions.
-  mountEffectImpl(
-    UpdateEffect,
-    HookSnapshot,
-    () => {
-      ref.current = callback;
-    },
-    [ref, callback],
-  );
-
-  hook.memoizedState = [ref, event];
-
-  return event;
+  useEventImpl(eventFn, callback);
+  hook.memoizedState = eventFn;
+  return eventFn;
 }
 
-function updateEvent<T>(callback: () => T): () => T {
+function updateEvent<Args, Return, F: (...Array<Args>) => Return>(
+  callback: F,
+): EventFunctionWrapper<Args, Return, F> {
   const hook = updateWorkInProgressHook();
-  const ref = hook.memoizedState[0];
-
-  updateEffectImpl(
-    UpdateEffect,
-    HookSnapshot,
-    () => {
-      ref.current = callback;
-    },
-    [ref, callback],
-  );
-
-  return hook.memoizedState[1];
+  const eventFn = hook.memoizedState;
+  useEventImpl(eventFn, callback);
+  return eventFn;
 }
 
 function mountInsertionEffect(
@@ -1934,7 +1976,14 @@ function mountLayoutEffect(
   create: () => (() => void) | void,
   deps: Array<mixed> | void | null,
 ): void {
-  const fiberFlags: Flags = UpdateEffect | LayoutStaticEffect;
+  let fiberFlags: Flags = UpdateEffect | LayoutStaticEffect;
+  if (
+    __DEV__ &&
+    enableStrictEffects &&
+    (currentlyRenderingFiber.mode & StrictEffectsMode) !== NoMode
+  ) {
+    fiberFlags |= MountLayoutDevEffect;
+  }
   return mountEffectImpl(fiberFlags, HookLayout, create, deps);
 }
 
@@ -1994,7 +2043,14 @@ function mountImperativeHandle<T>(
   const effectDeps =
     deps !== null && deps !== undefined ? deps.concat([ref]) : null;
 
-  const fiberFlags: Flags = UpdateEffect | LayoutStaticEffect;
+  let fiberFlags: Flags = UpdateEffect | LayoutStaticEffect;
+  if (
+    __DEV__ &&
+    enableStrictEffects &&
+    (currentlyRenderingFiber.mode & StrictEffectsMode) !== NoMode
+  ) {
+    fiberFlags |= MountLayoutDevEffect;
+  }
   return mountEffectImpl(
     fiberFlags,
     HookLayout,
@@ -2890,9 +2946,11 @@ if (__DEV__) {
     (HooksDispatcherOnMountInDEV: Dispatcher).useMemoCache = useMemoCache;
   }
   if (enableUseEventHook) {
-    (HooksDispatcherOnMountInDEV: Dispatcher).useEvent = function useEvent<T>(
-      callback: () => T,
-    ): () => T {
+    (HooksDispatcherOnMountInDEV: Dispatcher).useEvent = function useEvent<
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       mountHookTypesDev();
       return mountEvent(callback);
@@ -3048,8 +3106,10 @@ if (__DEV__) {
   }
   if (enableUseEventHook) {
     (HooksDispatcherOnMountWithHookTypesInDEV: Dispatcher).useEvent = function useEvent<
-      T,
-    >(callback: () => T): () => T {
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       updateHookTypesDev();
       return mountEvent(callback);
@@ -3204,9 +3264,11 @@ if (__DEV__) {
     (HooksDispatcherOnUpdateInDEV: Dispatcher).useMemoCache = useMemoCache;
   }
   if (enableUseEventHook) {
-    (HooksDispatcherOnUpdateInDEV: Dispatcher).useEvent = function useEvent<T>(
-      callback: () => T,
-    ): () => T {
+    (HooksDispatcherOnUpdateInDEV: Dispatcher).useEvent = function useEvent<
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       updateHookTypesDev();
       return updateEvent(callback);
@@ -3363,8 +3425,10 @@ if (__DEV__) {
   }
   if (enableUseEventHook) {
     (HooksDispatcherOnRerenderInDEV: Dispatcher).useEvent = function useEvent<
-      T,
-    >(callback: () => T): () => T {
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       updateHookTypesDev();
       return updateEvent(callback);
@@ -3547,8 +3611,10 @@ if (__DEV__) {
   }
   if (enableUseEventHook) {
     (InvalidNestedHooksDispatcherOnMountInDEV: Dispatcher).useEvent = function useEvent<
-      T,
-    >(callback: () => T): () => T {
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       warnInvalidHookAccess();
       mountHookTypesDev();
@@ -3732,8 +3798,10 @@ if (__DEV__) {
   }
   if (enableUseEventHook) {
     (InvalidNestedHooksDispatcherOnUpdateInDEV: Dispatcher).useEvent = function useEvent<
-      T,
-    >(callback: () => T): () => T {
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       warnInvalidHookAccess();
       updateHookTypesDev();
@@ -3918,8 +3986,10 @@ if (__DEV__) {
   }
   if (enableUseEventHook) {
     (InvalidNestedHooksDispatcherOnRerenderInDEV: Dispatcher).useEvent = function useEvent<
-      T,
-    >(callback: () => T): () => T {
+      Args,
+      Return,
+      F: (...Array<Args>) => Return,
+    >(callback: F): EventFunctionWrapper<Args, Return, F> {
       currentHookNameInDev = 'useEvent';
       warnInvalidHookAccess();
       updateHookTypesDev();

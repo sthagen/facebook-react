@@ -16,7 +16,7 @@ import type {
   UpdatePayload,
 } from './ReactFiberHostConfig';
 import type {Fiber} from './ReactInternalTypes';
-import type {FiberRoot} from './ReactInternalTypes';
+import type {FiberRoot, EventFunctionWrapper} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane.new';
 import type {SuspenseState} from './ReactFiberSuspenseComponent.new';
 import type {UpdateQueue} from './ReactFiberClassUpdateQueue.new';
@@ -50,6 +50,8 @@ import {
   enableCache,
   enableTransitionTracing,
   enableUseEventHook,
+  enableStrictEffects,
+  enableFloat,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -57,6 +59,7 @@ import {
   ClassComponent,
   HostRoot,
   HostComponent,
+  HostResource,
   HostText,
   HostPortal,
   Profiler,
@@ -72,7 +75,6 @@ import {
   CacheComponent,
   TracingMarkerComponent,
 } from './ReactWorkTags';
-import {detachDeletedInstance} from './ReactFiberHostConfig';
 import {
   NoFlags,
   ContentReset,
@@ -116,6 +118,7 @@ import {
   supportsMutation,
   supportsPersistence,
   supportsHydration,
+  supportsResources,
   commitMount,
   commitUpdate,
   resetTextContent,
@@ -140,6 +143,9 @@ import {
   prepareScopeUpdate,
   prepareForCommit,
   beforeActiveInstanceBlur,
+  detachDeletedInstance,
+  acquireResource,
+  releaseResource,
 } from './ReactFiberHostConfig';
 import {
   captureCommitPhaseError,
@@ -164,7 +170,6 @@ import {
   Layout as HookLayout,
   Insertion as HookInsertion,
   Passive as HookPassive,
-  Snapshot as HookSnapshot,
 } from './ReactHookEffectTags';
 import {didWarnAboutReassigningProps} from './ReactFiberBeginWork.new';
 import {doesFiberContain} from './ReactFiberTreeReflection';
@@ -416,8 +421,7 @@ function commitBeforeMutationEffectsOnFiber(finishedWork: Fiber) {
     case FunctionComponent: {
       if (enableUseEventHook) {
         if ((flags & Update) !== NoFlags) {
-          // useEvent doesn't need to be cleaned up
-          commitHookEffectListMount(HookSnapshot | HookHasEffect, finishedWork);
+          commitUseEventMount(finishedWork);
         }
       }
       break;
@@ -494,6 +498,7 @@ function commitBeforeMutationEffectsOnFiber(finishedWork: Fiber) {
       break;
     }
     case HostComponent:
+    case HostResource:
     case HostText:
     case HostPortal:
     case IncompleteClassComponent:
@@ -662,6 +667,21 @@ function commitHookEffectListMount(flags: HookFlags, finishedWork: Fiber) {
       }
       effect = effect.next;
     } while (effect !== firstEffect);
+  }
+}
+
+function commitUseEventMount(finishedWork: Fiber) {
+  const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
+  const eventPayloads = updateQueue !== null ? updateQueue.events : null;
+  if (eventPayloads !== null) {
+    // FunctionComponentUpdateQueue.events is a flat array of
+    // [EventFunctionWrapper, EventFunction, ...], so increment by 2 each iteration to find the next
+    // pair.
+    for (let ii = 0; ii < eventPayloads.length; ii += 2) {
+      const eventFn: EventFunctionWrapper<any, any, any> = eventPayloads[ii];
+      const nextImpl = eventPayloads[ii + 1];
+      eventFn._impl = nextImpl;
+    }
   }
 }
 
@@ -1050,6 +1070,34 @@ function commitLayoutEffectOnFiber(
       }
       break;
     }
+    case HostResource: {
+      if (enableFloat && supportsResources) {
+        recursivelyTraverseLayoutEffects(
+          finishedRoot,
+          finishedWork,
+          committedLanes,
+        );
+
+        if (flags & Update) {
+          const newResource = finishedWork.memoizedState;
+          if (current !== null) {
+            const currentResource = current.memoizedState;
+            if (currentResource !== newResource) {
+              releaseResource(currentResource);
+            }
+          }
+          finishedWork.stateNode = newResource
+            ? acquireResource(newResource)
+            : null;
+        }
+
+        if (flags & Ref) {
+          safelyAttachRef(finishedWork, finishedWork.return);
+        }
+        break;
+      }
+    }
+    // eslint-disable-next-line-no-fallthrough
     case HostComponent: {
       recursivelyTraverseLayoutEffects(
         finishedRoot,
@@ -1436,7 +1484,10 @@ function hideOrUnhideAllChildren(finishedWork, isHidden) {
     // children to find all the terminal nodes.
     let node: Fiber = finishedWork;
     while (true) {
-      if (node.tag === HostComponent) {
+      if (
+        node.tag === HostComponent ||
+        (enableFloat && supportsResources ? node.tag === HostResource : false)
+      ) {
         if (hostSubtreeRoot === null) {
           hostSubtreeRoot = node;
           try {
@@ -1508,6 +1559,7 @@ function commitAttachRef(finishedWork: Fiber) {
     const instance = finishedWork.stateNode;
     let instanceToUse;
     switch (finishedWork.tag) {
+      case HostResource:
       case HostComponent:
         instanceToUse = getPublicInstance(instance);
         break;
@@ -1712,7 +1764,8 @@ function isHostParent(fiber: Fiber): boolean {
   return (
     fiber.tag === HostComponent ||
     fiber.tag === HostRoot ||
-    fiber.tag === HostPortal
+    fiber.tag === HostPortal ||
+    (enableFloat && supportsResources ? fiber.tag === HostResource : false)
   );
 }
 
@@ -1959,6 +2012,23 @@ function commitDeletionEffectsOnFiber(
   // into their subtree. There are simpler cases in the inner switch
   // that don't modify the stack.
   switch (deletedFiber.tag) {
+    case HostResource: {
+      if (enableFloat && supportsResources) {
+        if (!offscreenSubtreeWasHidden) {
+          safelyDetachRef(deletedFiber, nearestMountedAncestor);
+        }
+
+        recursivelyTraverseDeletionEffects(
+          finishedRoot,
+          nearestMountedAncestor,
+          deletedFiber,
+        );
+
+        releaseResource(deletedFiber.memoizedState);
+        return;
+      }
+    }
+    // eslint-disable-next-line no-fallthrough
     case HostComponent: {
       if (!offscreenSubtreeWasHidden) {
         safelyDetachRef(deletedFiber, nearestMountedAncestor);
@@ -2455,6 +2525,20 @@ function commitMutationEffectsOnFiber(
       }
       return;
     }
+    case HostResource: {
+      if (enableFloat && supportsResources) {
+        recursivelyTraverseMutationEffects(root, finishedWork, lanes);
+        commitReconciliationEffects(finishedWork);
+
+        if (flags & Ref) {
+          if (current !== null) {
+            safelyDetachRef(current, current.return);
+          }
+        }
+        return;
+      }
+    }
+    // eslint-disable-next-line-no-fallthrough
     case HostComponent: {
       recursivelyTraverseMutationEffects(root, finishedWork, lanes);
       commitReconciliationEffects(finishedWork);
@@ -2846,6 +2930,7 @@ export function disappearLayoutEffects(finishedWork: Fiber) {
       recursivelyTraverseDisappearLayoutEffects(finishedWork);
       break;
     }
+    case HostResource:
     case HostComponent: {
       // TODO (Offscreen) Check: flags & RefStatic
       safelyDetachRef(finishedWork, finishedWork.return);
@@ -2947,6 +3032,7 @@ export function reappearLayoutEffects(
     // case HostRoot: {
     //  ...
     // }
+    case HostResource:
     case HostComponent: {
       recursivelyTraverseReappearLayoutEffects(
         finishedRoot,
@@ -4096,4 +4182,111 @@ function commitPassiveUnmountInsideDeletedTreeOnFiber(
   }
 }
 
-export {commitPlacement, commitAttachRef, commitDetachRef};
+function invokeLayoutEffectMountInDEV(fiber: Fiber): void {
+  if (__DEV__ && enableStrictEffects) {
+    // We don't need to re-check StrictEffectsMode here.
+    // This function is only called if that check has already passed.
+    switch (fiber.tag) {
+      case FunctionComponent:
+      case ForwardRef:
+      case SimpleMemoComponent: {
+        try {
+          commitHookEffectListMount(HookLayout | HookHasEffect, fiber);
+        } catch (error) {
+          captureCommitPhaseError(fiber, fiber.return, error);
+        }
+        break;
+      }
+      case ClassComponent: {
+        const instance = fiber.stateNode;
+        try {
+          instance.componentDidMount();
+        } catch (error) {
+          captureCommitPhaseError(fiber, fiber.return, error);
+        }
+        break;
+      }
+    }
+  }
+}
+
+function invokePassiveEffectMountInDEV(fiber: Fiber): void {
+  if (__DEV__ && enableStrictEffects) {
+    // We don't need to re-check StrictEffectsMode here.
+    // This function is only called if that check has already passed.
+    switch (fiber.tag) {
+      case FunctionComponent:
+      case ForwardRef:
+      case SimpleMemoComponent: {
+        try {
+          commitHookEffectListMount(HookPassive | HookHasEffect, fiber);
+        } catch (error) {
+          captureCommitPhaseError(fiber, fiber.return, error);
+        }
+        break;
+      }
+    }
+  }
+}
+
+function invokeLayoutEffectUnmountInDEV(fiber: Fiber): void {
+  if (__DEV__ && enableStrictEffects) {
+    // We don't need to re-check StrictEffectsMode here.
+    // This function is only called if that check has already passed.
+    switch (fiber.tag) {
+      case FunctionComponent:
+      case ForwardRef:
+      case SimpleMemoComponent: {
+        try {
+          commitHookEffectListUnmount(
+            HookLayout | HookHasEffect,
+            fiber,
+            fiber.return,
+          );
+        } catch (error) {
+          captureCommitPhaseError(fiber, fiber.return, error);
+        }
+        break;
+      }
+      case ClassComponent: {
+        const instance = fiber.stateNode;
+        if (typeof instance.componentWillUnmount === 'function') {
+          safelyCallComponentWillUnmount(fiber, fiber.return, instance);
+        }
+        break;
+      }
+    }
+  }
+}
+
+function invokePassiveEffectUnmountInDEV(fiber: Fiber): void {
+  if (__DEV__ && enableStrictEffects) {
+    // We don't need to re-check StrictEffectsMode here.
+    // This function is only called if that check has already passed.
+    switch (fiber.tag) {
+      case FunctionComponent:
+      case ForwardRef:
+      case SimpleMemoComponent: {
+        try {
+          commitHookEffectListUnmount(
+            HookPassive | HookHasEffect,
+            fiber,
+            fiber.return,
+          );
+        } catch (error) {
+          captureCommitPhaseError(fiber, fiber.return, error);
+        }
+      }
+    }
+  }
+}
+
+export {
+  commitPlacement,
+  commitAttachRef,
+  commitDetachRef,
+  invokeLayoutEffectMountInDEV,
+  invokeLayoutEffectUnmountInDEV,
+  invokePassiveEffectMountInDEV,
+  invokePassiveEffectUnmountInDEV,
+};
