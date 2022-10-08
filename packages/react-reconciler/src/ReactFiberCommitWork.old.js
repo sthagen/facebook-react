@@ -52,6 +52,7 @@ import {
   enableUseEventHook,
   enableStrictEffects,
   enableFloat,
+  enableLegacyHidden,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -405,6 +406,7 @@ function commitBeforeMutationEffectsOnFiber(finishedWork: Fiber) {
       if (
         finishedWork.tag === SuspenseComponent &&
         isSuspenseBoundaryBeingHidden(current, finishedWork) &&
+        // $FlowFixMe[incompatible-call] found when upgrading Flow
         doesFiberContain(finishedWork, focusedInstanceHandle)
       ) {
         shouldFireAfterActiveInstanceBlur = true;
@@ -879,7 +881,7 @@ function commitClassLayoutLifecycles(
 function commitClassCallbacks(finishedWork: Fiber) {
   // TODO: I think this is now always non-null by the time it reaches the
   // commit phase. Consider removing the type check.
-  const updateQueue: UpdateQueue<*> | null = (finishedWork.updateQueue: any);
+  const updateQueue: UpdateQueue<mixed> | null = (finishedWork.updateQueue: any);
   if (updateQueue !== null) {
     const instance = finishedWork.stateNode;
     if (__DEV__) {
@@ -1046,9 +1048,7 @@ function commitLayoutEffectOnFiber(
       if (flags & Callback) {
         // TODO: I think this is now always non-null by the time it reaches the
         // commit phase. Consider removing the type check.
-        const updateQueue: UpdateQueue<
-          *,
-        > | null = (finishedWork.updateQueue: any);
+        const updateQueue: UpdateQueue<mixed> | null = (finishedWork.updateQueue: any);
         if (updateQueue !== null) {
           let instance = null;
           if (finishedWork.child !== null) {
@@ -1235,6 +1235,7 @@ function abortRootTransitions(
             transitionInstance.pendingBoundaries !== null &&
             transitionInstance.pendingBoundaries.has(deletedOffscreenInstance)
           ) {
+            // $FlowFixMe[incompatible-use] found when upgrading Flow
             transitionInstance.pendingBoundaries.delete(
               deletedOffscreenInstance,
             );
@@ -1314,7 +1315,7 @@ function abortParentMarkerTransitionsForDeletedFiber(
   if (enableTransitionTracing) {
     // Find all pending markers that are waiting on child suspense boundaries in the
     // aborted subtree and cancels them
-    let fiber = abortedFiber;
+    let fiber: null | Fiber = abortedFiber;
     while (fiber !== null) {
       switch (fiber.tag) {
         case TracingMarkerComponent:
@@ -1783,6 +1784,7 @@ function getHostSibling(fiber: Fiber): ?Instance {
         // last sibling.
         return null;
       }
+      // $FlowFixMe[incompatible-type] found when upgrading Flow
       node = node.return;
     }
     node.sibling.return = node.return;
@@ -1949,7 +1951,7 @@ function commitDeletionEffects(
     // TODO: Instead of searching up the fiber return path on every deletion, we
     // can track the nearest host component on the JS stack as we traverse the
     // tree during the commit phase. This would make insertions faster, too.
-    let parent = returnFiber;
+    let parent: null | Fiber = returnFiber;
     findParent: while (parent !== null) {
       switch (parent.tag) {
         case HostComponent: {
@@ -2330,8 +2332,12 @@ function getRetryCache(finishedWork) {
     }
     case OffscreenComponent: {
       const instance: OffscreenInstance = finishedWork.stateNode;
-      let retryCache = instance._retryCache;
+      // $FlowFixMe[incompatible-type-arg] found when upgrading Flow
+      let retryCache: null | Set<Wakeable> | WeakSet<Wakeable> =
+        // $FlowFixMe[incompatible-type] found when upgrading Flow
+        instance._retryCache;
       if (retryCache === null) {
+        // $FlowFixMe[incompatible-type]
         retryCache = instance._retryCache = new PossiblyWeakSet();
       }
       return retryCache;
@@ -2516,9 +2522,7 @@ function commitMutationEffectsOnFiber(
       }
 
       if (flags & Callback && offscreenSubtreeIsHidden) {
-        const updateQueue: UpdateQueue<
-          *,
-        > | null = (finishedWork.updateQueue: any);
+        const updateQueue: UpdateQueue<mixed> | null = (finishedWork.updateQueue: any);
         if (updateQueue !== null) {
           deferHiddenCallbacks(updateQueue);
         }
@@ -3010,9 +3014,7 @@ export function reappearLayoutEffects(
 
       // Commit any callbacks that would have fired while the component
       // was hidden.
-      const updateQueue: UpdateQueue<
-        *,
-      > | null = (finishedWork.updateQueue: any);
+      const updateQueue: UpdateQueue<mixed> | null = (finishedWork.updateQueue: any);
       if (updateQueue !== null) {
         commitHiddenCallbacks(updateQueue, instance);
       }
@@ -3418,7 +3420,23 @@ function commitPassiveMountOnFiber(
       }
       break;
     }
-    case LegacyHiddenComponent:
+    case LegacyHiddenComponent: {
+      if (enableLegacyHidden) {
+        recursivelyTraversePassiveMountEffects(
+          finishedRoot,
+          finishedWork,
+          committedLanes,
+          committedTransitions,
+        );
+
+        if (flags & Passive) {
+          const current = finishedWork.alternate;
+          const instance: OffscreenInstance = finishedWork.stateNode;
+          commitOffscreenPassiveMountEffects(current, finishedWork, instance);
+        }
+      }
+      break;
+    }
     case OffscreenComponent: {
       // TODO: Pass `current` as argument to this function
       const instance: OffscreenInstance = finishedWork.stateNode;
@@ -3599,7 +3617,25 @@ export function reconnectPassiveEffects(
     // case HostRoot: {
     //  ...
     // }
-    case LegacyHiddenComponent:
+    case LegacyHiddenComponent: {
+      if (enableLegacyHidden) {
+        recursivelyTraverseReconnectPassiveEffects(
+          finishedRoot,
+          finishedWork,
+          committedLanes,
+          committedTransitions,
+          includeWorkInProgressEffects,
+        );
+
+        if (includeWorkInProgressEffects && flags & Passive) {
+          // TODO: Pass `current` as argument to this function
+          const current: Fiber | null = finishedWork.alternate;
+          const instance: OffscreenInstance = finishedWork.stateNode;
+          commitOffscreenPassiveMountEffects(current, finishedWork, instance);
+        }
+      }
+      break;
+    }
     case OffscreenComponent: {
       const instance: OffscreenInstance = finishedWork.stateNode;
       const nextState: OffscreenState | null = finishedWork.memoizedState;
@@ -3819,7 +3855,9 @@ function detachAlternateSiblings(parentFiber: Fiber) {
       if (detachedChild !== null) {
         previousFiber.child = null;
         do {
+          // $FlowFixMe[incompatible-use] found when upgrading Flow
           const detachedSibling = detachedChild.sibling;
+          // $FlowFixMe[incompatible-use] found when upgrading Flow
           detachedChild.sibling = null;
           detachedChild = detachedSibling;
         } while (detachedChild !== null);

@@ -97,7 +97,7 @@ function guessEditor(): Array<string> {
     }
   }
 
-  // Last resort, use old skool env vars
+  // Last resort, use old-school env vars
   if (process.env.VISUAL) {
     return [process.env.VISUAL];
   } else if (process.env.EDITOR) {
@@ -173,6 +173,7 @@ export function launchEditor(
     // There's an existing editor process already and it's attached
     // to the terminal, so go kill it. Otherwise two separate editor
     // instances attach to the stdin/stdout which gets confusing.
+    // $FlowFixMe[incompatible-use] found when upgrading Flow
     childProcess.kill('SIGKILL');
   }
 
@@ -186,6 +187,7 @@ export function launchEditor(
     childProcess = spawn(editor, args, {stdio: 'inherit'});
   }
   childProcess.on('error', function() {});
+  // $FlowFixMe[incompatible-use] found when upgrading Flow
   childProcess.on('exit', function(errorCode) {
     childProcess = null;
   });

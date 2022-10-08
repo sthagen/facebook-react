@@ -404,14 +404,14 @@ export function addMarkerProgressCallbackToPendingTransition(
 ) {
   if (enableTransitionTracing) {
     if (currentPendingTransitionCallbacks === null) {
-      currentPendingTransitionCallbacks = {
+      currentPendingTransitionCallbacks = ({
         transitionStart: null,
         transitionProgress: null,
         transitionComplete: null,
         markerProgress: new Map(),
         markerIncomplete: null,
         markerComplete: null,
-      };
+      }: PendingTransitionCallbacks);
     }
 
     if (currentPendingTransitionCallbacks.markerProgress === null) {
@@ -734,7 +734,7 @@ export function scheduleUpdateOnFiber(
         root === rootCommittingMutationOrLayoutEffects
       ) {
         if (fiber.mode & ProfileMode) {
-          let current = fiber;
+          let current: null | Fiber = fiber;
           while (current !== null) {
             if (current.tag === Profiler) {
               const {id, onNestedUpdateScheduled} = current.memoizedProps;
@@ -1209,6 +1209,7 @@ export function queueRecoverableErrors(errors: Array<CapturedValue<mixed>>) {
   if (workInProgressRootRecoverableErrors === null) {
     workInProgressRootRecoverableErrors = errors;
   } else {
+    // $FlowFixMe[method-unbinding]
     workInProgressRootRecoverableErrors.push.apply(
       workInProgressRootRecoverableErrors,
       errors,
@@ -1416,6 +1417,7 @@ function markRootSuspended(root, suspendedLanes) {
     suspendedLanes,
     workInProgressRootInterleavedUpdatedLanes,
   );
+  // $FlowFixMe[incompatible-call] found when upgrading Flow
   markRootSuspended_dontCallThisOneDirectly(root, suspendedLanes);
 }
 
@@ -1565,7 +1567,7 @@ export function discreteUpdates<A, B, C, D, R>(
 // Warning, this opts-out of checking the function body.
 declare function flushSync<R>(fn: () => R): R;
 // eslint-disable-next-line no-redeclare
-declare function flushSync(): void;
+declare function flushSync(void): void;
 // eslint-disable-next-line no-redeclare
 export function flushSync<R>(fn: (() => R) | void): R | void {
   // In legacy mode, we flush pending passive effects at the beginning of the
@@ -2056,6 +2058,7 @@ function workLoopConcurrent() {
   }
 
   while (workInProgress !== null && !shouldYield()) {
+    // $FlowFixMe[incompatible-call] found when upgrading Flow
     performUnitOfWork(workInProgress);
   }
 }
@@ -2185,7 +2188,7 @@ function resumeSuspendedUnitOfWork(
 function completeUnitOfWork(unitOfWork: Fiber): void {
   // Attempt to complete the current unit of work, then move to the next
   // sibling. If there are no more siblings, return to the parent fiber.
-  let completedWork = unitOfWork;
+  let completedWork: Fiber = unitOfWork;
   do {
     // The current, flushed, state of this fiber is the alternate. Ideally
     // nothing should rely on this, but relying on it here means that we don't
@@ -2271,6 +2274,7 @@ function completeUnitOfWork(unitOfWork: Fiber): void {
       return;
     }
     // Otherwise, return to the parent
+    // $FlowFixMe[incompatible-type] we bail out when we get a null
     completedWork = returnFiber;
     // Update the next thing we're working on in case something throws.
     workInProgress = completedWork;
@@ -3162,6 +3166,7 @@ export function resolveRetryWakeable(boundaryFiber: Fiber, wakeable: Wakeable) {
       break;
     case OffscreenComponent: {
       const instance: OffscreenInstance = boundaryFiber.stateNode;
+      // $FlowFixMe[incompatible-type] found when upgrading Flow
       retryCache = instance._retryCache;
       break;
     }
@@ -3375,7 +3380,7 @@ function invokeEffectsInDev(
   fiberFlags: Flags,
   invokeEffectFn: (fiber: Fiber) => void,
 ) {
-  let current = firstChild;
+  let current: null | Fiber = firstChild;
   let subtreeRoot = null;
   while (current != null) {
     const primarySubtreeFlag = current.subtreeFlags & fiberFlags;
@@ -3432,6 +3437,7 @@ export function warnAboutUpdateOnNotYetMountedFiberInDEV(fiber: Fiber) {
       if (didWarnStateUpdateForNotYetMountedComponent.has(componentName)) {
         return;
       }
+      // $FlowFixMe[incompatible-use] found when upgrading Flow
       didWarnStateUpdateForNotYetMountedComponent.add(componentName);
     } else {
       didWarnStateUpdateForNotYetMountedComponent = new Set([componentName]);

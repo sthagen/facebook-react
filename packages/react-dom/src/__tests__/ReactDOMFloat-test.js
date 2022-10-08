@@ -248,6 +248,60 @@ describe('ReactDOMFloat', () => {
     );
   });
 
+  // @gate enableFloat
+  it('emits resources before everything else when rendering with no head', async () => {
+    function App() {
+      return (
+        <>
+          <title>foo</title>
+          <link rel="preload" href="foo" as="style" />
+        </>
+      );
+    }
+
+    await actIntoEmptyDocument(() => {
+      buffer = `<!DOCTYPE html><html><head>${ReactDOMFizzServer.renderToString(
+        <App />,
+      )}</head><body>foo</body></html>`;
+    });
+    expect(getVisibleChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" href="foo" as="style" />
+          <title>foo</title>
+        </head>
+        <body>foo</body>
+      </html>,
+    );
+  });
+
+  // @gate enableFloat
+  it('emits resources before everything else when rendering with just a head', async () => {
+    function App() {
+      return (
+        <head>
+          <title>foo</title>
+          <link rel="preload" href="foo" as="style" />
+        </head>
+      );
+    }
+
+    await actIntoEmptyDocument(() => {
+      buffer = `<!DOCTYPE html><html>${ReactDOMFizzServer.renderToString(
+        <App />,
+      )}<body>foo</body></html>`;
+    });
+    expect(getVisibleChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" href="foo" as="style" />
+          <title>foo</title>
+        </head>
+        <body>foo</body>
+      </html>,
+    );
+  });
+
   describe('HostResource', () => {
     // @gate enableFloat
     it('warns when you update props to an invalid type', async () => {
@@ -270,7 +324,7 @@ describe('ReactDOMFloat', () => {
           ' valid for a Resource type. Generally Resources are not expected to ever have updated' +
           ' props however in some limited circumstances it can be valid when changing the href.' +
           ' When React encounters props that invalidate the Resource it is the same as not rendering' +
-          ' a Resource at all. valid rel types for Resources are "font" and "style". The previous' +
+          ' a Resource at all. valid rel types for Resources are "stylesheet" and "preload". The previous' +
           ' rel for this instance was "stylesheet". The updated rel is "author" and the updated href is "bar".',
       );
       expect(getVisibleChildren(document)).toEqual(
@@ -404,6 +458,97 @@ describe('ReactDOMFloat', () => {
             <link rel="preload" as="style" href="bar" />
           </head>
           <body />
+        </html>,
+      );
+    });
+
+    // @gate enableFloat
+    it('supports script preloads', async () => {
+      function ServerApp() {
+        ReactDOM.preload('foo', {as: 'script', integrity: 'foo hash'});
+        ReactDOM.preload('bar', {
+          as: 'script',
+          crossOrigin: 'use-credentials',
+          integrity: 'bar hash',
+        });
+        return (
+          <html>
+            <link rel="preload" href="baz" as="script" />
+            <head>
+              <title>hi</title>
+            </head>
+            <body>foo</body>
+          </html>
+        );
+      }
+      function ClientApp() {
+        ReactDOM.preload('foo', {as: 'script', integrity: 'foo hash'});
+        ReactDOM.preload('qux', {as: 'script'});
+        return (
+          <html>
+            <head>
+              <title>hi</title>
+            </head>
+            <body>foo</body>
+            <link
+              rel="preload"
+              href="quux"
+              as="script"
+              crossOrigin=""
+              integrity="quux hash"
+            />
+          </html>
+        );
+      }
+
+      await actIntoEmptyDocument(() => {
+        const {pipe} = ReactDOMFizzServer.renderToPipeableStream(<ServerApp />);
+        pipe(writable);
+      });
+      expect(getVisibleChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="preload" as="script" href="foo" integrity="foo hash" />
+            <link
+              rel="preload"
+              as="script"
+              href="bar"
+              crossorigin="use-credentials"
+              integrity="bar hash"
+            />
+            <link rel="preload" as="script" href="baz" />
+            <title>hi</title>
+          </head>
+          <body>foo</body>
+        </html>,
+      );
+
+      ReactDOMClient.hydrateRoot(document, <ClientApp />);
+      expect(Scheduler).toFlushWithoutYielding();
+
+      expect(getVisibleChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="preload" as="script" href="foo" integrity="foo hash" />
+            <link
+              rel="preload"
+              as="script"
+              href="bar"
+              crossorigin="use-credentials"
+              integrity="bar hash"
+            />
+            <link rel="preload" as="script" href="baz" />
+            <title>hi</title>
+            <link rel="preload" as="script" href="qux" />
+            <link
+              rel="preload"
+              as="script"
+              href="quux"
+              crossorigin=""
+              integrity="quux hash"
+            />
+          </head>
+          <body>foo</body>
         </html>,
       );
     });
@@ -549,6 +694,122 @@ describe('ReactDOMFloat', () => {
           <body />
         </html>,
       );
+    });
+  });
+
+  describe('document encapsulation', () => {
+    // @gate enableFloat
+    it('can support styles inside portals to a shadowRoot', async () => {
+      const shadow = document.body.attachShadow({mode: 'open'});
+      const root = ReactDOMClient.createRoot(container);
+      root.render(
+        <>
+          <link rel="stylesheet" href="foo" precedence="default" />
+          {ReactDOM.createPortal(
+            <div>
+              <link
+                rel="stylesheet"
+                href="foo"
+                data-extra-prop="foo"
+                precedence="different"
+              />
+              shadow
+            </div>,
+            shadow,
+          )}
+          container
+        </>,
+      );
+      expect(Scheduler).toFlushWithoutYielding();
+      expect(getVisibleChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="stylesheet" href="foo" data-rprec="default" />
+            <link rel="preload" href="foo" as="style" />
+          </head>
+          <body>
+            <div id="container">container</div>
+          </body>
+        </html>,
+      );
+      expect(getVisibleChildren(shadow)).toEqual([
+        <link
+          rel="stylesheet"
+          href="foo"
+          data-rprec="different"
+          data-extra-prop="foo"
+        />,
+        <div>shadow</div>,
+      ]);
+    });
+    // @gate enableFloat
+    it('can support styles inside portals to an element in shadowRoots', async () => {
+      const template = document.createElement('template');
+      template.innerHTML =
+        "<div><div id='shadowcontainer1'></div><div id='shadowcontainer2'></div></div>";
+      const shadow = document.body.attachShadow({mode: 'open'});
+      shadow.appendChild(template.content);
+
+      const shadowContainer1 = shadow.getElementById('shadowcontainer1');
+      const shadowContainer2 = shadow.getElementById('shadowcontainer2');
+      const root = ReactDOMClient.createRoot(container);
+      root.render(
+        <>
+          <link rel="stylesheet" href="foo" precedence="default" />
+          {ReactDOM.createPortal(
+            <div>
+              <link rel="stylesheet" href="foo" precedence="one" />
+              <link rel="stylesheet" href="bar" precedence="two" />1
+            </div>,
+            shadow,
+          )}
+          {ReactDOM.createPortal(
+            <div>
+              <link rel="stylesheet" href="foo" precedence="one" />
+              <link rel="stylesheet" href="baz" precedence="one" />2
+            </div>,
+            shadowContainer1,
+          )}
+          {ReactDOM.createPortal(
+            <div>
+              <link rel="stylesheet" href="bar" precedence="two" />
+              <link rel="stylesheet" href="qux" precedence="three" />3
+            </div>,
+            shadowContainer2,
+          )}
+          container
+        </>,
+      );
+      expect(Scheduler).toFlushWithoutYielding();
+      expect(getVisibleChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="stylesheet" href="foo" data-rprec="default" />
+            <link rel="preload" href="foo" as="style" />
+            <link rel="preload" href="bar" as="style" />
+            <link rel="preload" href="baz" as="style" />
+            <link rel="preload" href="qux" as="style" />
+          </head>
+          <body>
+            <div id="container">container</div>
+          </body>
+        </html>,
+      );
+      expect(getVisibleChildren(shadow)).toEqual([
+        <link rel="stylesheet" href="foo" data-rprec="one" />,
+        <link rel="stylesheet" href="baz" data-rprec="one" />,
+        <link rel="stylesheet" href="bar" data-rprec="two" />,
+        <link rel="stylesheet" href="qux" data-rprec="three" />,
+        <div>
+          <div id="shadowcontainer1">
+            <div>2</div>
+          </div>
+          <div id="shadowcontainer2">
+            <div>3</div>
+          </div>
+        </div>,
+        <div>1</div>,
+      ]);
     });
   });
 
@@ -2769,7 +3030,11 @@ describe('ReactDOMFloat', () => {
               (mockError, scenarioNumber) => {
                 if (__DEV__) {
                   expect(mockError.mock.calls[scenarioNumber]).toEqual(
-                    makeArgs('undefined', '"style" and "font"', 'foo'),
+                    makeArgs(
+                      'undefined',
+                      '"style", "font", or "script"',
+                      'foo',
+                    ),
                   );
                 } else {
                   expect(mockError).not.toHaveBeenCalled();
@@ -2782,7 +3047,7 @@ describe('ReactDOMFloat', () => {
               (mockError, scenarioNumber) => {
                 if (__DEV__) {
                   expect(mockError.mock.calls[scenarioNumber]).toEqual(
-                    makeArgs('null', '"style" and "font"', 'bar'),
+                    makeArgs('null', '"style", "font", or "script"', 'bar'),
                   );
                 } else {
                   expect(mockError).not.toHaveBeenCalled();
@@ -2797,7 +3062,7 @@ describe('ReactDOMFloat', () => {
                   expect(mockError.mock.calls[scenarioNumber]).toEqual(
                     makeArgs(
                       'something with type "number"',
-                      '"style" and "font"',
+                      '"style", "font", or "script"',
                       'baz',
                     ),
                   );
@@ -2814,7 +3079,7 @@ describe('ReactDOMFloat', () => {
                   expect(mockError.mock.calls[scenarioNumber]).toEqual(
                     makeArgs(
                       'something with type "object"',
-                      '"style" and "font"',
+                      '"style", "font", or "script"',
                       'qux',
                     ),
                   );
@@ -2829,7 +3094,7 @@ describe('ReactDOMFloat', () => {
               (mockError, scenarioNumber) => {
                 if (__DEV__) {
                   expect(mockError.mock.calls[scenarioNumber]).toEqual(
-                    makeArgs('"bar"', '"style" and "font"', 'quux'),
+                    makeArgs('"bar"', '"style", "font", or "script"', 'quux'),
                   );
                 } else {
                   expect(mockError).not.toHaveBeenCalled();
