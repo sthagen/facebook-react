@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,8 +12,8 @@ export interface Destination {
   destroy(error: Error): mixed;
 }
 
-export type PrecomputedChunk = string;
-export type Chunk = string;
+export opaque type PrecomputedChunk = string;
+export opaque type Chunk = string;
 
 export function scheduleWork(callback: () => void) {
   callback();

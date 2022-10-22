@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,9 +9,22 @@
 
 import type {CacheDispatcher} from 'react-reconciler/src/ReactInternalTypes';
 
+function createSignal(): AbortSignal {
+  return new AbortController().signal;
+}
+
 export const DefaultCacheDispatcher: CacheDispatcher = {
   getCacheSignal(): AbortSignal {
-    throw new Error('Not implemented.');
+    if (!currentCache) {
+      throw new Error('Reading the cache is only supported while rendering.');
+    }
+    let entry: AbortSignal | void = (currentCache.get(createSignal): any);
+    if (entry === undefined) {
+      entry = createSignal();
+      // $FlowFixMe[incompatible-use] found when upgrading Flow
+      currentCache.set(createSignal, entry);
+    }
+    return entry;
   },
   getCacheForType<T>(resourceType: () => T): T {
     if (!currentCache) {

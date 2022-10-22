@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -23,6 +23,7 @@ import {
   enableFilterEmptyStringAttributesDOM,
   enableCustomElementPropertySupport,
   enableFloat,
+  enableFizzExternalRuntime,
 } from 'shared/ReactFeatureFlags';
 
 import type {
@@ -63,7 +64,9 @@ import isArray from 'shared/isArray';
 import {
   prepareToRenderResources,
   finishRenderingResources,
+  resourcesFromElement,
   resourcesFromLink,
+  resourcesFromScript,
   ReactDOMServerDispatcher,
 } from './ReactDOMFloatServer';
 export {
@@ -156,6 +159,7 @@ export function createResponseState(
   bootstrapScriptContent: string | void,
   bootstrapScripts: $ReadOnlyArray<string | BootstrapScriptDescriptor> | void,
   bootstrapModules: $ReadOnlyArray<string | BootstrapScriptDescriptor> | void,
+  externalRuntimeConfig: string | BootstrapScriptDescriptor | void,
 ): ResponseState {
   const idPrefix = identifierPrefix === undefined ? '' : identifierPrefix;
   const inlineScriptWithNonce =
@@ -171,6 +175,29 @@ export function createResponseState(
       stringToChunk(escapeBootstrapScriptContent(bootstrapScriptContent)),
       endInlineScript,
     );
+  }
+  if (enableFizzExternalRuntime) {
+    if (externalRuntimeConfig !== undefined) {
+      const src =
+        typeof externalRuntimeConfig === 'string'
+          ? externalRuntimeConfig
+          : externalRuntimeConfig.src;
+      const integrity =
+        typeof externalRuntimeConfig === 'string'
+          ? undefined
+          : externalRuntimeConfig.integrity;
+      bootstrapChunks.push(
+        startScriptSrc,
+        stringToChunk(escapeTextForBrowser(src)),
+      );
+      if (integrity) {
+        bootstrapChunks.push(
+          scriptIntegirty,
+          stringToChunk(escapeTextForBrowser(integrity)),
+        );
+      }
+      bootstrapChunks.push(endAsyncScript);
+    }
   }
   if (bootstrapScripts !== undefined) {
     for (let i = 0; i < bootstrapScripts.length; i++) {
@@ -1123,6 +1150,26 @@ function pushStartTextArea(
   return null;
 }
 
+function pushMeta(
+  target: Array<Chunk | PrecomputedChunk>,
+  props: Object,
+  responseState: ResponseState,
+  textEmbedded: boolean,
+): ReactNodeList {
+  if (enableFloat && resourcesFromElement('meta', props)) {
+    if (textEmbedded) {
+      // This link follows text but we aren't writing a tag. while not as efficient as possible we need
+      // to be safe and assume text will follow by inserting a textSeparator
+      target.push(textSeparator);
+    }
+    // We have converted this link exclusively to a resource and no longer
+    // need to emit it
+    return null;
+  }
+
+  return pushSelfClosing(target, props, 'meta', responseState);
+}
+
 function pushLink(
   target: Array<Chunk | PrecomputedChunk>,
   props: Object,
@@ -1252,6 +1299,20 @@ function pushStartTitle(
   props: Object,
   responseState: ResponseState,
 ): ReactNodeList {
+  if (enableFloat && resourcesFromElement('title', props)) {
+    // We have converted this link exclusively to a resource and no longer
+    // need to emit it
+    return null;
+  }
+
+  return pushStartTitleImpl(target, props, responseState);
+}
+
+function pushStartTitleImpl(
+  target: Array<Chunk | PrecomputedChunk>,
+  props: Object,
+  responseState: ResponseState,
+): ReactNodeList {
   target.push(startChunkForTag('title'));
 
   let children = null;
@@ -1347,6 +1408,26 @@ function pushStartHtml(
     target.push(DOCTYPE);
   }
   return pushStartGenericElement(target, props, tag, responseState);
+}
+
+function pushStartScript(
+  target: Array<Chunk | PrecomputedChunk>,
+  props: Object,
+  responseState: ResponseState,
+  textEmbedded: boolean,
+): ReactNodeList {
+  if (enableFloat && resourcesFromScript(props)) {
+    if (textEmbedded) {
+      // This link follows text but we aren't writing a tag. while not as efficient as possible we need
+      // to be safe and assume text will follow by inserting a textSeparator
+      target.push(textSeparator);
+    }
+    // We have converted this link exclusively to a resource and no longer
+    // need to emit it
+    return null;
+  }
+
+  return pushStartGenericElement(target, props, 'script', responseState);
 }
 
 function pushStartGenericElement(
@@ -1625,6 +1706,10 @@ export function pushStartInstance(
       return pushStartTitle(target, props, responseState);
     case 'link':
       return pushLink(target, props, responseState, textEmbedded);
+    case 'script':
+      return pushStartScript(target, props, responseState, textEmbedded);
+    case 'meta':
+      return pushMeta(target, props, responseState, textEmbedded);
     // Newline eating tags
     case 'listing':
     case 'pre': {
@@ -1639,7 +1724,6 @@ export function pushStartInstance(
     case 'hr':
     case 'img':
     case 'keygen':
-    case 'meta':
     case 'param':
     case 'source':
     case 'track':
@@ -2235,57 +2319,129 @@ function escapeJSObjectForInstructionScripts(input: Object): string {
   });
 }
 
+const precedencePlaceholderStart = stringToPrecomputedChunk(
+  '<style data-precedence="',
+);
+const precedencePlaceholderEnd = stringToPrecomputedChunk('"></style>');
+
 export function writeInitialResources(
   destination: Destination,
   resources: Resources,
   responseState: ResponseState,
 ): boolean {
-  const explicitPreloadsTarget = [];
-  const remainingTarget = [];
+  function flushLinkResource(resource) {
+    if (!resource.flushed) {
+      pushLinkImpl(target, resource.props, responseState);
+      resource.flushed = true;
+    }
+  }
 
-  const {precedences, explicitPreloads, implicitPreloads} = resources;
+  const target = [];
+
+  const {
+    charset,
+    preconnects,
+    fontPreloads,
+    precedences,
+    usedStylePreloads,
+    scripts,
+    usedScriptPreloads,
+    explicitStylePreloads,
+    explicitScriptPreloads,
+    headResources,
+  } = resources;
+
+  if (charset) {
+    pushSelfClosing(target, charset.props, 'meta', responseState);
+    charset.flushed = true;
+    resources.charset = null;
+  }
+
+  preconnects.forEach(r => {
+    // font preload Resources should not already be flushed so we elide this check
+    pushLinkImpl(target, r.props, responseState);
+    r.flushed = true;
+  });
+  preconnects.clear();
+
+  fontPreloads.forEach(r => {
+    // font preload Resources should not already be flushed so we elide this check
+    pushLinkImpl(target, r.props, responseState);
+    r.flushed = true;
+  });
+  fontPreloads.clear();
 
   // Flush stylesheets first by earliest precedence
-  precedences.forEach(precedenceResources => {
-    precedenceResources.forEach(resource => {
-      // resources should not already be flushed so we elide this check
-      pushLinkImpl(remainingTarget, resource.props, responseState);
-      resource.flushed = true;
-      resource.inShell = true;
-      resource.hint.flushed = true;
-    });
-  });
-
-  explicitPreloads.forEach(resource => {
-    if (!resource.flushed) {
-      pushLinkImpl(explicitPreloadsTarget, resource.props, responseState);
-      resource.flushed = true;
+  precedences.forEach((p, precedence) => {
+    if (p.size) {
+      p.forEach(r => {
+        // resources should not already be flushed so we elide this check
+        pushLinkImpl(target, r.props, responseState);
+        r.flushed = true;
+        r.inShell = true;
+        r.hint.flushed = true;
+      });
+      p.clear();
+    } else {
+      target.push(
+        precedencePlaceholderStart,
+        stringToChunk(escapeTextForBrowser(precedence)),
+        precedencePlaceholderEnd,
+      );
     }
   });
-  explicitPreloads.clear();
 
-  implicitPreloads.forEach(resource => {
-    if (!resource.flushed) {
-      pushLinkImpl(remainingTarget, resource.props, responseState);
-      resource.flushed = true;
-    }
+  usedStylePreloads.forEach(flushLinkResource);
+  usedStylePreloads.clear();
+
+  scripts.forEach(r => {
+    // should never be flushed already
+    pushStartGenericElement(target, r.props, 'script', responseState);
+    pushEndInstance(target, target, 'script', r.props);
+    r.flushed = true;
+    r.hint.flushed = true;
   });
-  implicitPreloads.clear();
+  scripts.clear();
+
+  usedScriptPreloads.forEach(flushLinkResource);
+  usedScriptPreloads.clear();
+
+  explicitStylePreloads.forEach(flushLinkResource);
+  explicitStylePreloads.clear();
+
+  explicitScriptPreloads.forEach(flushLinkResource);
+  explicitScriptPreloads.clear();
+
+  headResources.forEach(r => {
+    switch (r.type) {
+      case 'title': {
+        pushStartTitleImpl(target, r.props, responseState);
+        if (typeof r.props.children === 'string') {
+          target.push(stringToChunk(escapeTextForBrowser(r.props.children)));
+        }
+        pushEndInstance(target, target, 'title', r.props);
+        break;
+      }
+      case 'meta': {
+        pushSelfClosing(target, r.props, 'meta', responseState);
+        break;
+      }
+      case 'link': {
+        pushLinkImpl(target, r.props, responseState);
+        break;
+      }
+    }
+    r.flushed = true;
+  });
+  headResources.clear();
 
   let i;
   let r = true;
-  for (i = 0; i < explicitPreloadsTarget.length - 1; i++) {
-    writeChunk(destination, explicitPreloadsTarget[i]);
+  for (i = 0; i < target.length - 1; i++) {
+    writeChunk(destination, target[i]);
   }
-  if (i < explicitPreloadsTarget.length) {
-    r = writeChunkAndReturn(destination, explicitPreloadsTarget[i]);
-  }
-
-  for (i = 0; i < remainingTarget.length - 1; i++) {
-    writeChunk(destination, remainingTarget[i]);
-  }
-  if (i < remainingTarget.length) {
-    r = writeChunkAndReturn(destination, remainingTarget[i]);
+  if (i < target.length) {
+    r = writeChunkAndReturn(destination, target[i]);
   }
   return r;
 }
@@ -2295,33 +2451,100 @@ export function writeImmediateResources(
   resources: Resources,
   responseState: ResponseState,
 ): boolean {
-  const {explicitPreloads, implicitPreloads} = resources;
+  function flushLinkResource(resource) {
+    if (!resource.flushed) {
+      pushLinkImpl(target, resource.props, responseState);
+      resource.flushed = true;
+    }
+  }
+
   const target = [];
 
-  explicitPreloads.forEach(resource => {
-    if (!resource.flushed) {
-      pushLinkImpl(target, resource.props, responseState);
-      resource.flushed = true;
-    }
-  });
-  explicitPreloads.clear();
+  const {
+    charset,
+    preconnects,
+    fontPreloads,
+    usedStylePreloads,
+    scripts,
+    usedScriptPreloads,
+    explicitStylePreloads,
+    explicitScriptPreloads,
+    headResources,
+  } = resources;
 
-  implicitPreloads.forEach(resource => {
-    if (!resource.flushed) {
-      pushLinkImpl(target, resource.props, responseState);
-      resource.flushed = true;
-    }
-  });
-  implicitPreloads.clear();
+  if (charset) {
+    pushSelfClosing(target, charset.props, 'meta', responseState);
+    charset.flushed = true;
+    resources.charset = null;
+  }
 
-  let i = 0;
-  for (; i < target.length - 1; i++) {
+  preconnects.forEach(r => {
+    // font preload Resources should not already be flushed so we elide this check
+    pushLinkImpl(target, r.props, responseState);
+    r.flushed = true;
+  });
+  preconnects.clear();
+
+  fontPreloads.forEach(r => {
+    // font preload Resources should not already be flushed so we elide this check
+    pushLinkImpl(target, r.props, responseState);
+    r.flushed = true;
+  });
+  fontPreloads.clear();
+
+  usedStylePreloads.forEach(flushLinkResource);
+  usedStylePreloads.clear();
+
+  scripts.forEach(r => {
+    // should never be flushed already
+    pushStartGenericElement(target, r.props, 'script', responseState);
+    pushEndInstance(target, target, 'script', r.props);
+    r.flushed = true;
+    r.hint.flushed = true;
+  });
+  scripts.clear();
+
+  usedScriptPreloads.forEach(flushLinkResource);
+  usedScriptPreloads.clear();
+
+  explicitStylePreloads.forEach(flushLinkResource);
+  explicitStylePreloads.clear();
+
+  explicitScriptPreloads.forEach(flushLinkResource);
+  explicitScriptPreloads.clear();
+
+  headResources.forEach(r => {
+    switch (r.type) {
+      case 'title': {
+        pushStartTitleImpl(target, r.props, responseState);
+        if (typeof r.props.children === 'string') {
+          target.push(stringToChunk(escapeTextForBrowser(r.props.children)));
+        }
+        pushEndInstance(target, target, 'title', r.props);
+        break;
+      }
+      case 'meta': {
+        pushSelfClosing(target, r.props, 'meta', responseState);
+        break;
+      }
+      case 'link': {
+        pushLinkImpl(target, r.props, responseState);
+        break;
+      }
+    }
+    r.flushed = true;
+  });
+  headResources.clear();
+
+  let i;
+  let r = true;
+  for (i = 0; i < target.length - 1; i++) {
     writeChunk(destination, target[i]);
   }
   if (i < target.length) {
-    return writeChunkAndReturn(destination, target[i]);
+    r = writeChunkAndReturn(destination, target[i]);
   }
-  return false;
+  return r;
 }
 
 function hasStyleResourceDependencies(
@@ -2434,7 +2657,7 @@ function writeStyleResourceDependency(
         case 'href':
         case 'rel':
         case 'precedence':
-        case 'data-rprec': {
+        case 'data-precedence': {
           break;
         }
         case 'children':

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -30,7 +30,6 @@ import {
 import {
   createRootStrictEffectsByDefault,
   enableCache,
-  enableStrictEffects,
   enableProfilerTimer,
   enableScopeAPI,
   enableLegacyHidden,
@@ -73,7 +72,6 @@ import {
 } from './ReactWorkTags';
 import {OffscreenVisible} from './ReactFiberOffscreenComponent';
 import getComponentNameFromFiber from 'react-reconciler/src/getComponentNameFromFiber';
-
 import {isDevToolsPresent} from './ReactFiberDevToolsHook.new';
 import {
   resolveClassForHotReloading,
@@ -109,6 +107,7 @@ import {
   REACT_TRACING_MARKER_TYPE,
 } from 'shared/ReactSymbols';
 import {TransitionTracingMarker} from './ReactFiberTracingMarkerComponent.new';
+import {detachOffscreenInstance} from './ReactFiberCommitWork.new';
 
 export type {Fiber};
 
@@ -449,13 +448,7 @@ export function createHostRootFiber(
   let mode;
   if (tag === ConcurrentRoot) {
     mode = ConcurrentMode;
-    if (isStrictMode === true) {
-      mode |= StrictLegacyMode;
-
-      if (enableStrictEffects) {
-        mode |= StrictEffectsMode;
-      }
-    } else if (enableStrictEffects && createRootStrictEffectsByDefault) {
+    if (isStrictMode === true || createRootStrictEffectsByDefault) {
       mode |= StrictLegacyMode | StrictEffectsMode;
     }
     if (
@@ -531,7 +524,7 @@ export function createFiberFromTypeAndProps(
       case REACT_STRICT_MODE_TYPE:
         fiberTag = Mode;
         mode |= StrictLegacyMode;
-        if (enableStrictEffects && (mode & ConcurrentMode) !== NoMode) {
+        if ((mode & ConcurrentMode) !== NoMode) {
           // Strict effects should never run on legacy roots
           mode |= StrictEffectsMode;
         }
@@ -755,6 +748,8 @@ export function createFiberFromOffscreen(
     _pendingMarkers: null,
     _retryCache: null,
     _transitions: null,
+    _current: null,
+    detach: () => detachOffscreenInstance(primaryChildInstance),
   };
   fiber.stateNode = primaryChildInstance;
   return fiber;
@@ -776,6 +771,8 @@ export function createFiberFromLegacyHidden(
     _pendingMarkers: null,
     _transitions: null,
     _retryCache: null,
+    _current: null,
+    detach: () => detachOffscreenInstance(instance),
   };
   fiber.stateNode = instance;
   return fiber;

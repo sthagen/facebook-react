@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,12 +11,12 @@ import type {
   ReactProviderType,
   ReactContext,
   ReactNodeList,
+  MutableSource,
 } from 'shared/ReactTypes';
 import type {LazyComponent as LazyComponentType} from 'react/src/ReactLazy';
 import type {Fiber, FiberRoot} from './ReactInternalTypes';
 import type {TypeOfMode} from './ReactTypeOfMode';
 import type {Lanes, Lane} from './ReactFiberLane.new';
-import type {MutableSource} from 'shared/ReactTypes';
 import type {
   SuspenseState,
   SuspenseListRenderState,
@@ -29,6 +29,7 @@ import type {
   OffscreenQueue,
   OffscreenInstance,
 } from './ReactFiberOffscreenComponent';
+import {OffscreenDetached} from './ReactFiberOffscreenComponent';
 import type {
   Cache,
   CacheComponentState,
@@ -37,7 +38,6 @@ import type {
 import type {UpdateQueue} from './ReactFiberClassUpdateQueue.new';
 import type {RootState} from './ReactFiberRoot.new';
 import type {TracingMarkerInstance} from './ReactFiberTracingMarkerComponent.new';
-
 import checkPropTypes from 'shared/checkPropTypes';
 import {
   markComponentRenderStarted,
@@ -688,7 +688,10 @@ function updateOffscreenComponent(
 
   if (
     nextProps.mode === 'hidden' ||
-    (enableLegacyHidden && nextProps.mode === 'unstable-defer-without-hiding')
+    (enableLegacyHidden &&
+      nextProps.mode === 'unstable-defer-without-hiding') ||
+    // TODO: remove read from stateNode.
+    workInProgress.stateNode._visibility & OffscreenDetached
   ) {
     // Rendering a hidden tree.
 
@@ -1596,13 +1599,13 @@ function updateHostResource(current, workInProgress, renderLanes) {
     workInProgress.pendingProps,
     currentProps,
   );
-  reconcileChildren(
-    current,
-    workInProgress,
-    workInProgress.pendingProps.children,
-    renderLanes,
-  );
-  return workInProgress.child;
+  // Resources never have reconciler managed children. It is possible for
+  // the host implementation of getResource to consider children in the
+  // resource construction but they will otherwise be discarded. In practice
+  // this precludes all but the simplest children and Host specific warnings
+  // should be implemented to warn when children are passsed when otherwise not
+  // expected
+  return null;
 }
 
 function updateHostSingleton(

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,17 +13,21 @@ import ReactDOMSharedInternals from 'shared/ReactDOMSharedInternals.js';
 const {Dispatcher} = ReactDOMSharedInternals;
 import {DOCUMENT_NODE} from '../shared/HTMLNodeType';
 import {
-  validateUnmatchedLinkResourceProps,
+  warnOnMissingHrefAndRel,
   validatePreloadResourceDifference,
-  validateHrefKeyedUpdatedProps,
+  validateURLKeyedUpdatedProps,
   validateStyleResourceDifference,
+  validateScriptResourceDifference,
   validateLinkPropsForStyleResource,
   validateLinkPropsForPreloadResource,
   validatePreloadArguments,
   validatePreinitArguments,
 } from '../shared/ReactDOMResourceValidation';
 import {createElement, setInitialProperties} from './ReactDOMComponent';
-import {getStylesFromRoot} from './ReactDOMComponentTree';
+import {
+  getResourcesFromRoot,
+  markNodeAsResource,
+} from './ReactDOMComponentTree';
 import {HTML_NAMESPACE} from '../shared/DOMNamespaces';
 import {getCurrentRootHostContainer} from 'react-reconciler/src/ReactFiberHostContext';
 
@@ -33,7 +37,6 @@ type ResourceType = 'style' | 'font' | 'script';
 
 type PreloadProps = {
   rel: 'preload',
-  as: ResourceType,
   href: string,
   [string]: mixed,
 };
@@ -48,10 +51,10 @@ type PreloadResource = {
 type StyleProps = {
   rel: 'stylesheet',
   href: string,
-  'data-rprec': string,
+  'data-precedence': string,
   [string]: mixed,
 };
-export type StyleResource = {
+type StyleResource = {
   type: 'style',
 
   // Ref count for resource
@@ -72,10 +75,71 @@ export type StyleResource = {
   instance: ?Element,
   root: FloatRoot,
 };
+type ScriptProps = {
+  src: string,
+  [string]: mixed,
+};
+type ScriptResource = {
+  type: 'script',
+  src: string,
+  props: ScriptProps,
+
+  instance: ?Element,
+  root: FloatRoot,
+};
+
+type TitleProps = {
+  [string]: mixed,
+};
+type TitleResource = {
+  type: 'title',
+  props: TitleProps,
+
+  count: number,
+  instance: ?Element,
+  root: Document,
+};
+
+type MetaProps = {
+  [string]: mixed,
+};
+type MetaResource = {
+  type: 'meta',
+  matcher: string,
+  property: ?string,
+  parentResource: ?MetaResource,
+  props: MetaProps,
+
+  count: number,
+  instance: ?Element,
+  root: Document,
+};
+
+type LinkProps = {
+  href: string,
+  rel: string,
+  [string]: mixed,
+};
+type LinkResource = {
+  type: 'link',
+  props: LinkProps,
+
+  count: number,
+  instance: ?Element,
+  root: Document,
+};
 
 type Props = {[string]: mixed};
 
-type Resource = StyleResource | PreloadResource;
+type HeadResource = TitleResource | MetaResource | LinkResource;
+type Resource = StyleResource | ScriptResource | PreloadResource | HeadResource;
+
+export type RootResources = {
+  styles: Map<string, StyleResource>,
+  scripts: Map<string, ScriptResource>,
+  head: Map<string, HeadResource>,
+  lastStructuredMeta: Map<string, MetaResource>,
+};
 
 // Brief on purpose due to insertion by script when streaming late boundaries
 // s = Status
@@ -202,11 +266,12 @@ function preloadPropsFromPreloadOptions(
 //      ReactDOM.preinit
 // --------------------------------------
 
-type PreinitAs = 'style';
+type PreinitAs = 'style' | 'script';
 type PreinitOptions = {
   as: PreinitAs,
-  crossOrigin?: string,
   precedence?: string,
+  crossOrigin?: string,
+  integrity?: string,
 };
 function preinit(href: string, options: PreinitOptions) {
   if (__DEV__) {
@@ -243,7 +308,7 @@ function preinit(href: string, options: PreinitOptions) {
 
     switch (as) {
       case 'style': {
-        const styleResources = getStylesFromRoot(resourceRoot);
+        const styleResources = getResourcesFromRoot(resourceRoot).styles;
         const precedence = options.precedence || 'default';
         let resource = styleResources.get(href);
         if (resource) {
@@ -270,6 +335,28 @@ function preinit(href: string, options: PreinitOptions) {
           );
         }
         acquireResource(resource);
+        return;
+      }
+      case 'script': {
+        const src = href;
+        const scriptResources = getResourcesFromRoot(resourceRoot).scripts;
+        let resource = scriptResources.get(src);
+        if (resource) {
+          if (__DEV__) {
+            const latestProps = scriptPropsFromPreinitOptions(src, options);
+            validateScriptResourceDifference(resource.props, latestProps);
+          }
+        } else {
+          const resourceProps = scriptPropsFromPreinitOptions(src, options);
+          resource = createScriptResource(
+            scriptResources,
+            resourceRoot,
+            src,
+            resourceProps,
+          );
+        }
+        acquireResource(resource);
+        return;
       }
     }
   }
@@ -285,6 +372,7 @@ function preloadPropsFromPreinitOptions(
     rel: 'preload',
     as,
     crossOrigin: as === 'font' ? '' : options.crossOrigin,
+    integrity: options.integrity,
   };
 }
 
@@ -296,8 +384,20 @@ function stylePropsFromPreinitOptions(
   return {
     rel: 'stylesheet',
     href,
-    'data-rprec': precedence,
+    'data-precedence': precedence,
     crossOrigin: options.crossOrigin,
+  };
+}
+
+function scriptPropsFromPreinitOptions(
+  src: string,
+  options: PreinitOptions,
+): ScriptProps {
+  return {
+    src,
+    async: true,
+    crossOrigin: options.crossOrigin,
+    integrity: options.integrity,
   };
 }
 
@@ -314,9 +414,17 @@ type StyleQualifyingProps = {
 type PreloadQualifyingProps = {
   rel: 'preload',
   href: string,
-  as: ResourceType,
   [string]: mixed,
 };
+type ScriptQualifyingProps = {
+  src: string,
+  async: true,
+  [string]: mixed,
+};
+
+function getTitleKey(child: string | number): string {
+  return 'title:' + child;
+}
 
 // This function is called in begin work and we should always have a currentDocument set
 export function getResource(
@@ -331,17 +439,122 @@ export function getResource(
     );
   }
   switch (type) {
+    case 'meta': {
+      let matcher, propertyString, parentResource;
+      const {
+        charSet,
+        content,
+        httpEquiv,
+        name,
+        itemProp,
+        property,
+      } = pendingProps;
+      const headRoot: Document = getDocumentFromRoot(resourceRoot);
+      const {head: headResources, lastStructuredMeta} = getResourcesFromRoot(
+        headRoot,
+      );
+      if (typeof charSet === 'string') {
+        matcher = 'meta[charset]';
+      } else if (typeof content === 'string') {
+        if (typeof httpEquiv === 'string') {
+          matcher = `meta[http-equiv="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            httpEquiv,
+          )}"][content="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            content,
+          )}"]`;
+        } else if (typeof property === 'string') {
+          propertyString = property;
+          matcher = `meta[property="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            property,
+          )}"][content="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            content,
+          )}"]`;
+
+          const parentPropertyPath = property
+            .split(':')
+            .slice(0, -1)
+            .join(':');
+          parentResource = lastStructuredMeta.get(parentPropertyPath);
+          if (parentResource) {
+            // When using parentResource the matcher is not functional for locating
+            // the instance in the DOM but it still serves as a unique key.
+            matcher = parentResource.matcher + matcher;
+          }
+        } else if (typeof name === 'string') {
+          matcher = `meta[name="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            name,
+          )}"][content="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            content,
+          )}"]`;
+        } else if (typeof itemProp === 'string') {
+          matcher = `meta[itemprop="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            itemProp,
+          )}"][content="${escapeSelectorAttributeValueInsideDoubleQuotes(
+            content,
+          )}"]`;
+        }
+      }
+      if (matcher) {
+        let resource = headResources.get(matcher);
+        if (!resource) {
+          resource = {
+            type: 'meta',
+            matcher,
+            property: propertyString,
+            parentResource,
+            props: Object.assign({}, pendingProps),
+            count: 0,
+            instance: null,
+            root: headRoot,
+          };
+          headResources.set(matcher, resource);
+        }
+        if (typeof resource.property === 'string') {
+          // We cast because flow doesn't know that this resource must be a Meta resource
+          lastStructuredMeta.set(resource.property, (resource: any));
+        }
+        return resource;
+      }
+      return null;
+    }
+    case 'title': {
+      let child = pendingProps.children;
+      if (Array.isArray(child) && child.length === 1) {
+        child = child[0];
+      }
+      if (typeof child === 'string' || typeof child === 'number') {
+        const headRoot: Document = getDocumentFromRoot(resourceRoot);
+        const headResources = getResourcesFromRoot(headRoot).head;
+        const key = getTitleKey(child);
+        let resource = headResources.get(key);
+        if (!resource) {
+          const titleProps = titlePropsFromRawProps(child, pendingProps);
+          resource = {
+            type: 'title',
+            props: titleProps,
+            count: 0,
+            instance: null,
+            root: headRoot,
+          };
+          headResources.set(key, resource);
+        }
+        return resource;
+      }
+      return null;
+    }
     case 'link': {
       const {rel} = pendingProps;
       switch (rel) {
         case 'stylesheet': {
-          const styleResources = getStylesFromRoot(resourceRoot);
+          const styleResources = getResourcesFromRoot(resourceRoot).styles;
           let didWarn;
           if (__DEV__) {
             if (currentProps) {
-              didWarn = validateHrefKeyedUpdatedProps(
+              didWarn = validateURLKeyedUpdatedProps(
                 pendingProps,
                 currentProps,
+                'style',
+                'href',
               );
             }
             if (!didWarn) {
@@ -360,7 +573,7 @@ export function getResource(
                 if (!didWarn) {
                   const latestProps = stylePropsFromRawProps(styleRawProps);
                   if ((resource: any)._dev_preload_props) {
-                    adoptPreloadProps(
+                    adoptPreloadPropsForStyle(
                       latestProps,
                       (resource: any)._dev_preload_props,
                     );
@@ -387,8 +600,8 @@ export function getResource(
           if (__DEV__) {
             validateLinkPropsForPreloadResource(pendingProps);
           }
-          const {href, as} = pendingProps;
-          if (typeof href === 'string' && isResourceAsType(as)) {
+          const {href} = pendingProps;
+          if (typeof href === 'string') {
             // We've asserted all the specific types for PreloadQualifyingProps
             const preloadRawProps: PreloadQualifyingProps = (pendingProps: any);
             let resource = preloadResources.get(href);
@@ -417,12 +630,77 @@ export function getResource(
           return null;
         }
         default: {
+          const {href, sizes, media} = pendingProps;
+          if (typeof rel === 'string' && typeof href === 'string') {
+            const sizeKey =
+              '::sizes:' + (typeof sizes === 'string' ? sizes : '');
+            const mediaKey =
+              '::media:' + (typeof media === 'string' ? media : '');
+            const key = 'rel:' + rel + '::href:' + href + sizeKey + mediaKey;
+            const headRoot = getDocumentFromRoot(resourceRoot);
+            const headResources = getResourcesFromRoot(headRoot).head;
+            let resource = headResources.get(key);
+            if (!resource) {
+              resource = {
+                type: 'link',
+                props: Object.assign({}, pendingProps),
+                count: 0,
+                instance: null,
+                root: headRoot,
+              };
+              headResources.set(key, resource);
+            }
+            return resource;
+          }
           if (__DEV__) {
-            validateUnmatchedLinkResourceProps(pendingProps, currentProps);
+            warnOnMissingHrefAndRel(pendingProps, currentProps);
           }
           return null;
         }
       }
+    }
+    case 'script': {
+      const scriptResources = getResourcesFromRoot(resourceRoot).scripts;
+      let didWarn;
+      if (__DEV__) {
+        if (currentProps) {
+          didWarn = validateURLKeyedUpdatedProps(
+            pendingProps,
+            currentProps,
+            'script',
+            'src',
+          );
+        }
+      }
+      const {src, async} = pendingProps;
+      if (async && typeof src === 'string') {
+        const scriptRawProps: ScriptQualifyingProps = (pendingProps: any);
+        let resource = scriptResources.get(src);
+        if (resource) {
+          if (__DEV__) {
+            if (!didWarn) {
+              const latestProps = scriptPropsFromRawProps(scriptRawProps);
+              if ((resource: any)._dev_preload_props) {
+                adoptPreloadPropsForScript(
+                  latestProps,
+                  (resource: any)._dev_preload_props,
+                );
+              }
+              validateScriptResourceDifference(resource.props, latestProps);
+            }
+          }
+        } else {
+          const resourceProps = scriptPropsFromRawProps(scriptRawProps);
+          resource = createScriptResource(
+            scriptResources,
+            resourceRoot,
+            src,
+            resourceProps,
+          );
+        }
+        return resource;
+      }
+      return null;
     }
     default: {
       throw new Error(
@@ -438,11 +716,25 @@ function preloadPropsFromRawProps(
   return Object.assign({}, rawBorrowedProps);
 }
 
+function titlePropsFromRawProps(
+  child: string | number,
+  rawProps: Props,
+): TitleProps {
+  const props: TitleProps = Object.assign({}, rawProps);
+  props.children = child;
+  return props;
+}
+
 function stylePropsFromRawProps(rawProps: StyleQualifyingProps): StyleProps {
   const props: StyleProps = Object.assign({}, rawProps);
-  props['data-rprec'] = rawProps.precedence;
+  props['data-precedence'] = rawProps.precedence;
   props.precedence = null;
 
+  return props;
+}
+
+function scriptPropsFromRawProps(rawProps: ScriptQualifyingProps): ScriptProps {
+  const props: ScriptProps = Object.assign({}, rawProps);
   return props;
 }
 
@@ -452,8 +744,16 @@ function stylePropsFromRawProps(rawProps: StyleQualifyingProps): StyleProps {
 
 export function acquireResource(resource: Resource): Instance {
   switch (resource.type) {
+    case 'title':
+    case 'link':
+    case 'meta': {
+      return acquireHeadResource(resource);
+    }
     case 'style': {
       return acquireStyleResource(resource);
+    }
+    case 'script': {
+      return acquireScriptResource(resource);
     }
     case 'preload': {
       return resource.instance;
@@ -466,11 +766,29 @@ export function acquireResource(resource: Resource): Instance {
   }
 }
 
-export function releaseResource(resource: Resource) {
+export function releaseResource(resource: Resource): void {
   switch (resource.type) {
+    case 'link':
+    case 'title':
+    case 'meta': {
+      return releaseHeadResource(resource);
+    }
     case 'style': {
       resource.count--;
+      return;
     }
+  }
+}
+
+function releaseHeadResource(resource: HeadResource): void {
+  if (--resource.count === 0) {
+    // the instance will have existed since we acquired it
+    const instance: Instance = (resource.instance: any);
+    const parent = instance.parentNode;
+    if (parent) {
+      parent.removeChild(instance);
+    }
+    resource.instance = null;
   }
 }
 
@@ -481,6 +799,7 @@ function createResourceInstance(
 ): Instance {
   const element = createElement(type, props, ownerDocument, HTML_NAMESPACE);
   setInitialProperties(element, type, props);
+  markNodeAsResource(element);
   return element;
 }
 
@@ -558,7 +877,7 @@ function createStyleResource(
       // the preload pathways. For instance if you have diffreent crossOrigin attributes for a preload
       // and a stylesheet the stylesheet will make a new request even if the preload had already loaded
       const preloadProps = hint.props;
-      adoptPreloadProps(resource.props, hint.props);
+      adoptPreloadPropsForStyle(resource.props, hint.props);
       if (__DEV__) {
         (resource: any)._dev_preload_props = preloadProps;
       }
@@ -568,7 +887,7 @@ function createStyleResource(
   return resource;
 }
 
-function adoptPreloadProps(
+function adoptPreloadPropsForStyle(
   styleProps: StyleProps,
   preloadProps: PreloadProps,
 ): void {
@@ -576,7 +895,6 @@ function adoptPreloadProps(
     styleProps.crossOrigin = preloadProps.crossOrigin;
   if (styleProps.referrerPolicy == null)
     styleProps.referrerPolicy = preloadProps.referrerPolicy;
-  if (styleProps.media == null) styleProps.media = preloadProps.media;
   if (styleProps.title == null) styleProps.title = preloadProps.title;
 }
 
@@ -610,6 +928,65 @@ function preloadPropsFromStyleProps(props: StyleProps): PreloadProps {
   };
 }
 
+function createScriptResource(
+  scriptResources: Map<string, ScriptResource>,
+  root: FloatRoot,
+  src: string,
+  props: ScriptProps,
+): ScriptResource {
+  if (__DEV__) {
+    if (scriptResources.has(src)) {
+      console.error(
+        'createScriptResource was called when a script Resource matching the same src already exists. This is a bug in React.',
+      );
+    }
+  }
+
+  const limitedEscapedSrc = escapeSelectorAttributeValueInsideDoubleQuotes(src);
+  const existingEl = root.querySelector(
+    `script[async][src="${limitedEscapedSrc}"]`,
+  );
+  const resource = {
+    type: 'script',
+    src,
+    props,
+    root,
+    instance: existingEl || null,
+  };
+  scriptResources.set(src, resource);
+
+  if (!existingEl) {
+    const hint = preloadResources.get(src);
+    if (hint) {
+      // If a preload for this style Resource already exists there are certain props we want to adopt
+      // on the style Resource, primarily focussed on making sure the style network pathways utilize
+      // the preload pathways. For instance if you have diffreent crossOrigin attributes for a preload
+      // and a stylesheet the stylesheet will make a new request even if the preload had already loaded
+      const preloadProps = hint.props;
+      adoptPreloadPropsForScript(props, hint.props);
+      if (__DEV__) {
+        (resource: any)._dev_preload_props = preloadProps;
+      }
+    }
+  } else {
+    markNodeAsResource(existingEl);
+  }
+
+  return resource;
+}
+
+function adoptPreloadPropsForScript(
+  scriptProps: ScriptProps,
+  preloadProps: PreloadProps,
+): void {
+  if (scriptProps.crossOrigin == null)
+    scriptProps.crossOrigin = preloadProps.crossOrigin;
+  if (scriptProps.referrerPolicy == null)
+    scriptProps.referrerPolicy = preloadProps.referrerPolicy;
+  if (scriptProps.integrity == null)
+    scriptProps.referrerPolicy = preloadProps.integrity;
+}
+
 function createPreloadResource(
   ownerDocument: Document,
   href: string,
@@ -623,7 +1000,9 @@ function createPreloadResource(
   );
   if (!element) {
     element = createResourceInstance('link', props, ownerDocument);
-    insertPreloadInstance(element, ownerDocument);
+    insertResourceInstanceBefore(ownerDocument, element, null);
+  } else {
+    markNodeAsResource(element);
   }
   return {
     type: 'preload',
@@ -634,17 +1013,138 @@ function createPreloadResource(
   };
 }
 
+function acquireHeadResource(resource: HeadResource): Instance {
+  resource.count++;
+  let instance = resource.instance;
+  if (!instance) {
+    const {props, root, type} = resource;
+    switch (type) {
+      case 'title': {
+        const titles = root.querySelectorAll('title');
+        for (let i = 0; i < titles.length; i++) {
+          if (titles[i].textContent === props.children) {
+            instance = resource.instance = titles[i];
+            markNodeAsResource(instance);
+            return instance;
+          }
+        }
+        instance = resource.instance = createResourceInstance(
+          type,
+          props,
+          root,
+        );
+        insertResourceInstanceBefore(root, instance, titles.item(0));
+        break;
+      }
+      case 'meta': {
+        let insertBefore = null;
+
+        const metaResource: MetaResource = (resource: any);
+        const {matcher, property, parentResource} = metaResource;
+
+        if (parentResource && typeof property === 'string') {
+          // This resoruce is a structured meta type with a parent.
+          // Instead of using the matcher we just traverse forward
+          // siblings of the parent instance until we find a match
+          // or exhaust.
+          const parent = parentResource.instance;
+          if (parent) {
+            let node = null;
+            let nextNode = (insertBefore = parent.nextSibling);
+            while ((node = nextNode)) {
+              nextNode = node.nextSibling;
+              if (node.nodeName === 'META') {
+                const meta: Element = (node: any);
+                const propertyAttr = meta.getAttribute('property');
+                if (typeof propertyAttr !== 'string') {
+                  continue;
+                } else if (
+                  propertyAttr === property &&
+                  meta.getAttribute('content') === props.content
+                ) {
+                  resource.instance = meta;
+                  markNodeAsResource(meta);
+                  return meta;
+                } else if (property.startsWith(propertyAttr + ':')) {
+                  // This meta starts a new instance of a parent structure for this meta type
+                  // We need to halt our search here because even if we find a later match it
+                  // is for a different parent element
+                  break;
+                }
+              }
+            }
+          }
+        } else if ((instance = root.querySelector(matcher))) {
+          resource.instance = instance;
+          markNodeAsResource(instance);
+          return instance;
+        }
+        instance = resource.instance = createResourceInstance(
+          type,
+          props,
+          root,
+        );
+        insertResourceInstanceBefore(root, instance, insertBefore);
+        break;
+      }
+      case 'link': {
+        const linkProps: LinkProps = (props: any);
+        const limitedEscapedRel = escapeSelectorAttributeValueInsideDoubleQuotes(
+          linkProps.rel,
+        );
+        const limitedEscapedHref = escapeSelectorAttributeValueInsideDoubleQuotes(
+          linkProps.href,
+        );
+        let selector = `link[rel="${limitedEscapedRel}"][href="${limitedEscapedHref}"]`;
+        if (typeof linkProps.sizes === 'string') {
+          const limitedEscapedSizes = escapeSelectorAttributeValueInsideDoubleQuotes(
+            linkProps.sizes,
+          );
+          selector += `[sizes="${limitedEscapedSizes}"]`;
+        }
+        if (typeof linkProps.media === 'string') {
+          const limitedEscapedMedia = escapeSelectorAttributeValueInsideDoubleQuotes(
+            linkProps.media,
+          );
+          selector += `[media="${limitedEscapedMedia}"]`;
+        }
+        const existingEl = root.querySelector(selector);
+        if (existingEl) {
+          instance = resource.instance = existingEl;
+          markNodeAsResource(instance);
+          return instance;
+        }
+        instance = resource.instance = createResourceInstance(
+          type,
+          props,
+          root,
+        );
+        insertResourceInstanceBefore(root, instance, null);
+        return instance;
+      }
+      default: {
+        throw new Error(
+          `acquireHeadResource encountered a resource type it did not expect: "${type}". This is a bug in React.`,
+        );
+      }
+    }
+  }
+  return instance;
+}
+
 function acquireStyleResource(resource: StyleResource): Instance {
-  if (!resource.instance) {
+  let instance = resource.instance;
+  if (!instance) {
     const {props, root, precedence} = resource;
     const limitedEscapedHref = escapeSelectorAttributeValueInsideDoubleQuotes(
       props.href,
     );
     const existingEl = root.querySelector(
-      `link[rel="stylesheet"][data-rprec][href="${limitedEscapedHref}"]`,
+      `link[rel="stylesheet"][data-precedence][href="${limitedEscapedHref}"]`,
     );
     if (existingEl) {
-      resource.instance = existingEl;
+      instance = resource.instance = existingEl;
+      markNodeAsResource(instance);
       resource.preloaded = true;
       const loadingState: ?StyleResourceLoadingState = (existingEl: any)._p;
       if (loadingState) {
@@ -669,7 +1169,7 @@ function acquireStyleResource(resource: StyleResource): Instance {
         resource.loaded = true;
       }
     } else {
-      const instance = createResourceInstance(
+      instance = resource.instance = createResourceInstance(
         'link',
         resource.props,
         getDocumentFromRoot(root),
@@ -677,12 +1177,36 @@ function acquireStyleResource(resource: StyleResource): Instance {
 
       attachLoadListeners(instance, resource);
       insertStyleInstance(instance, precedence, root);
-      resource.instance = instance;
     }
   }
   resource.count++;
-  // $FlowFixMe[incompatible-return] found when upgrading Flow
-  return resource.instance;
+  return instance;
+}
+
+function acquireScriptResource(resource: ScriptResource): Instance {
+  let instance = resource.instance;
+  if (!instance) {
+    const {props, root} = resource;
+    const limitedEscapedSrc = escapeSelectorAttributeValueInsideDoubleQuotes(
+      props.src,
+    );
+    const existingEl = root.querySelector(
+      `script[async][src="${limitedEscapedSrc}"]`,
+    );
+    if (existingEl) {
+      instance = resource.instance = existingEl;
+      markNodeAsResource(instance);
+    } else {
+      instance = resource.instance = createResourceInstance(
+        'script',
+        resource.props,
+        getDocumentFromRoot(root),
+      );
+
+      insertResourceInstanceBefore(getDocumentFromRoot(root), instance, null);
+    }
+  }
+  return instance;
 }
 
 function attachLoadListeners(instance: Instance, resource: StyleResource) {
@@ -749,12 +1273,14 @@ function insertStyleInstance(
   precedence: string,
   root: FloatRoot,
 ): void {
-  const nodes = root.querySelectorAll('link[rel="stylesheet"][data-rprec]');
+  const nodes = root.querySelectorAll(
+    'link[rel="stylesheet"][data-precedence]',
+  );
   const last = nodes.length ? nodes[nodes.length - 1] : null;
   let prior = last;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const nodePrecedence = node.dataset.rprec;
+    const nodePrecedence = node.dataset.precedence;
     if (nodePrecedence === precedence) {
       prior = node;
     } else if (prior !== last) {
@@ -780,60 +1306,67 @@ function insertStyleInstance(
   }
 }
 
-function insertPreloadInstance(
-  instance: Instance,
+function insertResourceInstanceBefore(
   ownerDocument: Document,
+  instance: Instance,
+  before: ?Node,
 ): void {
-  if (!ownerDocument.contains(instance)) {
-    const parent = ownerDocument.head;
-    if (parent) {
-      parent.appendChild(instance);
-    } else {
-      throw new Error(
-        'While attempting to insert a Resource, React expected the Document to contain' +
-          ' a head element but it was not found.',
+  if (__DEV__) {
+    if (instance.tagName === 'LINK' && (instance: any).rel === 'stylesheet') {
+      console.error(
+        'insertResourceInstanceBefore was called with a stylesheet. Stylesheets must be' +
+          ' inserted with insertStyleInstance instead. This is a bug in React.',
       );
     }
+  }
+  const parent = (before && before.parentNode) || ownerDocument.head;
+  if (parent) {
+    parent.insertBefore(instance, before);
+  } else {
+    throw new Error(
+      'While attempting to insert a Resource, React expected the Document to contain' +
+        ' a head element but it was not found.',
+    );
   }
 }
 
 export function isHostResourceType(type: string, props: Props): boolean {
   switch (type) {
+    case 'meta':
+    case 'title': {
+      return true;
+    }
     case 'link': {
+      const {onLoad, onError} = props;
+      if (onLoad || onError) {
+        return false;
+      }
       switch (props.rel) {
         case 'stylesheet': {
           if (__DEV__) {
             validateLinkPropsForStyleResource(props);
           }
-          const {href, precedence, onLoad, onError, disabled} = props;
+          const {href, precedence, disabled} = props;
           return (
             typeof href === 'string' &&
             typeof precedence === 'string' &&
-            !onLoad &&
-            !onError &&
             disabled == null
           );
         }
-        case 'preload': {
-          if (__DEV__) {
-            validateLinkPropsForStyleResource(props);
-          }
-          const {href, as, onLoad, onError} = props;
-          return (
-            !onLoad &&
-            !onError &&
-            typeof href === 'string' &&
-            isResourceAsType(as)
-          );
+        default: {
+          const {rel, href} = props;
+          return typeof href === 'string' && typeof rel === 'string';
         }
       }
     }
+    case 'script': {
+      // We don't validate because it is valid to use async with onLoad/onError unlike combining
+      // precedence with these for style resources
+      const {src, async, onLoad, onError} = props;
+      return (async: any) && typeof src === 'string' && !onLoad && !onError;
+    }
   }
   return false;
-}
-
-function isResourceAsType(as: mixed): boolean {
-  return as === 'style' || as === 'font' || as === 'script';
 }
 
 // When passing user input into querySelector(All) the embedded string must not alter

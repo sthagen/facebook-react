@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -50,7 +50,7 @@ describe('react-dom-server-rendering-stub', () => {
     }
     const html = ReactDOMFizzServer.renderToString(<App />);
     expect(html).toEqual(
-      '<link href="foo" rel="preload" as="style"/><link rel="stylesheet" href="bar" data-rprec="default"/><div>foo</div>',
+      '<link rel="stylesheet" href="bar" data-precedence="default"/><link href="foo" rel="preload" as="style"/><div>foo</div>',
     );
   });
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -29,6 +29,7 @@ export const enableProfilerNestedUpdateScheduledHook = false;
 export const enableUpdaterTracking = __PROFILE__;
 export const enableCache = false;
 export const enableCacheElement = true;
+export const enableFetchInstrumentation = false;
 export const enableSchedulerDebugging = false;
 export const debugRenderPhaseSideEffectsForStrictMode = true;
 export const disableJavaScriptURLs = false;
@@ -51,7 +52,7 @@ export const enableSuspenseAvoidThisFallback = false;
 export const enableSuspenseAvoidThisFallbackFizz = false;
 export const enableCPUSuspense = true;
 export const enableUseHook = false;
-export const enableUseMemoCacheHook = false;
+export const enableUseMemoCacheHook = true;
 export const enableUseEventHook = false;
 export const enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay = true;
 export const enableClientRenderFallbackOnTextMismatch = true;
@@ -65,7 +66,6 @@ export const enableGetInspectorDataForInstanceInProduction = true;
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = false;
 
-export const enableStrictEffects = __DEV__;
 export const createRootStrictEffectsByDefault = false;
 
 export const disableSchedulerTimeoutInWorkLoop = false;
@@ -86,6 +86,7 @@ export const enableFloat = false;
 export const enableHostSingletons = false;
 
 export const useModernStrictMode = false;
+export const enableFizzExternalRuntime = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

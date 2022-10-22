@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -35,7 +35,6 @@ import {
   enableDebugTracing,
   enableSchedulingProfiler,
   disableSchedulerTimeoutInWorkLoop,
-  enableStrictEffects,
   skipUnmountedBoundaries,
   enableUpdaterTracking,
   enableCache,
@@ -290,7 +289,7 @@ type ExecutionContext = number;
 
 export const NoContext = /*             */ 0b000;
 const BatchedContext = /*               */ 0b001;
-const RenderContext = /*                */ 0b010;
+export const RenderContext = /*         */ 0b010;
 export const CommitContext = /*         */ 0b100;
 
 type RootExitStatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -1063,10 +1062,6 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
       // The render unwound without completing the tree. This happens in special
       // cases where need to exit the current render without producing a
       // consistent tree or committing.
-      //
-      // This should only happen during a concurrent render, not a discrete or
-      // synchronous update. We should have already checked for this when we
-      // unwound the stack.
       markRootSuspended(root, lanes);
     } else {
       // The render completed.
@@ -1111,6 +1106,9 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
           ensureRootIsScheduled(root, now());
           throw fatalError;
         }
+
+        // FIXME: Need to check for RootDidNotComplete again. The factoring here
+        // isn't ideal.
       }
 
       // We now have a consistent tree. The next step is either to commit it,
@@ -1473,7 +1471,12 @@ function performSyncWorkOnRoot(root) {
   }
 
   if (exitStatus === RootDidNotComplete) {
-    throw new Error('Root did not complete. This is a bug in React.');
+    // The render unwound without completing the tree. This happens in special
+    // cases where need to exit the current render without producing a
+    // consistent tree or committing.
+    markRootSuspended(root, lanes);
+    ensureRootIsScheduled(root, now());
+    return null;
   }
 
   // We now have a consistent tree. Because this is a sync render, we
@@ -2606,7 +2609,7 @@ function commitRootImpl(
     legacyErrorBoundariesThatAlreadyFailed = null;
   }
 
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     if (!rootDidHavePassiveEffects) {
       commitDoubleInvokeEffectsInDEV(root, false);
     }
@@ -2883,7 +2886,7 @@ function flushPassiveEffectsImpl() {
     markPassiveEffectsStopped();
   }
 
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     commitDoubleInvokeEffectsInDEV(root, true);
   }
 
@@ -3352,7 +3355,7 @@ function commitDoubleInvokeEffectsInDEV(
   root: FiberRoot,
   hasPassiveEffects: boolean,
 ) {
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     if (useModernStrictMode) {
       let doubleInvokeEffects = true;
 

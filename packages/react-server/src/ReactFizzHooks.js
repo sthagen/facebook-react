@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,10 +7,7 @@
  * @flow
  */
 
-import type {
-  Dispatcher,
-  EventFunctionWrapper,
-} from 'react-reconciler/src/ReactInternalTypes';
+import type {Dispatcher} from 'react-reconciler/src/ReactInternalTypes';
 
 import type {
   MutableSource,
@@ -522,7 +519,8 @@ function throwOnUseEventCall() {
 
 export function useEvent<Args, Return, F: (...Array<Args>) => Return>(
   callback: F,
-): EventFunctionWrapper<Args, Return, F> {
+): F {
+  // $FlowIgnore[incompatible-return]
   return throwOnUseEventCall;
 }
 
@@ -610,6 +608,11 @@ function use<T>(usable: Usable<T>): T {
             index,
           );
           if (prevThenableAtIndex !== null) {
+            if (thenable !== prevThenableAtIndex) {
+              // Avoid an unhandled rejection errors for the Promises that we'll
+              // intentionally ignore.
+              thenable.then(noop, noop);
+            }
             switch (prevThenableAtIndex.status) {
               case 'fulfilled': {
                 const fulfilledValue: T = prevThenableAtIndex.value;

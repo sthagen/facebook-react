@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -24,8 +24,9 @@ import {
   getFiberFromScopeInstance,
   getInstanceFromNode as getInstanceFromNodeDOMTree,
   isContainerMarkedAsRoot,
+  detachDeletedInstance,
+  isMarkedResource,
 } from './ReactDOMComponentTree';
-import {detachDeletedInstance} from './ReactDOMComponentTree';
 export {detachDeletedInstance};
 import {hasRole} from './DOMAccessibilityRoles';
 import {
@@ -58,6 +59,7 @@ import {
   TEXT_NODE,
   COMMENT_NODE,
   DOCUMENT_NODE,
+  DOCUMENT_TYPE_NODE,
   DOCUMENT_FRAGMENT_NODE,
 } from '../shared/HTMLNodeType';
 import dangerousStyleValue from '../shared/dangerousStyleValue';
@@ -711,50 +713,16 @@ export function unhideTextInstance(
 
 export function clearContainer(container: Container): void {
   if (enableHostSingletons) {
-    // We have refined the container to Element type
     const nodeType = container.nodeType;
-    if (nodeType === DOCUMENT_NODE || nodeType === ELEMENT_NODE) {
+    if (nodeType === DOCUMENT_NODE) {
+      clearContainerSparingly(container);
+    } else if (nodeType === ELEMENT_NODE) {
       switch (container.nodeName) {
-        case '#document':
         case 'HTML':
         case 'HEAD':
-        case 'BODY': {
-          let node = container.firstChild;
-          while (node) {
-            const nextNode = node.nextSibling;
-            const nodeName = node.nodeName;
-            switch (nodeName) {
-              case 'HTML':
-              case 'HEAD':
-              case 'BODY': {
-                clearContainer((node: any));
-                // If these singleton instances had previously been rendered with React they
-                // may still hold on to references to the previous fiber tree. We detatch them
-                // prospectiveyl to reset them to a baseline starting state since we cannot create
-                // new instances.
-                detachDeletedInstance((node: any));
-                break;
-              }
-              case 'STYLE': {
-                break;
-              }
-              case 'LINK': {
-                if (
-                  ((node: any): HTMLLinkElement).rel.toLowerCase() ===
-                  'stylesheet'
-                ) {
-                  break;
-                }
-              }
-              // eslint-disable-next-line no-fallthrough
-              default: {
-                container.removeChild(node);
-              }
-            }
-            node = nextNode;
-          }
+        case 'BODY':
+          clearContainerSparingly(container);
           return;
-        }
         default: {
           container.textContent = '';
         }
@@ -775,6 +743,42 @@ export function clearContainer(container: Container): void {
   }
 }
 
+function clearContainerSparingly(container: Node) {
+  let node;
+  let nextNode: ?Node = container.firstChild;
+  if (nextNode && nextNode.nodeType === DOCUMENT_TYPE_NODE) {
+    nextNode = nextNode.nextSibling;
+  }
+  while (nextNode) {
+    node = nextNode;
+    nextNode = nextNode.nextSibling;
+    switch (node.nodeName) {
+      case 'HTML':
+      case 'HEAD':
+      case 'BODY': {
+        const element: Element = (node: any);
+        clearContainerSparingly(element);
+        // If these singleton instances had previously been rendered with React they
+        // may still hold on to references to the previous fiber tree. We detatch them
+        // prospectively to reset them to a baseline starting state since we cannot create
+        // new instances.
+        detachDeletedInstance(element);
+        continue;
+      }
+      case 'STYLE': {
+        continue;
+      }
+      case 'LINK': {
+        if (((node: any): HTMLLinkElement).rel.toLowerCase() === 'stylesheet') {
+          continue;
+        }
+      }
+    }
+    container.removeChild(node);
+  }
+  return;
+}
+
 // Making this so we can eventually move all of the instance caching to the commit phase.
 // Currently this is only used to associate fiber and props to instances for hydrating
 // HostSingletons. The reason we need it here is we only want to make this binding on commit
@@ -793,6 +797,20 @@ export function bindInstance(
 // -------------------
 
 export const supportsHydration = true;
+
+// With Resources, some HostComponent types will never be server rendered and need to be
+// inserted without breaking hydration
+export function isHydratable(type: string, props: Props): boolean {
+  if (enableFloat) {
+    if (type === 'script') {
+      const {async, onLoad, onError} = (props: any);
+      return !(async && (onLoad || onError));
+    }
+    return true;
+  } else {
+    return true;
+  }
+}
 
 export function canHydrateInstance(
   instance: HydratableInstance,
@@ -889,12 +907,27 @@ function getNextHydratable(node) {
             const rel = linkEl.rel;
             if (
               rel === 'preload' ||
-              (rel === 'stylesheet' && linkEl.hasAttribute('data-rprec'))
+              (rel === 'stylesheet' && linkEl.hasAttribute('data-precedence'))
             ) {
               continue;
             }
             break;
           }
+          case 'STYLE': {
+            const styleEl: HTMLStyleElement = (element: any);
+            if (styleEl.hasAttribute('data-precedence')) {
+              continue;
+            }
+            break;
+          }
+          case 'SCRIPT': {
+            const scriptEl: HTMLScriptElement = (element: any);
+            if (scriptEl.hasAttribute('async')) {
+              continue;
+            }
+            break;
+          }
+          case 'TITLE':
           case 'HTML':
           case 'HEAD':
           case 'BODY': {
@@ -908,14 +941,34 @@ function getNextHydratable(node) {
     } else if (enableFloat) {
       if (nodeType === ELEMENT_NODE) {
         const element: Element = (node: any);
-        if (element.tagName === 'LINK') {
-          const linkEl: HTMLLinkElement = (element: any);
-          const rel = linkEl.rel;
-          if (
-            rel === 'preload' ||
-            (rel === 'stylesheet' && linkEl.hasAttribute('data-rprec'))
-          ) {
+        switch (element.tagName) {
+          case 'LINK': {
+            const linkEl: HTMLLinkElement = (element: any);
+            const rel = linkEl.rel;
+            if (
+              rel === 'preload' ||
+              (rel === 'stylesheet' && linkEl.hasAttribute('data-precedence'))
+            ) {
+              continue;
+            }
+            break;
+          }
+          case 'TITLE': {
             continue;
+          }
+          case 'STYLE': {
+            const styleEl: HTMLStyleElement = (element: any);
+            if (styleEl.hasAttribute('data-precedence')) {
+              continue;
+            }
+            break;
+          }
+          case 'SCRIPT': {
+            const scriptEl: HTMLScriptElement = (element: any);
+            if (scriptEl.hasAttribute('async')) {
+              continue;
+            }
+            break;
           }
         }
         break;
@@ -1621,9 +1674,8 @@ export function clearSingleton(instance: Instance): void {
   while (node) {
     const nextNode = node.nextSibling;
     const nodeName = node.nodeName;
-    if (getInstanceFromNodeDOMTree(node)) {
-      // retain nodes owned by React
-    } else if (
+    if (
+      isMarkedResource(node) ||
       nodeName === 'HEAD' ||
       nodeName === 'BODY' ||
       nodeName === 'STYLE' ||

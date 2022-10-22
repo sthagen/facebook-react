@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -44,8 +44,8 @@ describe('ReactFlightDOM', () => {
     use = React.experimental_use;
     Suspense = React.Suspense;
     ReactDOMClient = require('react-dom/client');
-    ReactServerDOMWriter = require('react-server-dom-webpack/writer.node.server');
-    ReactServerDOMReader = require('react-server-dom-webpack');
+    ReactServerDOMWriter = require('react-server-dom-webpack/server.node');
+    ReactServerDOMReader = require('react-server-dom-webpack/client');
 
     ErrorBoundary = class extends React.Component {
       state = {hasError: false, error: null};

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -3546,6 +3546,36 @@ describe('ReactDOMFizzServer', () => {
     });
   });
 
+  // @gate enableFizzExternalRuntime
+  it('supports option to load runtime as an external script', async () => {
+    await actIntoEmptyDocument(() => {
+      const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
+        <html>
+          <head />
+          <body>
+            <div>hello world</div>
+          </body>
+        </html>,
+        {
+          unstable_externalRuntimeSrc: 'src-of-external-runtime',
+        },
+      );
+      pipe(writable);
+    });
+
+    expect(getVisibleChildren(document)).toEqual(
+      <html>
+        <head />
+        <body>
+          <div>hello world</div>
+        </body>
+      </html>,
+    );
+    expect(
+      Array.from(document.getElementsByTagName('script')).map(n => n.outerHTML),
+    ).toEqual(['<script src="src-of-external-runtime" async=""></script>']);
+  });
+
   it('#24384: Suspending should halt hydration warnings and not emit any if hydration completes successfully after unsuspending', async () => {
     const makeApp = () => {
       let resolve, resolved;
@@ -4938,18 +4968,27 @@ describe('ReactDOMFizzServer', () => {
           },
         });
         expect(Scheduler).toFlushAndYield([]);
-        expect(errors).toEqual(
-          [
-            gate(flags => flags.enableClientRenderFallbackOnTextMismatch)
-              ? 'Text content does not match server-rendered HTML.'
-              : null,
-            'Hydration failed because the initial UI does not match what was rendered on the server.',
-            'There was an error while hydrating. Because the error happened outside of a Suspense boundary, the entire root will switch to client rendering.',
-          ].filter(Boolean),
-        );
-        expect(getVisibleChildren(container)).toEqual(
-          <title>{['hello1', 'hello2']}</title>,
-        );
+        if (gate(flags => flags.enableFloat)) {
+          expect(errors).toEqual([]);
+          // with float, the title doesn't render on the client because it is not a simple child
+          // we end up seeing the server rendered title
+          expect(getVisibleChildren(container)).toEqual(
+            <title>{'hello1<!-- -->hello2'}</title>,
+          );
+        } else {
+          expect(errors).toEqual(
+            [
+              gate(flags => flags.enableClientRenderFallbackOnTextMismatch)
+                ? 'Text content does not match server-rendered HTML.'
+                : null,
+              'Hydration failed because the initial UI does not match what was rendered on the server.',
+              'There was an error while hydrating. Because the error happened outside of a Suspense boundary, the entire root will switch to client rendering.',
+            ].filter(Boolean),
+          );
+          expect(getVisibleChildren(container)).toEqual(
+            <title>{['hello1', 'hello2']}</title>,
+          );
+        }
       } finally {
         console.error = originalConsoleError;
       }

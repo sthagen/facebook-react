@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -35,6 +35,7 @@ import {createContext} from './ReactContext';
 import {lazy} from './ReactLazy';
 import {forwardRef} from './ReactForwardRef';
 import {memo} from './ReactMemo';
+import {cache} from './ReactCache';
 import {
   getCacheSignal,
   getCacheForType,
@@ -70,6 +71,9 @@ import ReactSharedInternals from './ReactSharedInternals';
 import {startTransition} from './ReactStartTransition';
 import {act} from './ReactAct';
 
+// Patch fetch
+import './ReactFetch';
+
 // TODO: Move this branching into the other module instead and just re-export.
 const createElement: any = __DEV__
   ? createElementWithValidation
@@ -100,6 +104,7 @@ export {
   forwardRef,
   lazy,
   memo,
+  cache as experimental_cache,
   useCallback,
   useContext,
   useEffect,

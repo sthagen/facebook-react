@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -36,12 +36,12 @@ import {
   UIManager,
   legacySendAccessibilityEvent,
 } from 'react-native/Libraries/ReactPrivate/ReactNativePrivateInterface';
-import {getInspectorDataForInstance} from './ReactNativeFiberInspector';
 
 import {getClosestInstanceFromNode} from './ReactNativeComponentTree';
 import {
   getInspectorDataForViewTag,
   getInspectorDataForViewAtPoint,
+  getInspectorDataForInstance,
 } from './ReactNativeFiberInspector';
 import {LegacyRoot} from 'react-reconciler/src/ReactRootTags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';

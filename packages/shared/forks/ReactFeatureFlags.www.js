@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -39,8 +39,6 @@ export const {
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
 // It's not used anywhere in production yet.
 
-export const enableStrictEffects: boolean =
-  __DEV__ && dynamicFeatureFlags.enableStrictEffects;
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 export const enableProfilerTimer = __PROFILE__;
 export const enableProfilerCommitHooks = __PROFILE__;
@@ -74,6 +72,7 @@ export const enableGetInspectorDataForInstanceInProduction = false;
 
 export const enableCache = true;
 export const enableCacheElement = true;
+export const enableFetchInstrumentation = false;
 
 export const disableJavaScriptURLs = true;
 
@@ -113,6 +112,7 @@ export const enableUseMutableSource = true;
 export const enableCustomElementPropertySupport = __EXPERIMENTAL__;
 
 export const useModernStrictMode = false;
+export const enableFizzExternalRuntime = true;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

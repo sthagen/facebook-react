@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -22,6 +22,7 @@ import type {OffscreenInstance} from './ReactFiberOffscreenComponent';
 import {
   warnAboutUpdateOnNotYetMountedFiberInDEV,
   throwIfInfiniteUpdateLoopDetected,
+  getWorkInProgressRoot,
 } from './ReactFiberWorkLoop.new';
 import {
   NoLane,
@@ -32,7 +33,6 @@ import {
 import {NoFlags, Placement, Hydrating} from './ReactFiberFlags';
 import {HostRoot, OffscreenComponent} from './ReactWorkTags';
 import {OffscreenVisible} from './ReactFiberOffscreenComponent';
-import {getWorkInProgressRoot} from './ReactFiberWorkLoop.new';
 
 export type ConcurrentUpdate = {
   next: ConcurrentUpdate,

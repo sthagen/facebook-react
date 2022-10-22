@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,20 +7,24 @@
  * @flow
  */
 
-import type {AnyNativeEvent} from './legacy-events/PluginModuleType';
+import type {
+  AnyNativeEvent,
+  LegacyPluginModule,
+} from './legacy-events/PluginModuleType';
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
-import type {LegacyPluginModule} from './legacy-events/PluginModuleType';
 import type {ReactSyntheticEvent} from './legacy-events/ReactSyntheticEventType';
 import type {
   RNTopLevelEventType,
   TopLevelType,
 } from './legacy-events/TopLevelEventTypes';
 
-import {registrationNameModules} from './legacy-events/EventPluginRegistry';
+import {
+  registrationNameModules,
+  plugins,
+} from './legacy-events/EventPluginRegistry';
 import {batchedUpdates} from './legacy-events/ReactGenericBatching';
 import accumulateInto from './legacy-events/accumulateInto';
 
-import {plugins} from './legacy-events/EventPluginRegistry';
 import getListeners from './ReactNativeGetListeners';
 import {runEventsInBatch} from './legacy-events/EventBatching';
 

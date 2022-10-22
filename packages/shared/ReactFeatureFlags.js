@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -84,6 +84,7 @@ export const enableLegacyFBSupport = false;
 
 export const enableCache = __EXPERIMENTAL__;
 export const enableCacheElement = __EXPERIMENTAL__;
+export const enableFetchInstrumentation = __EXPERIMENTAL__;
 
 export const enableTransitionTracing = false;
 
@@ -124,6 +125,9 @@ export const enableUseHook = __EXPERIMENTAL__;
 export const enableUseMemoCacheHook = __EXPERIMENTAL__;
 
 export const enableUseEventHook = __EXPERIMENTAL__;
+
+// Test in www before enabling in open source.
+export const enableFizzExternalRuntime = false;
 
 // -----------------------------------------------------------------------------
 // Chopping Block
@@ -225,10 +229,6 @@ export const enableSchedulingProfiler = __PROFILE__;
 // Helps identify side effects in render-phase lifecycle hooks and setState
 // reducers by double invoking them in StrictLegacyMode.
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
-
-// Helps identify code that is not safe for planned Offscreen API and Suspense semantics;
-// this feature flag only impacts StrictEffectsMode.
-export const enableStrictEffects = __DEV__;
 
 // To preserve the "Pause on caught exceptions" behavior of the debugger, we
 // replay the begin phase of a failed component inside invokeGuardedCallback.

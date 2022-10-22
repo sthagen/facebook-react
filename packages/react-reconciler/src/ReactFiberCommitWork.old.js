@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -15,13 +15,13 @@ import type {
   ChildSet,
   UpdatePayload,
 } from './ReactFiberHostConfig';
-import type {Fiber} from './ReactInternalTypes';
-import type {FiberRoot, EventFunctionWrapper} from './ReactInternalTypes';
+import type {Fiber, FiberRoot} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane.old';
 import type {SuspenseState} from './ReactFiberSuspenseComponent.old';
 import type {UpdateQueue} from './ReactFiberClassUpdateQueue.old';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks.old';
 import type {Wakeable} from 'shared/ReactTypes';
+import {isOffscreenManual} from './ReactFiberOffscreenComponent';
 import type {
   OffscreenState,
   OffscreenInstance,
@@ -50,7 +50,6 @@ import {
   enableCache,
   enableTransitionTracing,
   enableUseEventHook,
-  enableStrictEffects,
   enableFloat,
   enableLegacyHidden,
   enableHostSingletons,
@@ -153,6 +152,7 @@ import {
   clearSingleton,
   acquireSingletonInstance,
   releaseSingletonInstance,
+  scheduleMicrotask,
 } from './ReactFiberHostConfig';
 import {
   captureCommitPhaseError,
@@ -169,6 +169,7 @@ import {
   setIsRunningInsertionEffect,
   getExecutionContext,
   CommitContext,
+  RenderContext,
   NoContext,
 } from './ReactFiberWorkLoop.old';
 import {
@@ -197,6 +198,7 @@ import {releaseCache, retainCache} from './ReactFiberCacheComponent.old';
 import {clearTransitionsForLanes} from './ReactFiberLane.old';
 import {
   OffscreenVisible,
+  OffscreenDetached,
   OffscreenPassiveEffectsConnected,
 } from './ReactFiberOffscreenComponent';
 import {
@@ -683,13 +685,9 @@ function commitUseEventMount(finishedWork: Fiber) {
   const updateQueue: FunctionComponentUpdateQueue | null = (finishedWork.updateQueue: any);
   const eventPayloads = updateQueue !== null ? updateQueue.events : null;
   if (eventPayloads !== null) {
-    // FunctionComponentUpdateQueue.events is a flat array of
-    // [EventFunctionWrapper, EventFunction, ...], so increment by 2 each iteration to find the next
-    // pair.
-    for (let ii = 0; ii < eventPayloads.length; ii += 2) {
-      const eventFn: EventFunctionWrapper<any, any, any> = eventPayloads[ii];
-      const nextImpl = eventPayloads[ii + 1];
-      eventFn._impl = nextImpl;
+    for (let ii = 0; ii < eventPayloads.length; ii++) {
+      const {ref, nextImpl} = eventPayloads[ii];
+      ref.impl = nextImpl;
     }
   }
 }
@@ -1085,19 +1083,6 @@ function commitLayoutEffectOnFiber(
           finishedWork,
           committedLanes,
         );
-
-        if (flags & Update) {
-          const newResource = finishedWork.memoizedState;
-          if (current !== null) {
-            const currentResource = current.memoizedState;
-            if (currentResource !== newResource) {
-              releaseResource(currentResource);
-            }
-          }
-          finishedWork.stateNode = newResource
-            ? acquireResource(newResource)
-            : null;
-        }
 
         if (flags & Ref) {
           safelyAttachRef(finishedWork, finishedWork.return);
@@ -2072,7 +2057,9 @@ function commitDeletionEffectsOnFiber(
           nearestMountedAncestor,
           deletedFiber,
         );
-        releaseResource(deletedFiber.memoizedState);
+        if (deletedFiber.memoizedState) {
+          releaseResource(deletedFiber.memoizedState);
+        }
         return;
       }
     }
@@ -2426,6 +2413,28 @@ function getRetryCache(finishedWork) {
   }
 }
 
+export function detachOffscreenInstance(instance: OffscreenInstance): void {
+  const currentOffscreenFiber = instance._current;
+  if (currentOffscreenFiber === null) {
+    throw new Error(
+      'Calling Offscreen.detach before instance handle has been set.',
+    );
+  }
+
+  const executionContext = getExecutionContext();
+  if ((executionContext & (RenderContext | CommitContext)) !== NoContext) {
+    scheduleMicrotask(() => {
+      instance._visibility |= OffscreenDetached;
+      disappearLayoutEffects(currentOffscreenFiber);
+      disconnectPassiveEffect(currentOffscreenFiber);
+    });
+  } else {
+    instance._visibility |= OffscreenDetached;
+    disappearLayoutEffects(currentOffscreenFiber);
+    disconnectPassiveEffect(currentOffscreenFiber);
+  }
+}
+
 function attachSuspenseRetryListeners(
   finishedWork: Fiber,
   wakeables: Set<Wakeable>,
@@ -2613,6 +2622,19 @@ function commitMutationEffectsOnFiber(
           if (current !== null) {
             safelyDetachRef(current, current.return);
           }
+        }
+
+        if (flags & Update) {
+          const newResource = finishedWork.memoizedState;
+          if (current !== null) {
+            const currentResource = current.memoizedState;
+            if (currentResource !== newResource) {
+              releaseResource(currentResource);
+            }
+          }
+          finishedWork.stateNode = newResource
+            ? acquireResource(newResource)
+            : null;
         }
         return;
       }
@@ -2842,6 +2864,8 @@ function commitMutationEffectsOnFiber(
       }
 
       commitReconciliationEffects(finishedWork);
+      // TODO: Add explicit effect flag to set _current.
+      finishedWork.stateNode._current = finishedWork;
 
       if (flags & Visibility) {
         const offscreenInstance: OffscreenInstance = finishedWork.stateNode;
@@ -2868,7 +2892,8 @@ function commitMutationEffectsOnFiber(
           }
         }
 
-        if (supportsMutation) {
+        // Offscreen with manual mode manages visibility manually.
+        if (supportsMutation && !isOffscreenManual(finishedWork)) {
           // TODO: This needs to run whenever there's an insertion or update
           // inside a hidden Offscreen tree.
           hideOrUnhideAllChildren(offscreenBoundary, isHidden);
@@ -4318,7 +4343,7 @@ function commitPassiveUnmountInsideDeletedTreeOnFiber(
 }
 
 function invokeLayoutEffectMountInDEV(fiber: Fiber): void {
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     // We don't need to re-check StrictEffectsMode here.
     // This function is only called if that check has already passed.
     switch (fiber.tag) {
@@ -4346,7 +4371,7 @@ function invokeLayoutEffectMountInDEV(fiber: Fiber): void {
 }
 
 function invokePassiveEffectMountInDEV(fiber: Fiber): void {
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     // We don't need to re-check StrictEffectsMode here.
     // This function is only called if that check has already passed.
     switch (fiber.tag) {
@@ -4365,7 +4390,7 @@ function invokePassiveEffectMountInDEV(fiber: Fiber): void {
 }
 
 function invokeLayoutEffectUnmountInDEV(fiber: Fiber): void {
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     // We don't need to re-check StrictEffectsMode here.
     // This function is only called if that check has already passed.
     switch (fiber.tag) {
@@ -4395,7 +4420,7 @@ function invokeLayoutEffectUnmountInDEV(fiber: Fiber): void {
 }
 
 function invokePassiveEffectUnmountInDEV(fiber: Fiber): void {
-  if (__DEV__ && enableStrictEffects) {
+  if (__DEV__) {
     // We don't need to re-check StrictEffectsMode here.
     // This function is only called if that check has already passed.
     switch (fiber.tag) {

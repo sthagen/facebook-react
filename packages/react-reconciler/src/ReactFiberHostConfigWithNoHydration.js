@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -21,6 +21,7 @@ function shim(...args: any): empty {
 // Hydration (when unsupported)
 export type SuspenseInstance = mixed;
 export const supportsHydration = false;
+export const isHydratable = shim;
 export const canHydrateInstance = shim;
 export const canHydrateTextInstance = shim;
 export const canHydrateSuspenseInstance = shim;

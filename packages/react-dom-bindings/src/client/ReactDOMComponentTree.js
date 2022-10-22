@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,7 @@
  * @flow
  */
 
-import type {FloatRoot, StyleResource} from './ReactDOMFloatClient';
+import type {FloatRoot, RootResources} from './ReactDOMFloatClient';
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
 import type {ReactScopeInstance} from 'shared/ReactTypes';
 import type {
@@ -48,7 +48,8 @@ const internalContainerInstanceKey = '__reactContainer$' + randomKey;
 const internalEventHandlersKey = '__reactEvents$' + randomKey;
 const internalEventHandlerListenersKey = '__reactListeners$' + randomKey;
 const internalEventHandlesSetKey = '__reactHandles$' + randomKey;
-const internalRootNodeStylesSetKey = '__reactStyles$' + randomKey;
+const internalRootNodeResourcesKey = '__reactResources$' + randomKey;
+const internalResourceMarker = '__reactMarker$' + randomKey;
 
 export function detachDeletedInstance(node: Instance): void {
   // TODO: This function is only called on host components. I don't think all of
@@ -278,10 +279,23 @@ export function doesTargetHaveEventHandle(
   return eventHandles.has(eventHandle);
 }
 
-export function getStylesFromRoot(root: FloatRoot): Map<string, StyleResource> {
-  let styles = (root: any)[internalRootNodeStylesSetKey];
-  if (!styles) {
-    styles = (root: any)[internalRootNodeStylesSetKey] = new Map();
+export function getResourcesFromRoot(root: FloatRoot): RootResources {
+  let resources = (root: any)[internalRootNodeResourcesKey];
+  if (!resources) {
+    resources = (root: any)[internalRootNodeResourcesKey] = {
+      styles: new Map(),
+      scripts: new Map(),
+      head: new Map(),
+      lastStructuredMeta: new Map(),
+    };
   }
-  return styles;
+  return resources;
+}
+
+export function isMarkedResource(node: Node): boolean {
+  return !!(node: any)[internalResourceMarker];
+}
+
+export function markNodeAsResource(node: Node) {
+  (node: any)[internalResourceMarker] = true;
 }

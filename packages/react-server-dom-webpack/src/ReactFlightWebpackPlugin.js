@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -39,7 +39,7 @@ class ClientReferenceDependency extends ModuleDependency {
 // We use the Flight client implementation because you can't get to these
 // without the client runtime so it's the first time in the loading sequence
 // you might want them.
-const clientImportName = 'react-server-dom-webpack';
+const clientImportName = 'react-server-dom-webpack/client';
 const clientFileName = require.resolve('../');
 
 type ClientReferenceSearchPath = {

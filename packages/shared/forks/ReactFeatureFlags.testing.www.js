@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -22,6 +22,7 @@ export const enableProfilerNestedUpdateScheduledHook = false;
 export const enableUpdaterTracking = false;
 export const enableCache = true;
 export const enableCacheElement = true;
+export const enableFetchInstrumentation = false;
 export const disableJavaScriptURLs = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
@@ -55,7 +56,6 @@ export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableNewReconciler = false;
 export const deferRenderPhaseUpdateToNextBatch = false;
 
-export const enableStrictEffects = false;
 export const createRootStrictEffectsByDefault = false;
 export const enableUseRefAccessWarning = false;
 
@@ -77,6 +77,7 @@ export const enableFloat = false;
 export const enableHostSingletons = false;
 
 export const useModernStrictMode = false;
+export const enableFizzExternalRuntime = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

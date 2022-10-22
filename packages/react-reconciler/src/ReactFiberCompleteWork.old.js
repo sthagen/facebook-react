@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,7 @@
  * @flow
  */
 
-import type {Fiber} from './ReactInternalTypes';
+import type {Fiber, FiberRoot} from './ReactInternalTypes';
 import type {RootState} from './ReactFiberRoot.old';
 import type {Lanes, Lane} from './ReactFiberLane.old';
 import type {
@@ -15,7 +15,6 @@ import type {
   ReactContext,
   Wakeable,
 } from 'shared/ReactTypes';
-import type {FiberRoot} from './ReactInternalTypes';
 import type {
   Instance,
   Type,
@@ -27,6 +26,7 @@ import type {
   SuspenseState,
   SuspenseListRenderState,
 } from './ReactFiberSuspenseComponent.old';
+import {isOffscreenManual} from './ReactFiberOffscreenComponent';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
 import type {TracingMarkerInstance} from './ReactFiberTracingMarkerComponent.old';
 import type {Cache} from './ReactFiberCacheComponent.old';
@@ -34,6 +34,12 @@ import {
   enableSuspenseAvoidThisFallback,
   enableLegacyHidden,
   enableHostSingletons,
+  enableSuspenseCallback,
+  enableScopeAPI,
+  enableProfilerTimer,
+  enableCache,
+  enableTransitionTracing,
+  enableFloat,
 } from 'shared/ReactFeatureFlags';
 
 import {resetWorkInProgressVersions as resetMutableSourceWorkInProgressVersions} from './ReactMutableSource.old';
@@ -144,14 +150,6 @@ import {
   hasUnhydratedTailNodes,
   upgradeHydrationErrorsToRecoverable,
 } from './ReactFiberHydrationContext.old';
-import {
-  enableSuspenseCallback,
-  enableScopeAPI,
-  enableProfilerTimer,
-  enableCache,
-  enableTransitionTracing,
-  enableFloat,
-} from 'shared/ReactFeatureFlags';
 import {
   renderDidSuspend,
   renderDidSuspendDelayIfPossible,
@@ -428,7 +426,14 @@ if (supportsMutation) {
         if (child !== null) {
           child.return = node;
         }
-        appendAllChildrenToContainer(containerChildSet, node, true, true);
+        // If Offscreen is not in manual mode, detached tree is hidden from user space.
+        const _needsVisibilityToggle = !isOffscreenManual(node);
+        appendAllChildrenToContainer(
+          containerChildSet,
+          node,
+          _needsVisibilityToggle,
+          true,
+        );
       } else if (node.child !== null) {
         node.child.return = node;
         node = node.child;

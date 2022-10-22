@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -26,7 +26,6 @@ import {
   enableSchedulingProfiler,
   warnAboutDeprecatedLifecycles,
   enableLazyContextPropagation,
-  enableStrictEffects,
 } from 'shared/ReactFeatureFlags';
 import ReactStrictModeWarnings from './ReactStrictModeWarnings.old';
 import {isMounted} from './ReactFiberTreeReflection';
@@ -83,7 +82,9 @@ const fakeInternalInstance = {};
 
 // React.Component uses a shared frozen object by default.
 // We'll use it to determine whether we need to initialize legacy refs.
-export const emptyRefsObject: $FlowFixMe = new React.Component().refs;
+export const emptyRefsObject: $FlowFixMe = React.Component
+  ? new React.Component().refs
+  : {};
 
 let didWarnAboutStateAssignmentForComponent;
 let didWarnAboutUninitializedState;
@@ -908,11 +909,7 @@ function mountClassInstance(
 
   if (typeof instance.componentDidMount === 'function') {
     let fiberFlags: Flags = Update | LayoutStatic;
-    if (
-      __DEV__ &&
-      enableStrictEffects &&
-      (workInProgress.mode & StrictEffectsMode) !== NoMode
-    ) {
+    if (__DEV__ && (workInProgress.mode & StrictEffectsMode) !== NoMode) {
       fiberFlags |= MountLayoutDev;
     }
     workInProgress.flags |= fiberFlags;
@@ -986,11 +983,7 @@ function resumeMountClassInstance(
     // effect even though we're bailing out, so that cWU/cDU are called.
     if (typeof instance.componentDidMount === 'function') {
       let fiberFlags: Flags = Update | LayoutStatic;
-      if (
-        __DEV__ &&
-        enableStrictEffects &&
-        (workInProgress.mode & StrictEffectsMode) !== NoMode
-      ) {
+      if (__DEV__ && (workInProgress.mode & StrictEffectsMode) !== NoMode) {
         fiberFlags |= MountLayoutDev;
       }
       workInProgress.flags |= fiberFlags;
@@ -1037,11 +1030,7 @@ function resumeMountClassInstance(
     }
     if (typeof instance.componentDidMount === 'function') {
       let fiberFlags: Flags = Update | LayoutStatic;
-      if (
-        __DEV__ &&
-        enableStrictEffects &&
-        (workInProgress.mode & StrictEffectsMode) !== NoMode
-      ) {
+      if (__DEV__ && (workInProgress.mode & StrictEffectsMode) !== NoMode) {
         fiberFlags |= MountLayoutDev;
       }
       workInProgress.flags |= fiberFlags;
@@ -1051,11 +1040,7 @@ function resumeMountClassInstance(
     // effect even though we're bailing out, so that cWU/cDU are called.
     if (typeof instance.componentDidMount === 'function') {
       let fiberFlags: Flags = Update | LayoutStatic;
-      if (
-        __DEV__ &&
-        enableStrictEffects &&
-        (workInProgress.mode & StrictEffectsMode) !== NoMode
-      ) {
+      if (__DEV__ && (workInProgress.mode & StrictEffectsMode) !== NoMode) {
         fiberFlags |= MountLayoutDev;
       }
       workInProgress.flags |= fiberFlags;

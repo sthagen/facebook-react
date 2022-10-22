@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,7 @@
  * @flow
  */
 
-import type {ReactContext} from 'shared/ReactTypes';
+import type {ReactContext, RefObject} from 'shared/ReactTypes';
 
 import * as React from 'react';
 import {
@@ -27,7 +27,6 @@ import type {
   ViewState,
   ReactEventInfo,
 } from './types';
-import type {RefObject} from 'shared/ReactTypes';
 
 export type Context = {
   file: File | null,

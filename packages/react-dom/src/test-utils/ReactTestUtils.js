@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -23,10 +23,9 @@ import {
   rethrowCaughtError,
   invokeGuardedCallbackAndCatchFirstError,
 } from 'shared/ReactErrorUtils';
-import {enableFloat} from 'shared/ReactFeatureFlags';
+import {enableFloat, enableHostSingletons} from 'shared/ReactFeatureFlags';
 import assign from 'shared/assign';
 import isArray from 'shared/isArray';
-import {enableHostSingletons} from 'shared/ReactFeatureFlags';
 
 // Keep in sync with ReactDOM.js:
 const SecretInternals =

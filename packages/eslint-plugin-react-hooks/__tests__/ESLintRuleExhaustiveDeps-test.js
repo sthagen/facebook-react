@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7635,15 +7635,53 @@ if (__EXPERIMENTAL__) {
     ...tests.valid,
     {
       code: normalizeIndent`
-      function MyComponent({ theme }) {
-        const onStuff = useEvent(() => {
-          showNotification(theme);
-        });
-        useEffect(() => {
-          onStuff();
-        }, []);
-      }
-    `,
+        function MyComponent({ theme }) {
+          const onStuff = useEvent(() => {
+            showNotification(theme);
+          });
+          useEffect(() => {
+            onStuff();
+          }, []);
+        }
+      `,
+    },
+  ];
+
+  tests.invalid = [
+    ...tests.invalid,
+    {
+      code: normalizeIndent`
+        function MyComponent({ theme }) {
+          const onStuff = useEvent(() => {
+            showNotification(theme);
+          });
+          useEffect(() => {
+            onStuff();
+          }, [onStuff]);
+        }
+      `,
+      errors: [
+        {
+          message:
+            'Functions returned from `useEvent` must not be included in the dependency array. ' +
+            'Remove `onStuff` from the list.',
+          suggestions: [
+            {
+              desc: 'Remove the dependency `onStuff`',
+              output: normalizeIndent`
+                function MyComponent({ theme }) {
+                  const onStuff = useEvent(() => {
+                    showNotification(theme);
+                  });
+                  useEffect(() => {
+                    onStuff();
+                  }, []);
+                }
+              `,
+            },
+          ],
+        },
+      ],
     },
   ];
 }
