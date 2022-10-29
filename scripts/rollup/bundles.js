@@ -138,72 +138,6 @@ const bundles = [
     externals: ['react', 'ReactNativeInternalFeatureFlags'],
   },
 
-  /******* React Fetch Browser (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-fetch/index.browser',
-    global: 'ReactFetch',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: ['react'],
-  },
-
-  /******* React Fetch Node (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-fetch/index.node',
-    global: 'ReactFetch',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: ['react', 'http', 'https'],
-  },
-
-  /******* React FS Browser (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-fs/index.browser.server',
-    global: 'ReactFilesystem',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: [],
-  },
-
-  /******* React FS Node (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-fs/index.node.server',
-    global: 'ReactFilesystem',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: ['react', 'fs/promises', 'path'],
-  },
-
-  /******* React PG Browser (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-pg/index.browser.server',
-    global: 'ReactPostgres',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: [],
-  },
-
-  /******* React PG Node (experimental, new) *******/
-  {
-    bundleTypes: [NODE_DEV, NODE_PROD],
-    moduleType: ISOMORPHIC,
-    entry: 'react-pg/index.node.server',
-    global: 'ReactPostgres',
-    minifyWithProdErrorCodes: false,
-    wrapWithModuleBoundaries: false,
-    externals: ['react', 'pg'],
-  },
-
   /******* React DOM *******/
   {
     bundleTypes: [
@@ -320,7 +254,7 @@ const bundles = [
     global: 'ReactDOMServer',
     minifyWithProdErrorCodes: false,
     wrapWithModuleBoundaries: false,
-    externals: ['react', 'util', 'react-dom'],
+    externals: ['react', 'util', 'async_hooks', 'react-dom'],
   },
   {
     bundleTypes: __EXPERIMENTAL__ ? [FB_WWW_DEV, FB_WWW_PROD] : [],
@@ -350,7 +284,7 @@ const bundles = [
     global: 'ReactDOMStatic',
     minifyWithProdErrorCodes: false,
     wrapWithModuleBoundaries: false,
-    externals: ['react', 'util', 'stream', 'react-dom'],
+    externals: ['react', 'util', 'async_hooks', 'stream', 'react-dom'],
   },
 
   /******* React DOM Fizz Server External Runtime *******/
@@ -394,7 +328,7 @@ const bundles = [
     global: 'ReactServerDOMServer',
     minifyWithProdErrorCodes: false,
     wrapWithModuleBoundaries: false,
-    externals: ['react', 'util', 'react-dom'],
+    externals: ['react', 'util', 'async_hooks', 'react-dom'],
   },
 
   /******* React Server DOM Webpack Client *******/
@@ -462,7 +396,7 @@ const bundles = [
     bundleTypes: [FB_WWW_DEV, FB_WWW_PROD],
     moduleType: RENDERER,
     entry: 'react-server-dom-relay',
-    global: 'ReactFlightDOMRelayClient', // TODO: Rename to Reader
+    global: 'ReactFlightDOMRelayClient',
     minifyWithProdErrorCodes: true,
     wrapWithModuleBoundaries: false,
     externals: [
@@ -477,7 +411,7 @@ const bundles = [
     bundleTypes: [RN_FB_DEV, RN_FB_PROD],
     moduleType: RENDERER,
     entry: 'react-server-native-relay/server',
-    global: 'ReactFlightNativeRelayServer', // TODO: Rename to Writer
+    global: 'ReactFlightNativeRelayServer',
     minifyWithProdErrorCodes: false,
     wrapWithModuleBoundaries: false,
     externals: [
@@ -486,6 +420,7 @@ const bundles = [
       'JSResourceReferenceImpl',
       'ReactNativeInternalFeatureFlags',
       'util',
+      'async_hooks',
     ],
   },
 

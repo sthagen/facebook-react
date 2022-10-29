@@ -101,8 +101,19 @@ type LinkResource = {
   flushed: boolean,
 };
 
+type BaseResource = {
+  type: 'base',
+  props: Props,
+
+  flushed: boolean,
+};
+
 export type Resource = PreloadResource | StyleResource | ScriptResource;
-export type HeadResource = TitleResource | MetaResource | LinkResource;
+export type HeadResource =
+  | TitleResource
+  | MetaResource
+  | LinkResource
+  | BaseResource;
 
 export type Resources = {
   // Request local cache
@@ -113,6 +124,7 @@ export type Resources = {
 
   // Flushing queues for Resource dependencies
   charset: null | MetaResource,
+  bases: Set<BaseResource>,
   preconnects: Set<LinkResource>,
   fontPreloads: Set<PreloadResource>,
   // usedImagePreloads: Set<PreloadResource>,
@@ -144,6 +156,7 @@ export function createResources(): Resources {
 
     // cleared on flush
     charset: null,
+    bases: new Set(),
     preconnects: new Set(),
     fontPreloads: new Set(),
     // usedImagePreloads: new Set(),
@@ -645,9 +658,8 @@ export function resourcesFromElement(type: string, props: Props): boolean {
           resources.headsMap.set(key, resource);
           resources.headResources.add(resource);
         }
-        return true;
       }
-      return false;
+      return true;
     }
     case 'meta': {
       let key, propertyPath;
@@ -693,9 +705,28 @@ export function resourcesFromElement(type: string, props: Props): boolean {
             resources.headResources.add(resource);
           }
         }
-        return true;
       }
-      return false;
+      return true;
+    }
+    case 'base': {
+      const {target, href} = props;
+      // We mirror the key construction on the client since we will likely unify
+      // this code in the future to better guarantee key semantics are identical
+      // in both environments
+      let key = 'base';
+      key += typeof href === 'string' ? `[href="${href}"]` : ':not([href])';
+      key +=
+        typeof target === 'string' ? `[target="${target}"]` : ':not([target])';
+      if (!resources.headsMap.has(key)) {
+        const resource = {
+          type: 'base',
+          props: Object.assign({}, props),
+          flushed: false,
+        };
+        resources.headsMap.set(key, resource);
+        resources.bases.add(resource);
+      }
+      return true;
     }
   }
   return false;
@@ -832,7 +863,11 @@ export function resourcesFromLink(props: Props): boolean {
     }
   }
   if (props.onLoad || props.onError) {
-    return false;
+    // When a link has these props we can't treat it is a Resource but if we rendered it on the
+    // server it would look like a Resource in the rendered html (the onLoad/onError aren't emitted)
+    // Instead we expect the client to insert them rather than hydrate them which also guarantees
+    // that the onLoad and onError won't fire before the event handlers are attached
+    return true;
   }
 
   const sizes = typeof props.sizes === 'string' ? props.sizes : '';

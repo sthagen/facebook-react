@@ -8,7 +8,7 @@ let use;
 let Suspense;
 let startTransition;
 
-describe('ReactWakeable', () => {
+describe('ReactThenable', () => {
   beforeEach(() => {
     jest.resetModules();
 
@@ -16,7 +16,7 @@ describe('ReactWakeable', () => {
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
     act = require('jest-react').act;
-    use = React.experimental_use;
+    use = React.use;
     Suspense = React.Suspense;
     startTransition = React.startTransition;
   });
@@ -26,6 +26,11 @@ describe('ReactWakeable', () => {
     return props.text;
   }
 
+  // This behavior was intentionally disabled to derisk the rollout of `use`.
+  // It changes the behavior of old, pre-`use` Suspense implementations. We may
+  // add this back; however, the plan is to migrate all existing Suspense code
+  // to `use`, so the extra code probably isn't worth it.
+  // @gate TODO
   test('if suspended fiber is pinged in a microtask, retry immediately without unwinding the stack', async () => {
     let resolved = false;
     function Async() {
@@ -239,6 +244,76 @@ describe('ReactWakeable', () => {
   });
 
   // @gate enableUseHook
+  test('use(promise) in multiple components', async () => {
+    // This tests that the state for tracking promises is reset per component.
+    const promiseA = Promise.resolve('A');
+    const promiseB = Promise.resolve('B');
+    const promiseC = Promise.resolve('C');
+    const promiseD = Promise.resolve('D');
+
+    function Child({prefix}) {
+      return <Text text={prefix + use(promiseC) + use(promiseD)} />;
+    }
+
+    function Parent() {
+      return <Child prefix={use(promiseA) + use(promiseB)} />;
+    }
+
+    function App() {
+      return (
+        <Suspense fallback={<Text text="Loading..." />}>
+          <Parent />
+        </Suspense>
+      );
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(<App />);
+      });
+    });
+    expect(Scheduler).toHaveYielded(['ABCD']);
+    expect(root).toMatchRenderedOutput('ABCD');
+  });
+
+  // @gate enableUseHook
+  test('use(promise) in multiple sibling components', async () => {
+    // This tests that the state for tracking promises is reset per component.
+
+    const promiseA = {then: () => {}, status: 'pending', value: null};
+    const promiseB = {then: () => {}, status: 'pending', value: null};
+    const promiseC = {then: () => {}, status: 'fulfilled', value: 'C'};
+    const promiseD = {then: () => {}, status: 'fulfilled', value: 'D'};
+
+    function Sibling1({prefix}) {
+      return <Text text={use(promiseA) + use(promiseB)} />;
+    }
+
+    function Sibling2() {
+      return <Text text={use(promiseC) + use(promiseD)} />;
+    }
+
+    function App() {
+      return (
+        <Suspense fallback={<Text text="Loading..." />}>
+          <Sibling1 />
+          <Sibling2 />
+        </Suspense>
+      );
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(<App />);
+      });
+    });
+    expect(Scheduler).toHaveYielded(['CD', 'Loading...']);
+    expect(root).toMatchRenderedOutput('Loading...');
+  });
+
+  // @gate enableUseHook
   test('erroring in the same component as an uncached promise does not result in an infinite loop', async () => {
     class ErrorBoundary extends React.Component {
       state = {error: null};
@@ -385,5 +460,41 @@ describe('ReactWakeable', () => {
     expect(Scheduler).toHaveYielded(['Hello ', 'world!']);
 
     expect(root).toMatchRenderedOutput(<div>Hello world!</div>);
+  });
+
+  // @gate enableUseHook || !__DEV__
+  test('warns if use(promise) is wrapped with try/catch block', async () => {
+    function Async() {
+      try {
+        return <Text text={use(Promise.resolve('Async'))} />;
+      } catch (e) {
+        return <Text text="Fallback" />;
+      }
+    }
+
+    spyOnDev(console, 'error');
+    function App() {
+      return (
+        <Suspense fallback={<Text text="Loading..." />}>
+          <Async />
+        </Suspense>
+      );
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(<App />);
+      });
+    });
+
+    if (__DEV__) {
+      expect(console.error.calls.count()).toBe(1);
+      expect(console.error.calls.argsFor(0)[0]).toContain(
+        'Warning: `use` was called from inside a try/catch block. This is not ' +
+          'allowed and can lead to unexpected behavior. To handle errors ' +
+          'triggered by `use`, wrap your component in a error boundary.',
+      );
+    }
   });
 });
