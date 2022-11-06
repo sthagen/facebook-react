@@ -269,6 +269,68 @@ describe('ReactOffscreen', () => {
   });
 
   // @gate enableOffscreen
+  it('nested offscreen does not call componentWillUnmount when hidden', async () => {
+    // This is a bug that appeared during production test of <unstable_Offscreen />.
+    // It is a very specific scenario with nested Offscreens. The inner offscreen
+    // goes from visible to hidden in synchronous update.
+    class ClassComponent extends React.Component {
+      render() {
+        return <Text text="Child" />;
+      }
+
+      componentWillUnmount() {
+        Scheduler.unstable_yieldValue('componentWillUnmount');
+      }
+
+      componentDidMount() {
+        Scheduler.unstable_yieldValue('componentDidMount');
+      }
+    }
+
+    let _setIsVisible;
+    let isFirstRender = true;
+
+    function App() {
+      const [isVisible, setIsVisible] = React.useState(true);
+      _setIsVisible = setIsVisible;
+      if (isFirstRender === true) {
+        setIsVisible(false);
+        isFirstRender = false;
+      }
+
+      return (
+        <Offscreen mode="hidden">
+          <Offscreen mode={isVisible ? 'visible' : 'hidden'}>
+            <ClassComponent />
+          </Offscreen>
+        </Offscreen>
+      );
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      root.render(<App />);
+    });
+
+    expect(Scheduler).toHaveYielded(['Child']);
+    expect(root).toMatchRenderedOutput(<span hidden={true} prop="Child" />);
+
+    await act(async () => {
+      _setIsVisible(true);
+    });
+
+    expect(Scheduler).toHaveYielded(['Child']);
+    expect(root).toMatchRenderedOutput(<span hidden={true} prop="Child" />);
+
+    await act(async () => {
+      _setIsVisible(false);
+    });
+
+    expect(Scheduler).toHaveYielded(['Child']);
+    expect(root).toMatchRenderedOutput(<span hidden={true} prop="Child" />);
+  });
+
+  // @gate enableOffscreen
   it('mounts/unmounts layout effects when visibility changes (starting hidden)', async () => {
     function Child({text}) {
       useLayoutEffect(() => {
