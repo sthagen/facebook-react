@@ -187,7 +187,7 @@ function coerceRef(
       ) {
         return current.ref;
       }
-      const ref = function(value: mixed) {
+      const ref = function (value: mixed) {
         const refs = resolvedInst.refs;
         if (value === null) {
           delete refs[stringRef];
@@ -768,7 +768,7 @@ function createChildReconciler(
 
     if (__DEV__) {
       // First, validate keys.
-      let knownKeys = null;
+      let knownKeys: Set<string> | null = null;
       for (let i = 0; i < newChildren.length; i++) {
         const child = newChildren[i];
         knownKeys = warnOnInvalidKey(child, knownKeys, returnFiber);
@@ -961,7 +961,7 @@ function createChildReconciler(
       // We'll get a different iterator later for the main pass.
       const newChildren = iteratorFn.call(newChildrenIterable);
       if (newChildren) {
-        let knownKeys = null;
+        let knownKeys: Set<string> | null = null;
         let step = newChildren.next();
         for (; !step.done; step = newChildren.next()) {
           const child = step.value;
@@ -1354,9 +1354,8 @@ function createChildReconciler(
   return reconcileChildFibers;
 }
 
-export const reconcileChildFibers: ChildReconciler = createChildReconciler(
-  true,
-);
+export const reconcileChildFibers: ChildReconciler =
+  createChildReconciler(true);
 export const mountChildFibers: ChildReconciler = createChildReconciler(false);
 
 export function cloneChildFibers(

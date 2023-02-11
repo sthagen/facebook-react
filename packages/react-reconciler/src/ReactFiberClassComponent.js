@@ -92,18 +92,18 @@ let didWarnAboutContextTypeAndContextTypes;
 let didWarnAboutInvalidateContextType;
 
 if (__DEV__) {
-  didWarnAboutStateAssignmentForComponent = new Set();
-  didWarnAboutUninitializedState = new Set();
-  didWarnAboutGetSnapshotBeforeUpdateWithoutDidUpdate = new Set();
-  didWarnAboutLegacyLifecyclesAndDerivedState = new Set();
-  didWarnAboutDirectlyAssigningPropsToState = new Set();
-  didWarnAboutUndefinedDerivedState = new Set();
-  didWarnAboutContextTypeAndContextTypes = new Set();
-  didWarnAboutInvalidateContextType = new Set();
+  didWarnAboutStateAssignmentForComponent = new Set<string>();
+  didWarnAboutUninitializedState = new Set<string>();
+  didWarnAboutGetSnapshotBeforeUpdateWithoutDidUpdate = new Set<string>();
+  didWarnAboutLegacyLifecyclesAndDerivedState = new Set<string>();
+  didWarnAboutDirectlyAssigningPropsToState = new Set<string>();
+  didWarnAboutUndefinedDerivedState = new Set<string>();
+  didWarnAboutContextTypeAndContextTypes = new Set<string>();
+  didWarnAboutInvalidateContextType = new Set<string>();
 
-  const didWarnOnInvalidCallback = new Set();
+  const didWarnOnInvalidCallback = new Set<string>();
 
-  warnOnInvalidCallback = function(callback: mixed, callerName: string) {
+  warnOnInvalidCallback = function (callback: mixed, callerName: string) {
     if (callback === null || typeof callback === 'function') {
       return;
     }
@@ -119,7 +119,7 @@ if (__DEV__) {
     }
   };
 
-  warnOnUndefinedDerivedState = function(type: any, partialState: any) {
+  warnOnUndefinedDerivedState = function (type: any, partialState: any) {
     if (partialState === undefined) {
       const componentName = getComponentNameFromType(type) || 'Component';
       if (!didWarnAboutUndefinedDerivedState.has(componentName)) {
@@ -140,7 +140,7 @@ if (__DEV__) {
   // exception.
   Object.defineProperty(fakeInternalInstance, '_processChildContext', {
     enumerable: false,
-    value: function(): empty {
+    value: function (): empty {
       throw new Error(
         '_processChildContext is not available in React 16+. This likely ' +
           'means you have multiple copies of React and are attempting to nest ' +

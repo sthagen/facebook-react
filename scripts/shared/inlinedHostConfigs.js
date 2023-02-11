@@ -8,7 +8,7 @@
 
 module.exports = [
   {
-    shortName: 'dom',
+    shortName: 'dom-node',
     entryPoints: [
       'react-dom',
       'react-dom/unstable_testing',
@@ -46,7 +46,7 @@ module.exports = [
     isServerSupported: true,
   },
   {
-    shortName: 'bun',
+    shortName: 'dom-bun',
     entryPoints: ['react-dom', 'react-dom/src/server/ReactDOMFizzServerBun.js'],
     paths: [
       'react-dom',
@@ -89,6 +89,41 @@ module.exports = [
       'react-server-dom-webpack/client',
       'react-server-dom-webpack/server.browser',
       'react-server-dom-webpack/src/ReactFlightDOMServerBrowser.js', // react-server-dom-webpack/server.browser
+      'react-client/src/ReactFlightClientStream.js', // We can only type check this in streaming configurations.
+      'react-devtools',
+      'react-devtools-core',
+      'react-devtools-shell',
+      'react-devtools-shared',
+      'shared/ReactDOMSharedInternals',
+    ],
+    isFlowTyped: true,
+    isServerSupported: true,
+  },
+  {
+    shortName: 'dom-edge',
+    entryPoints: [
+      'react-dom',
+      'react-dom/unstable_testing',
+      'react-dom/src/server/ReactDOMFizzServerEdge.js',
+      'react-dom/static.edge',
+      'react-dom/server-rendering-stub',
+      'react-dom/unstable_server-external-runtime',
+      'react-server-dom-webpack/server.edge',
+      'react-server-dom-webpack/client',
+    ],
+    paths: [
+      'react-dom',
+      'react-dom-bindings',
+      'react-dom/client',
+      'react-dom/server.edge',
+      'react-dom/static.edge',
+      'react-dom/unstable_testing',
+      'react-dom/src/server/ReactDOMFizzServerEdge.js', // react-dom/server.edge
+      'react-dom/src/server/ReactDOMFizzStaticEdge.js',
+      'react-server-dom-webpack',
+      'react-server-dom-webpack/client',
+      'react-server-dom-webpack/server.edge',
+      'react-server-dom-webpack/src/ReactFlightDOMServerEdge.js', // react-server-dom-webpack/server.edge
       'react-client/src/ReactFlightClientStream.js', // We can only type check this in streaming configurations.
       'react-devtools',
       'react-devtools-core',

@@ -22,8 +22,14 @@ import {
   close,
 } from 'react-client/src/ReactFlightClientStream';
 
+type CallServerCallback = <A, T>(
+  {filepath: string, name: string},
+  args: A,
+) => Promise<T>;
+
 export type Options = {
   moduleMap?: BundlerConfig,
+  callServer?: CallServerCallback,
 };
 
 function startReadingFromStream(
@@ -31,25 +37,26 @@ function startReadingFromStream(
   stream: ReadableStream,
 ): void {
   const reader = stream.getReader();
-  function progress({done, value}: {done: boolean, value: ?any, ...}) {
+  function progress({
+    done,
+    value,
+  }: {
+    done: boolean,
+    value: ?any,
+    ...
+  }): void | Promise<void> {
     if (done) {
       close(response);
       return;
     }
     const buffer: Uint8Array = (value: any);
     processBinaryChunk(response, buffer);
-    return reader
-      .read()
-      .then(progress)
-      .catch(error);
+    return reader.read().then(progress).catch(error);
   }
   function error(e: any) {
     reportGlobalError(response, e);
   }
-  reader
-    .read()
-    .then(progress)
-    .catch(error);
+  reader.read().then(progress).catch(error);
 }
 
 function createFromReadableStream<T>(
@@ -58,6 +65,7 @@ function createFromReadableStream<T>(
 ): Thenable<T> {
   const response: FlightResponse = createResponse(
     options && options.moduleMap ? options.moduleMap : null,
+    options && options.callServer ? options.callServer : undefined,
   );
   startReadingFromStream(response, stream);
   return getRoot(response);
@@ -69,12 +77,13 @@ function createFromFetch<T>(
 ): Thenable<T> {
   const response: FlightResponse = createResponse(
     options && options.moduleMap ? options.moduleMap : null,
+    options && options.callServer ? options.callServer : undefined,
   );
   promiseForResponse.then(
-    function(r) {
+    function (r) {
       startReadingFromStream(response, (r.body: any));
     },
-    function(e) {
+    function (e) {
       reportGlobalError(response, e);
     },
   );
@@ -87,6 +96,7 @@ function createFromXHR<T>(
 ): Thenable<T> {
   const response: FlightResponse = createResponse(
     options && options.moduleMap ? options.moduleMap : null,
+    options && options.callServer ? options.callServer : undefined,
   );
   let processedLength = 0;
   function progress(e: ProgressEvent): void {

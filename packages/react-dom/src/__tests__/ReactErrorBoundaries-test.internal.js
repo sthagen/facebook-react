@@ -796,10 +796,10 @@ describe('ReactErrorBoundaries', () => {
     );
     if (__DEV__) {
       expect(console.error).toHaveBeenCalledTimes(2);
-      expect(console.error.calls.argsFor(0)[0]).toContain(
+      expect(console.error.mock.calls[0][0]).toContain(
         'ReactDOM.render is no longer supported',
       );
-      expect(console.error.calls.argsFor(1)[0]).toContain(
+      expect(console.error.mock.calls[1][0]).toContain(
         'The above error occurred in the <BrokenRender> component:',
       );
     }
@@ -2460,7 +2460,7 @@ describe('ReactErrorBoundaries', () => {
       throw evilError;
     };
     Object.defineProperty(Throws, 'displayName', {
-      get: function() {
+      get: function () {
         throw new Error('gotta catch em all');
       },
     });

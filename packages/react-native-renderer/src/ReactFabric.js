@@ -10,6 +10,7 @@
 import type {HostComponent} from './ReactNativeTypes';
 import type {ReactPortal, ReactNodeList} from 'shared/ReactTypes';
 import type {ElementRef, Element, ElementType} from 'react';
+import type {FiberRoot} from 'react-reconciler/src/ReactInternalTypes';
 
 import './ReactFabricInjection';
 
@@ -43,11 +44,6 @@ import {
 import {LegacyRoot, ConcurrentRoot} from 'react-reconciler/src/ReactRootTags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import getComponentNameFromType from 'shared/getComponentNameFromType';
-
-const {
-  dispatchCommand: fabricDispatchCommand,
-  sendAccessibilityEvent: fabricSendAccessibilityEvent,
-} = nativeFabricUIManager;
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
 
@@ -173,7 +169,7 @@ function dispatchCommand(handle: any, command: string, args: Array<any>) {
   if (handle._internalInstanceHandle != null) {
     const {stateNode} = handle._internalInstanceHandle;
     if (stateNode != null) {
-      fabricDispatchCommand(stateNode.node, command, args);
+      nativeFabricUIManager.dispatchCommand(stateNode.node, command, args);
     }
   } else {
     UIManager.dispatchViewManagerCommand(handle._nativeTag, command, args);
@@ -194,7 +190,7 @@ function sendAccessibilityEvent(handle: any, eventType: string) {
   if (handle._internalInstanceHandle != null) {
     const {stateNode} = handle._internalInstanceHandle;
     if (stateNode != null) {
-      fabricSendAccessibilityEvent(stateNode.node, eventType);
+      nativeFabricUIManager.sendAccessibilityEvent(stateNode.node, eventType);
     }
   } else {
     legacySendAccessibilityEvent(handle._nativeTag, eventType);
@@ -262,7 +258,7 @@ function createPortal(
 
 setBatchingImplementation(batchedUpdatesImpl, discreteUpdates);
 
-const roots = new Map();
+const roots = new Map<number, FiberRoot>();
 
 export {
   // This is needed for implementation details of TouchableNativeFeedback

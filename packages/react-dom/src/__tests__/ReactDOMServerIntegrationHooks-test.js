@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
+ * @jest-environment ./scripts/jest/ReactDOMServerIntegrationEnvironment
  */
 
 /* eslint-disable no-func-assign */
@@ -35,7 +36,7 @@ let clearYields;
 
 function initModules() {
   // Reset warning cache.
-  jest.resetModuleRegistry();
+  jest.resetModules();
 
   React = require('react');
   ReactDOM = require('react-dom');
@@ -72,12 +73,8 @@ function initModules() {
   };
 }
 
-const {
-  resetModules,
-  itRenders,
-  itThrowsWhenRendering,
-  serverRender,
-} = ReactDOMServerIntegrationUtils(initModules);
+const {resetModules, itRenders, itThrowsWhenRendering, serverRender} =
+  ReactDOMServerIntegrationUtils(initModules);
 
 describe('ReactDOMServerHooks', () => {
   beforeEach(() => {

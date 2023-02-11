@@ -16,11 +16,11 @@ const projectRoots = argv._;
 
 let mainWindow = null;
 
-app.on('window-all-closed', function() {
+app.on('window-all-closed', function () {
   app.quit();
 });
 
-app.on('ready', function() {
+app.on('ready', function () {
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 800,
@@ -41,10 +41,13 @@ app.on('ready', function() {
 
   // https://stackoverflow.com/questions/32402327/
   // $FlowFixMe[incompatible-use] found when upgrading Flow
-  mainWindow.webContents.on('new-window', function(event, url) {
-    event.preventDefault();
-    require('electron').shell.openExternal(url);
-  });
+  mainWindow.webContents.on(
+    'new-window',
+    function (event: $FlowFixMe, url: $FlowFixMe) {
+      event.preventDefault();
+      require('electron').shell.openExternal(url);
+    },
+  );
 
   // and load the index.html of the app.
   // $FlowFixMe[incompatible-use] found when upgrading Flow
@@ -59,7 +62,7 @@ app.on('ready', function() {
 
   // Emitted when the window is closed.
   // $FlowFixMe[incompatible-use] found when upgrading Flow
-  mainWindow.on('closed', function() {
+  mainWindow.on('closed', function () {
     mainWindow = null;
   });
 });

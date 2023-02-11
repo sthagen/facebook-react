@@ -24,7 +24,7 @@ import type {TracingMarkerInstance} from './ReactFiberTracingMarkerComponent';
 import {
   supportsResources,
   supportsSingletons,
-  isHostResourceType,
+  isHostHoistableType,
   isHostSingletonType,
 } from './ReactFiberHostConfig';
 import {
@@ -49,7 +49,7 @@ import {
   HostComponent,
   HostText,
   HostPortal,
-  HostResource,
+  HostHoistable,
   HostSingleton,
   ForwardRef,
   Fragment,
@@ -225,7 +225,7 @@ function FiberNode(
 //    is faster.
 // 5) It should be easy to port this to a C struct and keep a C implementation
 //    compatible.
-const createFiber = function(
+const createFiber = function (
   tag: WorkTag,
   pendingProps: mixed,
   key: null | string,
@@ -511,15 +511,15 @@ export function createFiberFromTypeAndProps(
       supportsSingletons
     ) {
       const hostContext = getHostContext();
-      fiberTag = isHostResourceType(type, pendingProps, hostContext)
-        ? HostResource
+      fiberTag = isHostHoistableType(type, pendingProps, hostContext)
+        ? HostHoistable
         : isHostSingletonType(type)
         ? HostSingleton
         : HostComponent;
     } else if (enableFloat && supportsResources) {
       const hostContext = getHostContext();
-      fiberTag = isHostResourceType(type, pendingProps, hostContext)
-        ? HostResource
+      fiberTag = isHostHoistableType(type, pendingProps, hostContext)
+        ? HostHoistable
         : HostComponent;
     } else if (enableHostSingletons && supportsSingletons) {
       fiberTag = isHostSingletonType(type) ? HostSingleton : HostComponent;

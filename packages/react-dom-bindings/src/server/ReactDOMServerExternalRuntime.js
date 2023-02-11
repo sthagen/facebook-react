@@ -27,6 +27,7 @@ if (document.readyState === 'loading') {
   } else {
     // body may not exist yet if the fizz runtime is sent in <head>
     // (e.g. as a preinit resource)
+    // $FlowFixMe[recursive-definition]
     const domBodyObserver = new MutationObserver(() => {
       // We expect the body node to be stable once parsed / created
       if (document.body) {
@@ -75,11 +76,11 @@ function installFizzInstrObserver(target /*: Node */) {
 
 function handleNode(node_ /*: Node */) {
   // $FlowFixMe[incompatible-cast]
-  if (node_.nodeType !== 1 || !(node_ /*: HTMLElement*/).dataset) {
+  if (node_.nodeType !== 1 || !(node_ /*: HTMLElement */).dataset) {
     return;
   }
   // $FlowFixMe[incompatible-cast]
-  const node = (node_ /*: HTMLElement*/);
+  const node = (node_ /*: HTMLElement */);
   const dataset = node.dataset;
   if (dataset['rxi'] != null) {
     clientRenderBoundary(

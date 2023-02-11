@@ -8,13 +8,14 @@
  * @flow
  */
 
-import type {BrowserTheme} from 'react-devtools-shared/src/devtools/views/DevTools';
+import type {BrowserTheme} from './devtools/views/DevTools';
 import type {
-  RendererID,
-  ReactRenderer,
-  Handler,
   DevToolsHook,
-} from 'react-devtools-shared/src/backend/types';
+  Handler,
+  ReactRenderer,
+  RendererID,
+  RendererInterface,
+} from './backend/types';
 
 import {
   patchConsoleUsingWindowValues,
@@ -166,7 +167,7 @@ export function installHook(target: any): DevToolsHook | null {
 
         // Bonus: throw an exception hoping that it gets picked up by a reporting system.
         // Not synchronously so that it doesn't break the calling code.
-        setTimeout(function() {
+        setTimeout(function () {
           throw new Error(
             'React is running in production mode, but dead code ' +
               'elimination has not been applied. Read how to correctly ' +
@@ -303,8 +304,10 @@ export function installHook(target: any): DevToolsHook | null {
           }
         };
 
-        overrideMethod.__REACT_DEVTOOLS_STRICT_MODE_ORIGINAL_METHOD__ = originalMethod;
-        originalMethod.__REACT_DEVTOOLS_STRICT_MODE_OVERRIDE_METHOD__ = overrideMethod;
+        overrideMethod.__REACT_DEVTOOLS_STRICT_MODE_ORIGINAL_METHOD__ =
+          originalMethod;
+        originalMethod.__REACT_DEVTOOLS_STRICT_MODE_OVERRIDE_METHOD__ =
+          overrideMethod;
 
         targetConsole[method] = overrideMethod;
       } catch (error) {}
@@ -517,9 +520,9 @@ export function installHook(target: any): DevToolsHook | null {
 
   // TODO: More meaningful names for "rendererInterfaces" and "renderers".
   const fiberRoots: {[RendererID]: Set<mixed>} = {};
-  const rendererInterfaces = new Map();
+  const rendererInterfaces = new Map<RendererID, RendererInterface>();
   const listeners: {[string]: Array<Handler>} = {};
-  const renderers = new Map();
+  const renderers = new Map<RendererID, ReactRenderer>();
 
   const hook: DevToolsHook = {
     rendererInterfaces,
@@ -555,7 +558,8 @@ export function installHook(target: any): DevToolsHook | null {
   };
 
   if (__TEST__) {
-    hook.dangerous_setTargetConsoleForTesting = dangerous_setTargetConsoleForTesting;
+    hook.dangerous_setTargetConsoleForTesting =
+      dangerous_setTargetConsoleForTesting;
   }
 
   Object.defineProperty(

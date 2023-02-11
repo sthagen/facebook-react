@@ -361,14 +361,12 @@ let workInProgressRootRenderPhaseUpdatedLanes: Lanes = NoLanes;
 // Lanes that were pinged (in an interleaved event) during this render.
 let workInProgressRootPingedLanes: Lanes = NoLanes;
 // Errors that are thrown during the render phase.
-let workInProgressRootConcurrentErrors: Array<
-  CapturedValue<mixed>,
-> | null = null;
+let workInProgressRootConcurrentErrors: Array<CapturedValue<mixed>> | null =
+  null;
 // These are errors that we recovered from without surfacing them to the UI.
 // We will log them once the tree commits.
-let workInProgressRootRecoverableErrors: Array<
-  CapturedValue<mixed>,
-> | null = null;
+let workInProgressRootRecoverableErrors: Array<CapturedValue<mixed>> | null =
+  null;
 
 // The most recent time we committed a fallback. This lets us ensure a train
 // model where we don't commit new loading states in too quick succession.
@@ -406,7 +404,8 @@ export function addTransitionStartCallbackToPendingTransition(
     }
 
     if (currentPendingTransitionCallbacks.transitionStart === null) {
-      currentPendingTransitionCallbacks.transitionStart = [];
+      currentPendingTransitionCallbacks.transitionStart =
+        ([]: Array<Transition>);
     }
 
     currentPendingTransitionCallbacks.transitionStart.push(transition);
@@ -539,7 +538,8 @@ export function addTransitionCompleteCallbackToPendingTransition(
     }
 
     if (currentPendingTransitionCallbacks.transitionComplete === null) {
-      currentPendingTransitionCallbacks.transitionComplete = [];
+      currentPendingTransitionCallbacks.transitionComplete =
+        ([]: Array<Transition>);
     }
 
     currentPendingTransitionCallbacks.transitionComplete.push(transition);
@@ -1002,7 +1002,10 @@ function ensureRootIsScheduled(root: FiberRoot, currentTime: number) {
 
 // This is the entry point for every concurrent task, i.e. anything that
 // goes through Scheduler.
-function performConcurrentWorkOnRoot(root: FiberRoot, didTimeout: boolean) {
+function performConcurrentWorkOnRoot(
+  root: FiberRoot,
+  didTimeout: boolean,
+): $FlowFixMe {
   if (enableProfilerTimer && enableProfilerNestedUpdatePhase) {
     resetNestedUpdateFlag();
   }
@@ -1397,7 +1400,8 @@ function isRenderConsistentWithExternalStores(finishedWork: Fiber): boolean {
   let node: Fiber = finishedWork;
   while (true) {
     if (node.flags & StoreConsistency) {
-      const updateQueue: FunctionComponentUpdateQueue | null = (node.updateQueue: any);
+      const updateQueue: FunctionComponentUpdateQueue | null =
+        (node.updateQueue: any);
       if (updateQueue !== null) {
         const checks = updateQueue.stores;
         if (checks !== null) {
@@ -2969,7 +2973,8 @@ function commitRootImpl(
     const prevRootTransitionCallbacks = root.transitionCallbacks;
     if (prevRootTransitionCallbacks !== null) {
       schedulePostPaintCallback(endTime => {
-        const prevPendingTransitionCallbacks = currentPendingTransitionCallbacks;
+        const prevPendingTransitionCallbacks =
+          currentPendingTransitionCallbacks;
         if (prevPendingTransitionCallbacks !== null) {
           currentPendingTransitionCallbacks = null;
           scheduleCallback(IdleSchedulerPriority, () => {
@@ -3329,7 +3334,7 @@ export function attachPingListener(
   let threadIDs;
   if (pingCache === null) {
     pingCache = root.pingCache = new PossiblyWeakMap();
-    threadIDs = new Set();
+    threadIDs = new Set<mixed>();
     pingCache.set(wakeable, threadIDs);
   } else {
     threadIDs = pingCache.get(wakeable);
@@ -3829,7 +3834,7 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
 let didWarnAboutUpdateInRender = false;
 let didWarnAboutUpdateInRenderForAnotherComponent;
 if (__DEV__) {
-  didWarnAboutUpdateInRenderForAnotherComponent = new Set();
+  didWarnAboutUpdateInRenderForAnotherComponent = new Set<string>();
 }
 
 function warnAboutRenderPhaseUpdatesInDEV(fiber: Fiber) {

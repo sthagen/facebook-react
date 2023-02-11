@@ -5,11 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
+ * @jest-environment ./scripts/jest/ReactDOMServerIntegrationEnvironment
  */
 
 'use strict';
-
-global.TextEncoder = require('util').TextEncoder;
 
 let React;
 let ReactDOM;
@@ -581,18 +580,18 @@ describe('ReactDOMServerHydration', () => {
 
     // Install setters to activate `in` check
     Object.defineProperty(customElement, 'str', {
-      set: function(x) {
+      set: function (x) {
         this._str = x;
       },
-      get: function() {
+      get: function () {
         return this._str;
       },
     });
     Object.defineProperty(customElement, 'obj', {
-      set: function(x) {
+      set: function (x) {
         this._obj = x;
       },
-      get: function() {
+      get: function () {
         return this._obj;
       },
     });

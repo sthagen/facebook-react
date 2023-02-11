@@ -21,7 +21,7 @@ let SuspenseList;
 
 function initModules() {
   // Reset warning cache.
-  jest.resetModuleRegistry();
+  jest.resetModules();
 
   React = require('react');
   ReactDOM = require('react-dom');
@@ -41,11 +41,8 @@ function initModules() {
   };
 }
 
-const {
-  itThrowsWhenRendering,
-  resetModules,
-  serverRender,
-} = ReactDOMServerIntegrationUtils(initModules);
+const {itThrowsWhenRendering, resetModules, serverRender} =
+  ReactDOMServerIntegrationUtils(initModules);
 
 describe('ReactDOMServerSuspense', () => {
   beforeEach(() => {

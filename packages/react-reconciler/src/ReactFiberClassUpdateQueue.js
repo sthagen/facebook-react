@@ -536,7 +536,7 @@ export function processUpdateQueue<State>(
 
     let newBaseState = null;
     let newFirstBaseUpdate = null;
-    let newLastBaseUpdate = null;
+    let newLastBaseUpdate: null | Update<State> = null;
 
     let update: Update<State> = firstBaseUpdate;
     do {
@@ -636,7 +636,8 @@ export function processUpdateQueue<State>(
           const lastPendingUpdate = pendingQueue;
           // Intentionally unsound. Pending updates form a circular list, but we
           // unravel them when transferring them to the base queue.
-          const firstPendingUpdate = ((lastPendingUpdate.next: any): Update<State>);
+          const firstPendingUpdate =
+            ((lastPendingUpdate.next: any): Update<State>);
           lastPendingUpdate.next = null;
           update = firstPendingUpdate;
           queue.lastBaseUpdate = lastPendingUpdate;
@@ -707,9 +708,8 @@ export function deferHiddenCallbacks<State>(
     if (existingHiddenCallbacks === null) {
       updateQueue.shared.hiddenCallbacks = newHiddenCallbacks;
     } else {
-      updateQueue.shared.hiddenCallbacks = existingHiddenCallbacks.concat(
-        newHiddenCallbacks,
-      );
+      updateQueue.shared.hiddenCallbacks =
+        existingHiddenCallbacks.concat(newHiddenCallbacks);
     }
   }
 }

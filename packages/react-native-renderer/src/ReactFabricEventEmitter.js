@@ -45,7 +45,7 @@ function extractPluginEvents(
   nativeEvent: AnyNativeEvent,
   nativeEventTarget: null | EventTarget,
 ): Array<ReactSyntheticEvent> | ReactSyntheticEvent | null {
-  let events = null;
+  let events: Array<ReactSyntheticEvent> | ReactSyntheticEvent | null = null;
   const legacyPlugins = ((plugins: any): Array<LegacyPluginModule<Event>>);
   for (let i = 0; i < legacyPlugins.length; i++) {
     // Not every plugin in the ordering may be loaded at runtime.
@@ -96,7 +96,7 @@ export function dispatchEvent(
     }
   }
 
-  batchedUpdates(function() {
+  batchedUpdates(function () {
     // Emit event to the RawEventEmitter. This is an unused-by-default EventEmitter
     // that can be used to instrument event performance monitoring (primarily - could be useful
     // for other things too).
