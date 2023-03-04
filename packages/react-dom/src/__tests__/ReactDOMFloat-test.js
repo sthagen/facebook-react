@@ -33,6 +33,8 @@ let buffer = '';
 let hasErrored = false;
 let fatalError = undefined;
 let renderOptions;
+let waitForAll;
+let assertLog;
 
 function resetJSDOM(markup) {
   // Test Environment
@@ -62,6 +64,10 @@ describe('ReactDOMFloat', () => {
     ReactDOMFizzServer = require('react-dom/server');
     Stream = require('stream');
     Suspense = React.Suspense;
+
+    const InternalTestUtils = require('internal-test-utils');
+    waitForAll = InternalTestUtils.waitForAll;
+    assertLog = InternalTestUtils.assertLog;
 
     textCache = new Map();
 
@@ -259,10 +265,14 @@ describe('ReactDOMFloat', () => {
     root.render(children);
     return expect(() => {
       try {
-        expect(Scheduler).toFlushWithoutYielding();
+        // TODO: Migrate this to waitForAll()
+        Scheduler.unstable_flushAll();
+        assertLog([]);
       } catch (e) {
         try {
-          expect(Scheduler).toFlushWithoutYielding();
+          // TODO: Migrate this to waitForAll()
+          Scheduler.unstable_flushAll();
+          assertLog([]);
         } catch (f) {}
       }
     });
@@ -283,11 +293,11 @@ describe('ReactDOMFloat', () => {
       </>,
     );
     try {
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
     } catch (e) {
       // for DOMExceptions that happen when expecting this test to fail we need
       // to clear the scheduler first otherwise the expected failure will fail
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       throw e;
     }
     expect(getMeaningfulChildren(document)).toEqual(
@@ -351,7 +361,7 @@ describe('ReactDOMFloat', () => {
         <body>foo</body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -476,7 +486,7 @@ describe('ReactDOMFloat', () => {
         <script async={true} src="foo" />
       </>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -494,7 +504,7 @@ describe('ReactDOMFloat', () => {
         <script data-new="new" async={true} src="foo" />
       </>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     // we don't see the attribute because the resource is the same and was not reconstructed
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
@@ -671,7 +681,7 @@ describe('ReactDOMFloat', () => {
         </body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -968,7 +978,7 @@ body {
         </body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
 
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
@@ -1107,7 +1117,7 @@ body {
         errors.push(err.digest);
       },
     });
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -1157,7 +1167,7 @@ body {
         <body>Hello</body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -1281,8 +1291,8 @@ body {
       <html>
         <head>
           <link rel="stylesheet" href="initial" data-precedence="one" />
+          <link rel="stylesheet" href="foo" data-precedence="one" />
           <link rel="stylesheet" href="preset" data-precedence="preset" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>loading foo bar...</div>
@@ -1304,7 +1314,6 @@ body {
           <link rel="stylesheet" href="foo" data-precedence="one" />
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>loading foo bar...</div>
@@ -1329,7 +1338,6 @@ body {
           <link rel="stylesheet" href="foo" data-precedence="one" />
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>loading foo bar...</div>
@@ -1354,7 +1362,6 @@ body {
           <link rel="stylesheet" href="foo" data-precedence="one" />
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>
@@ -1379,7 +1386,6 @@ body {
           <link rel="stylesheet" href="foo" data-precedence="one" />
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>
@@ -1407,7 +1413,6 @@ body {
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
           <link rel="stylesheet" href="baz" data-precedence="two" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>
@@ -1449,7 +1454,6 @@ body {
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
           <link rel="stylesheet" href="baz" data-precedence="two" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>
@@ -1482,7 +1486,6 @@ body {
           <link rel="stylesheet" href="preset" data-precedence="preset" />
           <link rel="stylesheet" href="bar" data-precedence="default" />
           <link rel="stylesheet" href="baz" data-precedence="two" />
-          <link rel="preload" href="foo" as="style" />
         </head>
         <body>
           <div>
@@ -1634,7 +1637,7 @@ body {
         </body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -1656,7 +1659,7 @@ body {
         </body>
       </html>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -1701,7 +1704,7 @@ body {
         <Throw />
       </ErrorBoundary>,
     );
-    expect(Scheduler).toFlushWithoutYielding();
+    await waitForAll([]);
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
@@ -2267,7 +2270,7 @@ body {
   // @gate enableFloat
   it('always enforces crossOrigin "anonymous" for font preloads', async () => {
     function App() {
-      ReactDOM.preload('foo', {as: 'font'});
+      ReactDOM.preload('foo', {as: 'font', type: 'font/woff2'});
       ReactDOM.preload('bar', {as: 'font', crossOrigin: 'foo'});
       ReactDOM.preload('baz', {as: 'font', crossOrigin: 'use-credentials'});
       ReactDOM.preload('qux', {as: 'font', crossOrigin: 'anonymous'});
@@ -2285,7 +2288,13 @@ body {
     expect(getMeaningfulChildren(document)).toEqual(
       <html>
         <head>
-          <link rel="preload" as="font" href="foo" crossorigin="" />
+          <link
+            rel="preload"
+            as="font"
+            href="foo"
+            crossorigin=""
+            type="font/woff2"
+          />
           <link rel="preload" as="font" href="bar" crossorigin="" />
           <link rel="preload" as="font" href="baz" crossorigin="" />
           <link rel="preload" as="font" href="qux" crossorigin="" />
@@ -2293,6 +2302,147 @@ body {
         <body />
       </html>,
     );
+  });
+
+  describe('ReactDOM.prefetchDNS(href)', () => {
+    it('creates a dns-prefetch resource when called', async () => {
+      function App({url}) {
+        ReactDOM.prefetchDNS(url);
+        ReactDOM.prefetchDNS(url);
+        ReactDOM.prefetchDNS(url, {});
+        ReactDOM.prefetchDNS(url, {crossOrigin: 'use-credentials'});
+        return (
+          <html>
+            <body>hello world</body>
+          </html>
+        );
+      }
+
+      await expect(async () => {
+        await actIntoEmptyDocument(() => {
+          renderToPipeableStream(<App url="foo" />).pipe(writable);
+        });
+      }).toErrorDev([
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. It looks like the you are attempting to set a crossOrigin property for this DNS lookup hint. Browsers do not perform DNS queries using CORS and setting this attribute on the resource hint has no effect. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+      ]);
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="dns-prefetch" href="foo" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+
+      const root = ReactDOMClient.hydrateRoot(document, <App url="foo" />);
+      await expect(async () => {
+        await waitForAll([]);
+      }).toErrorDev([
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. It looks like the you are attempting to set a crossOrigin property for this DNS lookup hint. Browsers do not perform DNS queries using CORS and setting this attribute on the resource hint has no effect. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+      ]);
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="dns-prefetch" href="foo" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+
+      root.render(<App url="bar" />);
+      await expect(async () => {
+        await waitForAll([]);
+      }).toErrorDev([
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+        'ReactDOM.prefetchDNS(): Expected only one argument, `href`, but encountered something with type "object" as a second argument instead. This argument is reserved for future options and is currently disallowed. It looks like the you are attempting to set a crossOrigin property for this DNS lookup hint. Browsers do not perform DNS queries using CORS and setting this attribute on the resource hint has no effect. Try calling ReactDOM.prefetchDNS() with just a single string argument, `href`.',
+      ]);
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="dns-prefetch" href="foo" />
+            <link rel="dns-prefetch" href="bar" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+    });
+  });
+
+  describe('ReactDOM.preconnect(href, { crossOrigin })', () => {
+    it('creates a preconnect resource when called', async () => {
+      function App({url}) {
+        ReactDOM.preconnect(url);
+        ReactDOM.preconnect(url);
+        ReactDOM.preconnect(url, {crossOrigin: true});
+        ReactDOM.preconnect(url, {crossOrigin: ''});
+        ReactDOM.preconnect(url, {crossOrigin: 'anonymous'});
+        ReactDOM.preconnect(url, {crossOrigin: 'use-credentials'});
+        return (
+          <html>
+            <body>hello world</body>
+          </html>
+        );
+      }
+
+      await expect(async () => {
+        await actIntoEmptyDocument(() => {
+          renderToPipeableStream(<App url="foo" />).pipe(writable);
+        });
+      }).toErrorDev(
+        'ReactDOM.preconnect(): Expected the `crossOrigin` option (second argument) to be a string but encountered something with type "boolean" instead. Try removing this option or passing a string value instead.',
+      );
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="preconnect" href="foo" />
+            <link rel="preconnect" href="foo" crossorigin="" />
+            <link rel="preconnect" href="foo" crossorigin="use-credentials" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+
+      const root = ReactDOMClient.hydrateRoot(document, <App url="foo" />);
+      await expect(async () => {
+        await waitForAll([]);
+      }).toErrorDev(
+        'ReactDOM.preconnect(): Expected the `crossOrigin` option (second argument) to be a string but encountered something with type "boolean" instead. Try removing this option or passing a string value instead.',
+      );
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="preconnect" href="foo" />
+            <link rel="preconnect" href="foo" crossorigin="" />
+            <link rel="preconnect" href="foo" crossorigin="use-credentials" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+
+      root.render(<App url="bar" />);
+      await expect(async () => {
+        await waitForAll([]);
+      }).toErrorDev(
+        'ReactDOM.preconnect(): Expected the `crossOrigin` option (second argument) to be a string but encountered something with type "boolean" instead. Try removing this option or passing a string value instead.',
+      );
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="preconnect" href="foo" />
+            <link rel="preconnect" href="foo" crossorigin="" />
+            <link rel="preconnect" href="foo" crossorigin="use-credentials" />
+            <link rel="preconnect" href="bar" />
+            <link rel="preconnect" href="bar" crossorigin="" />
+            <link rel="preconnect" href="bar" crossorigin="use-credentials" />
+          </head>
+          <body>hello world</body>
+        </html>,
+      );
+    });
   });
 
   describe('ReactDOM.preload(href, { as: ... })', () => {
@@ -2347,6 +2497,7 @@ body {
 
       function ClientApp() {
         ReactDOM.preload('foo', {as: 'style'});
+        ReactDOM.preload('font', {as: 'font', type: 'font/woff2'});
         React.useInsertionEffect(() => ReactDOM.preload('bar', {as: 'script'}));
         React.useLayoutEffect(() => ReactDOM.preload('baz', {as: 'font'}));
         React.useEffect(() => ReactDOM.preload('qux', {as: 'style'}));
@@ -2361,11 +2512,18 @@ body {
         );
       }
       ReactDOMClient.hydrateRoot(document, <ClientApp />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
             <link rel="preload" as="style" href="foo" />
+            <link
+              rel="preload"
+              as="font"
+              href="font"
+              crossorigin=""
+              type="font/woff2"
+            />
             <link rel="preload" as="font" href="baz" crossorigin="" />
             <link rel="preload" as="style" href="qux" />
           </head>
@@ -2576,7 +2734,7 @@ body {
       }
 
       ReactDOMClient.hydrateRoot(document, <ClientApp />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -2606,7 +2764,7 @@ body {
 
       const root = ReactDOMClient.createRoot(document);
       root.render(<App />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -2681,7 +2839,7 @@ body {
       }
 
       ReactDOMClient.hydrateRoot(document, <ClientApp />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -2710,7 +2868,7 @@ body {
 
       const root = ReactDOMClient.createRoot(document);
       root.render(<App />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -2902,7 +3060,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
@@ -2940,7 +3098,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
@@ -3023,7 +3181,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3058,7 +3216,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       root.render(
         <html>
@@ -3066,7 +3224,7 @@ body {
           <body>hello world</body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3108,8 +3266,8 @@ body {
           },
         },
       );
-      expect(() => {
-        expect(Scheduler).toFlushWithoutYielding();
+      await expect(async () => {
+        await waitForAll([]);
       }).toErrorDev(
         [
           'Warning: Text content did not match. Server: "server" Client: "client"',
@@ -3160,8 +3318,8 @@ body {
           },
         },
       );
-      expect(() => {
-        expect(Scheduler).toFlushWithoutYielding();
+      await expect(async () => {
+        await waitForAll([]);
       }).toErrorDev(
         [
           'Warning: Text content did not match. Server: "server" Client: "client"',
@@ -3194,7 +3352,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3216,7 +3374,7 @@ body {
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       // The reason we do not see preloads in the head is they are inserted synchronously
       // during render and then when the new singleton mounts it resets it's content, retaining only styles
       expect(getMeaningfulChildren(document)).toEqual(
@@ -3253,7 +3411,7 @@ body {
           container
         </>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3313,7 +3471,7 @@ body {
           container
         </>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3344,6 +3502,7 @@ body {
         <div>1</div>,
       ]);
     });
+
     // @gate enableFloat
     it('escapes hrefs when selecting matching elements in the document when rendering Resources', async () => {
       function App() {
@@ -3384,7 +3543,7 @@ body {
         );
       }
       root.render(<ClientApp />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3447,7 +3606,7 @@ body {
       container = document.getElementById('container');
       const root = ReactDOMClient.createRoot(container);
       root.render(<App />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -3523,7 +3682,7 @@ body {
           </svg>
         </div>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.body)).toEqual(
         <div>
           <svg>
@@ -3569,7 +3728,7 @@ body {
           </noscript>
         </div>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.body)).toEqual(
         <div>
           {/* On the client, <noscript> never renders children */}
@@ -3644,8 +3803,8 @@ body {
           </body>
         </html>,
       );
-      expect(() => {
-        expect(Scheduler).toFlushWithoutYielding();
+      await expect(async () => {
+        await waitForAll([]);
       }).toErrorDev([
         'React encountered a <link rel="stylesheet" href="foo" ... /> with a `precedence` prop that also included the `onLoad` and `onError` props. The presence of loading and error handlers indicates an intent to manage the stylesheet loading state from your from your Component code and React will not hoist or deduplicate this stylesheet. If your intent was to have React hoist and deduplciate this stylesheet using the `precedence` prop remove the `onLoad` and `onError` props, otherwise remove the `precedence` prop.',
       ]);
@@ -3915,7 +4074,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
@@ -3946,7 +4105,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -4002,19 +4161,14 @@ background-color: green;
         resolveText('first');
       });
 
-      const styleTemplates = document.querySelectorAll(
-        'template[data-precedence]',
-      );
-      expect(styleTemplates.length).toBe(1);
-      expect(getMeaningfulChildren(styleTemplates[0].content)).toEqual(
-        <style data-href="foo" data-precedence="default">
-          {css}
-        </style>,
-      );
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head />
-          <body />
+          <body>
+            <style data-href="foo" data-precedence="default" media="not all">
+              {css}
+            </style>
+          </body>
         </html>,
       );
 
@@ -4037,6 +4191,266 @@ background-color: green;
             <div>second</div>
           </body>
         </html>,
+      );
+    });
+
+    it('can hoist styles flushed early even when no other style dependencies are flushed on completion', async () => {
+      await actIntoEmptyDocument(() => {
+        renderToPipeableStream(
+          <html>
+            <body>
+              <Suspense fallback="loading...">
+                <BlockedOn value="first">
+                  <style href="foo" precedence="default">
+                    some css
+                  </style>
+                  <div>first</div>
+                  <BlockedOn value="second">
+                    <div>second</div>
+                  </BlockedOn>
+                </BlockedOn>
+              </Suspense>
+            </body>
+          </html>,
+        ).pipe(writable);
+      });
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head />
+          <body>loading...</body>
+        </html>,
+      );
+
+      // When we resolve first we flush the style tag because it is ready but we aren't yet ready to
+      // flush the entire boundary and reveal it.
+      await act(() => {
+        resolveText('first');
+      });
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head />
+          <body>
+            loading...
+            <style data-href="foo" data-precedence="default" media="not all">
+              some css
+            </style>
+          </body>
+        </html>,
+      );
+
+      // When we resolve second we flush the rest of the boundary segments and reveal the boundary. The style tag
+      // is hoisted during this reveal process even though no other styles flushed during this tick
+      await act(() => {
+        resolveText('second');
+      });
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <style data-href="foo" data-precedence="default">
+              some css
+            </style>
+          </head>
+          <body>
+            <div>first</div>
+            <div>second</div>
+          </body>
+        </html>,
+      );
+    });
+
+    it('can emit multiple style rules into a single style tag for a given precedence', async () => {
+      await actIntoEmptyDocument(() => {
+        renderToPipeableStream(
+          <html>
+            <body>
+              <style href="1" precedence="default">
+                1
+              </style>
+              <style href="2" precedence="foo">
+                foo2
+              </style>
+              <style href="3" precedence="default">
+                3
+              </style>
+              <style href="4" precedence="default">
+                4
+              </style>
+              <style href="5" precedence="foo">
+                foo5
+              </style>
+              <div>initial</div>
+              <Suspense fallback="loading...">
+                <BlockedOn value="first">
+                  <style href="6" precedence="default">
+                    6
+                  </style>
+                  <style href="7" precedence="foo">
+                    foo7
+                  </style>
+                  <style href="8" precedence="default">
+                    8
+                  </style>
+                  <style href="9" precedence="default">
+                    9
+                  </style>
+                  <style href="10" precedence="foo">
+                    foo10
+                  </style>
+                  <div>first</div>
+                  <BlockedOn value="second">
+                    <style href="11" precedence="default">
+                      11
+                    </style>
+                    <style href="12" precedence="foo">
+                      foo12
+                    </style>
+                    <style href="13" precedence="default">
+                      13
+                    </style>
+                    <style href="14" precedence="default">
+                      14
+                    </style>
+                    <style href="15" precedence="foo">
+                      foo15
+                    </style>
+                    <div>second</div>
+                  </BlockedOn>
+                </BlockedOn>
+              </Suspense>
+            </body>
+          </html>,
+        ).pipe(writable);
+      });
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <style data-href="1 3 4" data-precedence="default">
+              134
+            </style>
+            <style data-href="2 5" data-precedence="foo">
+              foo2foo5
+            </style>
+          </head>
+          <body>
+            <div>initial</div>loading...
+          </body>
+        </html>,
+      );
+
+      // When we resolve first we flush the style tag because it is ready but we aren't yet ready to
+      // flush the entire boundary and reveal it.
+      await act(() => {
+        resolveText('first');
+      });
+      await act(() => {
+        resolveText('second');
+      });
+
+      // Some sets of styles were ready before the entire boundary and they got emitted as early as they were
+      // ready. The remaining styles were ready when the boundary finished and they got grouped as well
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <style data-href="1 3 4" data-precedence="default">
+              134
+            </style>
+            <style data-href="6 8 9" data-precedence="default">
+              689
+            </style>
+            <style data-href="11 13 14" data-precedence="default">
+              111314
+            </style>
+            <style data-href="2 5" data-precedence="foo">
+              foo2foo5
+            </style>
+            <style data-href="7 10" data-precedence="foo">
+              foo7foo10
+            </style>
+            <style data-href="12 15" data-precedence="foo">
+              foo12foo15
+            </style>
+          </head>
+          <body>
+            <div>initial</div>
+            <div>first</div>
+            <div>second</div>
+          </body>
+        </html>,
+      );
+
+      // Client inserted style tags are not grouped together but can hydrate against a grouped set
+      ReactDOMClient.hydrateRoot(
+        document,
+        <html>
+          <body>
+            <style href="1" precedence="default">
+              1
+            </style>
+            <style href="2" precedence="foo">
+              foo2
+            </style>
+            <style href="16" precedence="default">
+              16
+            </style>
+            <style href="17" precedence="default">
+              17
+            </style>
+          </body>
+        </html>,
+      );
+      expect(Scheduler).toFlushWithoutYielding();
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <style data-href="1 3 4" data-precedence="default">
+              134
+            </style>
+            <style data-href="6 8 9" data-precedence="default">
+              689
+            </style>
+            <style data-href="11 13 14" data-precedence="default">
+              111314
+            </style>
+            <style data-href="16" data-precedence="default">
+              16
+            </style>
+            <style data-href="17" data-precedence="default">
+              17
+            </style>
+            <style data-href="2 5" data-precedence="foo">
+              foo2foo5
+            </style>
+            <style data-href="7 10" data-precedence="foo">
+              foo7foo10
+            </style>
+            <style data-href="12 15" data-precedence="foo">
+              foo12foo15
+            </style>
+          </head>
+          <body>
+            <div>initial</div>
+            <div>first</div>
+            <div>second</div>
+          </body>
+        </html>,
+      );
+    });
+
+    it('warns if you render a <style> with an href with a space on the server', async () => {
+      await expect(async () => {
+        await actIntoEmptyDocument(() => {
+          renderToPipeableStream(
+            <html>
+              <body>
+                <style href="foo bar" precedence="default">
+                  style
+                </style>
+              </body>
+            </html>,
+          ).pipe(writable);
+        });
+      }).toErrorDev(
+        'React expected the `href` prop for a <style> tag opting into hoisting semantics using the `precedence` prop to not have any spaces but ecountered spaces instead. using spaces in this prop will cause hydration of this style to fail on the client. The href for the <style> where this ocurred is "foo bar".',
       );
     });
   });
@@ -4089,7 +4503,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       // The async script with onLoad is inserted in the right place but does not cause the hydration
       // to fail.
       expect(getMeaningfulChildren(document)).toEqual(
@@ -4156,7 +4570,7 @@ background-color: green;
           </svg>
         </div>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.body)).toEqual(
         <div>
           <svg>
@@ -4202,7 +4616,7 @@ background-color: green;
           </noscript>
         </div>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.body)).toEqual(
         <div>
           {/* On the client, <noscript> never renders children */}
@@ -4304,7 +4718,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -4319,7 +4733,7 @@ background-color: green;
           <body />
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head />
@@ -4338,7 +4752,7 @@ background-color: green;
           </div>,
         );
       });
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document.head)).toEqual(
         <meta name="foo" data-foo="data" content="bar" />,
@@ -4346,7 +4760,7 @@ background-color: green;
       expect(getMeaningfulChildren(container)).toEqual(<div />);
 
       root.render(<div />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.head)).toEqual(undefined);
     });
 
@@ -4380,7 +4794,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -4395,7 +4809,7 @@ background-color: green;
           <body />
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head />
@@ -4414,7 +4828,7 @@ background-color: green;
           </div>,
         );
       });
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document.head)).toEqual(
         <link rel="foo" data-foo="data" href="foo" />,
@@ -4422,7 +4836,7 @@ background-color: green;
       expect(getMeaningfulChildren(container)).toEqual(<div />);
 
       root.render(<div />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.head)).toEqual(undefined);
     });
 
@@ -4456,7 +4870,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -4471,7 +4885,7 @@ background-color: green;
           <body />
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head />
@@ -4490,7 +4904,7 @@ background-color: green;
           </div>,
         );
       });
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
 
       expect(getMeaningfulChildren(document.head)).toEqual(
         <title data-foo="foo">a title</title>,
@@ -4498,7 +4912,7 @@ background-color: green;
       expect(getMeaningfulChildren(container)).toEqual(<div />);
 
       root.render(<div />);
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document.head)).toEqual(undefined);
     });
 
@@ -4627,7 +5041,7 @@ background-color: green;
           <meta name="after" />
         </>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -4647,7 +5061,7 @@ background-color: green;
           {null}
         </>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head />
@@ -4753,8 +5167,8 @@ background-color: green;
         },
       );
       try {
-        expect(() => {
-          expect(Scheduler).toFlushWithoutYielding();
+        await expect(async () => {
+          await waitForAll([]);
         }).toErrorDev(
           [
             'Warning: Text content did not match. Server: "server" Client: "client"',
@@ -4765,7 +5179,7 @@ background-color: green;
       } catch (e) {
         // When gates are false this test fails on a DOMException if you don't clear the scheduler after catching.
         // When gates are true this branch should not be hit
-        expect(Scheduler).toFlushWithoutYielding();
+        await waitForAll([]);
         throw e;
       }
       expect(getMeaningfulChildren(document)).toEqual(

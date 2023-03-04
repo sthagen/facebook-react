@@ -113,7 +113,7 @@ export const enableUseEffectEventHook = __EXPERIMENTAL__;
 // Test in www before enabling in open source.
 // Enables DOM-server to stream its instruction set as data-attributes
 // (handled with an MutationObserver) instead of inline-scripts
-export const enableFizzExternalRuntime = false;
+export const enableFizzExternalRuntime = true;
 
 // -----------------------------------------------------------------------------
 // Chopping Block
@@ -134,9 +134,6 @@ export const disableModulePatternComponents = false;
 export const disableLegacyContext = false;
 
 export const enableUseRefAccessWarning = false;
-
-// Enables time slicing for updates that aren't wrapped in startTransition.
-export const enableSyncDefaultUpdates = true;
 
 export const enableUnifiedSyncLane = __EXPERIMENTAL__;
 

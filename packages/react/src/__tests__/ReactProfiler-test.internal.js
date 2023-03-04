@@ -17,6 +17,9 @@ let Scheduler;
 let ReactTestRenderer;
 let act;
 let AdvanceTime;
+let assertLog;
+let waitFor;
+let waitForAll;
 
 function loadModules({
   enableProfilerTimer = true,
@@ -48,6 +51,11 @@ function loadModules({
     ReactNoop = null;
     ReactTestRenderer = require('react-test-renderer');
   }
+
+  const InternalTestUtils = require('internal-test-utils');
+  assertLog = InternalTestUtils.assertLog;
+  waitFor = InternalTestUtils.waitFor;
+  waitForAll = InternalTestUtils.waitForAll;
 
   AdvanceTime = class extends React.Component {
     static defaultProps = {
@@ -188,7 +196,7 @@ describe(`onRender`, () => {
     expect(callback).toHaveBeenCalledTimes(2);
   });
 
-  it('is not invoked until the commit phase', () => {
+  it('is not invoked until the commit phase', async () => {
     const callback = jest.fn();
 
     const Yield = ({value}) => {
@@ -196,19 +204,7 @@ describe(`onRender`, () => {
       return null;
     };
 
-    if (gate(flags => flags.enableSyncDefaultUpdates)) {
-      React.startTransition(() => {
-        ReactTestRenderer.create(
-          <React.Profiler id="test" onRender={callback}>
-            <Yield value="first" />
-            <Yield value="last" />
-          </React.Profiler>,
-          {
-            unstable_isConcurrent: true,
-          },
-        );
-      });
-    } else {
+    React.startTransition(() => {
       ReactTestRenderer.create(
         <React.Profiler id="test" onRender={callback}>
           <Yield value="first" />
@@ -218,12 +214,12 @@ describe(`onRender`, () => {
           unstable_isConcurrent: true,
         },
       );
-    }
+    });
 
     // Times are logged until a render is committed.
-    expect(Scheduler).toFlushAndYieldThrough(['first']);
+    await waitFor(['first']);
     expect(callback).toHaveBeenCalledTimes(0);
-    expect(Scheduler).toFlushAndYield(['last']);
+    await waitForAll(['last']);
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
@@ -260,7 +256,7 @@ describe(`onRender`, () => {
 
     // TODO: unstable_now is called by more places than just the profiler.
     // Rewrite this test so it's less fragile.
-    expect(Scheduler).toHaveYielded([
+    assertLog([
       'read current time',
       'read current time',
       'read current time',
@@ -681,7 +677,7 @@ describe(`onRender`, () => {
         </React.Profiler>,
       );
     });
-    expect(Scheduler).toHaveYielded(['false:false', 'true:false', 'true:true']);
+    assertLog(['false:false', 'true:false', 'true:true']);
 
     expect(onRender).toHaveBeenCalledTimes(3);
     expect(onRender.mock.calls[0][1]).toBe('mount');
@@ -723,7 +719,7 @@ describe(`onRender`, () => {
         </React.Profiler>,
       );
     });
-    expect(Scheduler).toHaveYielded([false, true]);
+    assertLog([false, true]);
 
     // Verify that the nested update inside of the sync work is appropriately tagged.
     expect(onRender).toHaveBeenCalledTimes(2);
@@ -732,7 +728,7 @@ describe(`onRender`, () => {
   });
 
   describe('with regard to interruptions', () => {
-    it('should accumulate actual time after a scheduling interruptions', () => {
+    it('should accumulate actual time after a scheduling interruptions', async () => {
       const callback = jest.fn();
 
       const Yield = ({renderTime}) => {
@@ -744,17 +740,7 @@ describe(`onRender`, () => {
       Scheduler.unstable_advanceTime(5); // 0 -> 5
 
       // Render partially, but run out of time before completing.
-      if (gate(flags => flags.enableSyncDefaultUpdates)) {
-        React.startTransition(() => {
-          ReactTestRenderer.create(
-            <React.Profiler id="test" onRender={callback}>
-              <Yield renderTime={2} />
-              <Yield renderTime={3} />
-            </React.Profiler>,
-            {unstable_isConcurrent: true},
-          );
-        });
-      } else {
+      React.startTransition(() => {
         ReactTestRenderer.create(
           <React.Profiler id="test" onRender={callback}>
             <Yield renderTime={2} />
@@ -762,12 +748,12 @@ describe(`onRender`, () => {
           </React.Profiler>,
           {unstable_isConcurrent: true},
         );
-      }
-      expect(Scheduler).toFlushAndYieldThrough(['Yield:2']);
+      });
+      await waitFor(['Yield:2']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Resume render for remaining children.
-      expect(Scheduler).toFlushAndYield(['Yield:3']);
+      await waitForAll(['Yield:3']);
 
       // Verify that logged times include both durations above.
       expect(callback).toHaveBeenCalledTimes(1);
@@ -778,7 +764,7 @@ describe(`onRender`, () => {
       expect(call[5]).toBe(10); // commit time
     });
 
-    it('should not include time between frames', () => {
+    it('should not include time between frames', async () => {
       const callback = jest.fn();
 
       const Yield = ({renderTime}) => {
@@ -791,20 +777,7 @@ describe(`onRender`, () => {
 
       // Render partially, but don't finish.
       // This partial render should take 5ms of simulated time.
-      if (gate(flags => flags.enableSyncDefaultUpdates)) {
-        React.startTransition(() => {
-          ReactTestRenderer.create(
-            <React.Profiler id="outer" onRender={callback}>
-              <Yield renderTime={5} />
-              <Yield renderTime={10} />
-              <React.Profiler id="inner" onRender={callback}>
-                <Yield renderTime={17} />
-              </React.Profiler>
-            </React.Profiler>,
-            {unstable_isConcurrent: true},
-          );
-        });
-      } else {
+      React.startTransition(() => {
         ReactTestRenderer.create(
           <React.Profiler id="outer" onRender={callback}>
             <Yield renderTime={5} />
@@ -815,8 +788,8 @@ describe(`onRender`, () => {
           </React.Profiler>,
           {unstable_isConcurrent: true},
         );
-      }
-      expect(Scheduler).toFlushAndYieldThrough(['Yield:5']);
+      });
+      await waitFor(['Yield:5']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Simulate time moving forward while frame is paused.
@@ -824,7 +797,7 @@ describe(`onRender`, () => {
 
       // Flush the remaining work,
       // Which should take an additional 10ms of simulated time.
-      expect(Scheduler).toFlushAndYield(['Yield:10', 'Yield:17']);
+      await waitForAll(['Yield:10', 'Yield:17']);
       expect(callback).toHaveBeenCalledTimes(2);
 
       const [innerCall, outerCall] = callback.mock.calls;
@@ -843,7 +816,7 @@ describe(`onRender`, () => {
       expect(outerCall[5]).toBe(87); // commit time
     });
 
-    it('should report the expected times when a high-pri update replaces a mount in-progress', () => {
+    it('should report the expected times when a high-pri update replaces a mount in-progress', async () => {
       const callback = jest.fn();
 
       const Yield = ({renderTime}) => {
@@ -857,17 +830,7 @@ describe(`onRender`, () => {
       // Render a partially update, but don't finish.
       // This partial render should take 10ms of simulated time.
       let renderer;
-      if (gate(flags => flags.enableSyncDefaultUpdates)) {
-        React.startTransition(() => {
-          renderer = ReactTestRenderer.create(
-            <React.Profiler id="test" onRender={callback}>
-              <Yield renderTime={10} />
-              <Yield renderTime={20} />
-            </React.Profiler>,
-            {unstable_isConcurrent: true},
-          );
-        });
-      } else {
+      React.startTransition(() => {
         renderer = ReactTestRenderer.create(
           <React.Profiler id="test" onRender={callback}>
             <Yield renderTime={10} />
@@ -875,8 +838,8 @@ describe(`onRender`, () => {
           </React.Profiler>,
           {unstable_isConcurrent: true},
         );
-      }
-      expect(Scheduler).toFlushAndYieldThrough(['Yield:10']);
+      });
+      await waitFor(['Yield:10']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Simulate time moving forward while frame is paused.
@@ -891,7 +854,7 @@ describe(`onRender`, () => {
           </React.Profiler>,
         );
       });
-      expect(Scheduler).toHaveYielded(['Yield:5']);
+      assertLog(['Yield:5']);
 
       // The initial work was thrown away in this case,
       // So the actual and base times should only include the final rendered tree times.
@@ -905,11 +868,11 @@ describe(`onRender`, () => {
       callback.mockReset();
 
       // Verify no more unexpected callbacks from low priority work
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(callback).toHaveBeenCalledTimes(0);
     });
 
-    it('should report the expected times when a high-priority update replaces a low-priority update', () => {
+    it('should report the expected times when a high-priority update replaces a low-priority update', async () => {
       const callback = jest.fn();
 
       const Yield = ({renderTime}) => {
@@ -930,7 +893,7 @@ describe(`onRender`, () => {
 
       // Render everything initially.
       // This should take 21 seconds of actual and base time.
-      expect(Scheduler).toFlushAndYield(['Yield:6', 'Yield:15']);
+      await waitForAll(['Yield:6', 'Yield:15']);
       expect(callback).toHaveBeenCalledTimes(1);
       let call = callback.mock.calls[0];
       expect(call[2]).toBe(21); // actual time
@@ -944,17 +907,7 @@ describe(`onRender`, () => {
 
       // Render a partially update, but don't finish.
       // This partial render should take 3ms of simulated time.
-      if (gate(flags => flags.enableSyncDefaultUpdates)) {
-        React.startTransition(() => {
-          renderer.update(
-            <React.Profiler id="test" onRender={callback}>
-              <Yield renderTime={3} />
-              <Yield renderTime={5} />
-              <Yield renderTime={9} />
-            </React.Profiler>,
-          );
-        });
-      } else {
+      React.startTransition(() => {
         renderer.update(
           <React.Profiler id="test" onRender={callback}>
             <Yield renderTime={3} />
@@ -962,15 +915,15 @@ describe(`onRender`, () => {
             <Yield renderTime={9} />
           </React.Profiler>,
         );
-      }
-      expect(Scheduler).toFlushAndYieldThrough(['Yield:3']);
+      });
+      await waitFor(['Yield:3']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Simulate time moving forward while frame is paused.
       Scheduler.unstable_advanceTime(100); // 59 -> 159
 
       // Render another 5ms of simulated time.
-      expect(Scheduler).toFlushAndYieldThrough(['Yield:5']);
+      await waitFor(['Yield:5']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Simulate time moving forward while frame is paused.
@@ -985,7 +938,7 @@ describe(`onRender`, () => {
           </React.Profiler>,
         );
       });
-      expect(Scheduler).toHaveYielded(['Yield:11']);
+      assertLog(['Yield:11']);
 
       // The actual time should include only the most recent render,
       // Because this lets us avoid a lot of commit phase reset complexity.
@@ -998,11 +951,11 @@ describe(`onRender`, () => {
       expect(call[5]).toBe(275); // commit time
 
       // Verify no more unexpected callbacks from low priority work
-      expect(Scheduler).toFlushAndYield([]);
+      await waitForAll([]);
       expect(callback).toHaveBeenCalledTimes(1);
     });
 
-    it('should report the expected times when a high-priority update interrupts a low-priority update', () => {
+    it('should report the expected times when a high-priority update interrupts a low-priority update', async () => {
       const callback = jest.fn();
 
       const Yield = ({renderTime}) => {
@@ -1049,7 +1002,7 @@ describe(`onRender`, () => {
       // Render everything initially.
       // This simulates a total of 14ms of actual render time.
       // The base render time is also 14ms for the initial render.
-      expect(Scheduler).toFlushAndYield([
+      await waitForAll([
         'FirstComponent:1',
         'Yield:4',
         'SecondComponent:2',
@@ -1068,14 +1021,10 @@ describe(`onRender`, () => {
 
       // Render a partially update, but don't finish.
       // This partial render will take 10ms of actual render time.
-      if (gate(flags => flags.enableSyncDefaultUpdates)) {
-        React.startTransition(() => {
-          first.setState({renderTime: 10});
-        });
-      } else {
+      React.startTransition(() => {
         first.setState({renderTime: 10});
-      }
-      expect(Scheduler).toFlushAndYieldThrough(['FirstComponent:10']);
+      });
+      await waitFor(['FirstComponent:10']);
       expect(callback).toHaveBeenCalledTimes(0);
 
       // Simulate time moving forward while frame is paused.
@@ -1084,7 +1033,7 @@ describe(`onRender`, () => {
       // Interrupt with higher priority work.
       // This simulates a total of 37ms of actual render time.
       renderer.unstable_flushSync(() => second.setState({renderTime: 30}));
-      expect(Scheduler).toHaveYielded(['SecondComponent:30', 'Yield:7']);
+      assertLog(['SecondComponent:30', 'Yield:7']);
 
       // The actual time should include only the most recent render (37ms),
       // Because this greatly simplifies the commit phase logic.
@@ -1108,7 +1057,7 @@ describe(`onRender`, () => {
       // The tree contains 42ms of base render time at this point,
       // Reflecting the most recent (longer) render durations.
       // TODO: This actual time should decrease by 10ms once the scheduler supports resuming.
-      expect(Scheduler).toFlushAndYield(['FirstComponent:10', 'Yield:4']);
+      await waitForAll(['FirstComponent:10', 'Yield:4']);
       expect(callback).toHaveBeenCalledTimes(1);
       call = callback.mock.calls[0];
       expect(call[2]).toBe(14); // actual time
@@ -1266,7 +1215,7 @@ describe(`onRender`, () => {
           );
         });
 
-        it('should reset the fiber stack correct after a "complete" phase error', () => {
+        it('should reset the fiber stack correct after a "complete" phase error', async () => {
           jest.resetModules();
 
           loadModules({
@@ -1301,7 +1250,7 @@ describe(`onRender`, () => {
               <span>hi</span>
             </React.Profiler>,
           );
-          expect(Scheduler).toFlushWithoutYielding();
+          await waitForAll([]);
         });
       });
     });
@@ -1925,7 +1874,7 @@ describe(`onPostCommit`, () => {
     loadModules();
   });
 
-  it('should report time spent in passive effects', () => {
+  it('should report time spent in passive effects', async () => {
     const callback = jest.fn();
 
     const ComponentWithEffects = () => {
@@ -1961,7 +1910,7 @@ describe(`onPostCommit`, () => {
         </React.Profiler>,
       );
     });
-    Scheduler.unstable_flushAll();
+    await waitForAll([]);
 
     expect(callback).toHaveBeenCalledTimes(1);
 
@@ -1982,7 +1931,7 @@ describe(`onPostCommit`, () => {
         </React.Profiler>,
       );
     });
-    Scheduler.unstable_flushAll();
+    await waitForAll([]);
 
     expect(callback).toHaveBeenCalledTimes(2);
 
@@ -2001,7 +1950,7 @@ describe(`onPostCommit`, () => {
         <React.Profiler id="unmount-test" onPostCommit={callback} />,
       );
     });
-    Scheduler.unstable_flushAll();
+    await waitForAll([]);
 
     expect(callback).toHaveBeenCalledTimes(3);
 
@@ -2440,12 +2389,12 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded(['Component:false', 'Component:true']);
+    assertLog(['Component:false', 'Component:true']);
     expect(onNestedUpdateScheduled).toHaveBeenCalledTimes(1);
     expect(onNestedUpdateScheduled.mock.calls[0][0]).toBe('test');
   });
 
-  it('is called when a function component schedules a batched update during a layout effect', () => {
+  it('is called when a function component schedules a batched update during a layout effect', async () => {
     function Component() {
       const [didMount, setDidMount] = React.useState(false);
       React.useLayoutEffect(() => {
@@ -2468,7 +2417,7 @@ describe(`onNestedUpdateScheduled`, () => {
         <Component />
       </React.Profiler>,
     );
-    expect(Scheduler).toFlushAndYield(['Component:false', 'Component:true']);
+    await waitForAll(['Component:false', 'Component:true']);
 
     expect(onRender).toHaveBeenCalledTimes(2);
     expect(onRender.mock.calls[0][1]).toBe('mount');
@@ -2511,7 +2460,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded(['Component:false', 'Component:true']);
+    assertLog(['Component:false', 'Component:true']);
     expect(onNestedUpdateScheduledOne).toHaveBeenCalledTimes(1);
     expect(onNestedUpdateScheduledOne.mock.calls[0][0]).toBe('one');
     expect(onNestedUpdateScheduledTwo).toHaveBeenCalledTimes(1);
@@ -2559,7 +2508,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded([
+    assertLog([
       'ComponentRootOne:false',
       'ComponentRootTwo',
       'ComponentRootOne:true',
@@ -2589,7 +2538,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded(['Component:false', 'Component:true']);
+    assertLog(['Component:false', 'Component:true']);
     expect(onNestedUpdateScheduled).not.toHaveBeenCalled();
   });
 
@@ -2614,12 +2563,12 @@ describe(`onNestedUpdateScheduled`, () => {
         </React.Profiler>,
       );
     });
-    expect(Scheduler).toHaveYielded(['Component:false']);
+    assertLog(['Component:false']);
 
     act(() => {
       updateFnRef.current();
     });
-    expect(Scheduler).toHaveYielded(['Component:true']);
+    assertLog(['Component:true']);
     expect(onNestedUpdateScheduled).not.toHaveBeenCalled();
   });
 
@@ -2645,7 +2594,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded(['Component:false', 'Component:true']);
+    assertLog(['Component:false', 'Component:true']);
     expect(onNestedUpdateScheduled).not.toHaveBeenCalled();
   });
 
@@ -2676,10 +2625,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded([
-      'Component:false:false',
-      'Component:true:false',
-    ]);
+    assertLog(['Component:false:false', 'Component:true:false']);
     expect(onNestedUpdateScheduled).toHaveBeenCalledTimes(1);
     expect(onNestedUpdateScheduled.mock.calls[0][0]).toBe('test');
 
@@ -2693,10 +2639,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded([
-      'Component:true:false',
-      'Component:true:true',
-    ]);
+    assertLog(['Component:true:false', 'Component:true:true']);
     expect(onNestedUpdateScheduled).toHaveBeenCalledTimes(2);
     expect(onNestedUpdateScheduled.mock.calls[1][0]).toBe('test');
   });
@@ -2728,7 +2671,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded(['Component:false', 'Component:true']);
+    assertLog(['Component:false', 'Component:true']);
     expect(onNestedUpdateScheduled).toHaveBeenCalledTimes(1);
     expect(onNestedUpdateScheduled.mock.calls[0][0]).toBe('test');
   });
@@ -2767,7 +2710,7 @@ describe(`onNestedUpdateScheduled`, () => {
         </React.Profiler>,
       );
     });
-    expect(Scheduler).toHaveYielded(['Component:false:false']);
+    assertLog(['Component:false:false']);
     expect(onNestedUpdateScheduled).not.toHaveBeenCalled();
 
     act(() => {
@@ -2780,10 +2723,7 @@ describe(`onNestedUpdateScheduled`, () => {
       );
     });
 
-    expect(Scheduler).toHaveYielded([
-      'Component:true:false',
-      'Component:true:true',
-    ]);
+    assertLog(['Component:true:false', 'Component:true:true']);
     expect(onNestedUpdateScheduled).toHaveBeenCalledTimes(1);
     expect(onNestedUpdateScheduled.mock.calls[0][0]).toBe('test');
   });
@@ -2814,12 +2754,12 @@ describe(`onNestedUpdateScheduled`, () => {
         </React.Profiler>,
       );
     });
-    expect(Scheduler).toHaveYielded(['Component:false']);
+    assertLog(['Component:false']);
 
     act(() => {
       updateFnRef.current();
     });
-    expect(Scheduler).toHaveYielded(['Component:true']);
+    assertLog(['Component:true']);
     expect(onNestedUpdateScheduled).not.toHaveBeenCalled();
   });
 
