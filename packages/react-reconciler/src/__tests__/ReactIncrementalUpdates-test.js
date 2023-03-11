@@ -26,7 +26,7 @@ describe('ReactIncrementalUpdates', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     ContinuousEventPriority =
       require('react-reconciler/constants').ContinuousEventPriority;
 
@@ -50,7 +50,7 @@ describe('ReactIncrementalUpdates', () => {
     class Foo extends React.Component {
       state = {};
       componentDidMount() {
-        Scheduler.unstable_yieldValue('commit');
+        Scheduler.log('commit');
         React.startTransition(() => {
           // Has low priority
           this.setState({b: 'b'});
@@ -99,13 +99,13 @@ describe('ReactIncrementalUpdates', () => {
     class Foo extends React.Component {
       state = {};
       componentDidMount() {
-        Scheduler.unstable_yieldValue('componentDidMount');
+        Scheduler.log('componentDidMount');
       }
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue('componentDidUpdate');
+        Scheduler.log('componentDidUpdate');
       }
       render() {
-        Scheduler.unstable_yieldValue('render');
+        Scheduler.log('render');
         instance = this;
         return <div />;
       }
@@ -152,7 +152,7 @@ describe('ReactIncrementalUpdates', () => {
 
     function createUpdate(letter) {
       return () => {
-        Scheduler.unstable_yieldValue(letter);
+        Scheduler.log(letter);
         return {
           [letter]: letter,
         };
@@ -239,7 +239,7 @@ describe('ReactIncrementalUpdates', () => {
 
     function createUpdate(letter) {
       return () => {
-        Scheduler.unstable_yieldValue(letter);
+        Scheduler.log(letter);
         return {
           [letter]: letter,
         };
@@ -340,16 +340,16 @@ describe('ReactIncrementalUpdates', () => {
     class Foo extends React.Component {
       state = {};
       componentDidMount() {
-        Scheduler.unstable_yieldValue('did mount');
+        Scheduler.log('did mount');
         this.setState({a: 'a'}, () => {
-          Scheduler.unstable_yieldValue('callback a');
+          Scheduler.log('callback a');
           this.setState({b: 'b'}, () => {
-            Scheduler.unstable_yieldValue('callback b');
+            Scheduler.log('callback b');
           });
         });
       }
       render() {
-        Scheduler.unstable_yieldValue('render');
+        Scheduler.log('render');
         return <div />;
       }
     }
@@ -371,11 +371,11 @@ describe('ReactIncrementalUpdates', () => {
     class Foo extends React.Component {
       state = {};
       UNSAFE_componentWillReceiveProps() {
-        Scheduler.unstable_yieldValue('componentWillReceiveProps');
+        Scheduler.log('componentWillReceiveProps');
         this.setState({b: 'b'});
       }
       render() {
-        Scheduler.unstable_yieldValue('render');
+        Scheduler.log('render');
         instance = this;
         return <div />;
       }
@@ -403,7 +403,7 @@ describe('ReactIncrementalUpdates', () => {
     class Foo extends React.Component {
       state = {};
       render() {
-        Scheduler.unstable_yieldValue('render');
+        Scheduler.log('render');
         instance = this;
         return <div />;
       }
@@ -416,32 +416,33 @@ describe('ReactIncrementalUpdates', () => {
     ]);
 
     instance.setState(function a() {
-      Scheduler.unstable_yieldValue('setState updater');
+      Scheduler.log('setState updater');
       this.setState({b: 'b'});
       return {a: 'a'};
     });
 
-    expect(() =>
-      expect(Scheduler).toFlushAndYield(
-        gate(flags =>
-          flags.deferRenderPhaseUpdateToNextBatch
-            ? [
-                'setState updater',
-                // In the new reconciler, updates inside the render phase are
-                // treated as if they came from an event, so the update gets
-                // shifted to a subsequent render.
-                'render',
-                'render',
-              ]
-            : [
-                'setState updater',
-                // In the old reconciler, updates in the render phase receive
-                // the currently rendering expiration time, so the update
-                // flushes immediately in the same render.
-                'render',
-              ],
+    await expect(
+      async () =>
+        await waitForAll(
+          gate(flags =>
+            flags.deferRenderPhaseUpdateToNextBatch
+              ? [
+                  'setState updater',
+                  // In the new reconciler, updates inside the render phase are
+                  // treated as if they came from an event, so the update gets
+                  // shifted to a subsequent render.
+                  'render',
+                  'render',
+                ]
+              : [
+                  'setState updater',
+                  // In the old reconciler, updates in the render phase receive
+                  // the currently rendering expiration time, so the update
+                  // flushes immediately in the same render.
+                  'render',
+                ],
+          ),
         ),
-      ),
     ).toErrorDev(
       'An update (setState, replaceState, or forceUpdate) was scheduled ' +
         'from inside an update function. Update functions should be pure, ' +
@@ -518,22 +519,22 @@ describe('ReactIncrementalUpdates', () => {
     expect(ReactNoop).toMatchRenderedOutput(<span prop="derived state" />);
   });
 
-  it('regression: does not expire soon due to layout effects in the last batch', () => {
+  it('regression: does not expire soon due to layout effects in the last batch', async () => {
     const {useState, useLayoutEffect} = React;
 
     let setCount;
     function App() {
       const [count, _setCount] = useState(0);
       setCount = _setCount;
-      Scheduler.unstable_yieldValue('Render: ' + count);
+      Scheduler.log('Render: ' + count);
       useLayoutEffect(() => {
         setCount(prevCount => prevCount + 1);
-        Scheduler.unstable_yieldValue('Commit: ' + count);
+        Scheduler.log('Commit: ' + count);
       }, []);
       return null;
     }
 
-    act(async () => {
+    await act(async () => {
       React.startTransition(() => {
         ReactNoop.render(<App />);
       });
@@ -552,7 +553,7 @@ describe('ReactIncrementalUpdates', () => {
 
   it('regression: does not expire soon due to previous flushSync', () => {
     function Text({text}) {
-      Scheduler.unstable_yieldValue(text);
+      Scheduler.log(text);
       return text;
     }
 
@@ -572,7 +573,7 @@ describe('ReactIncrementalUpdates', () => {
 
   it('regression: does not expire soon due to previous expired work', () => {
     function Text({text}) {
-      Scheduler.unstable_yieldValue(text);
+      Scheduler.log(text);
       return text;
     }
 
@@ -603,7 +604,7 @@ describe('ReactIncrementalUpdates', () => {
       };
 
       useLayoutEffect(() => {
-        Scheduler.unstable_yieldValue('Committed: ' + log);
+        Scheduler.log('Committed: ' + log);
         if (log === 'B') {
           // Right after B commits, schedule additional updates.
           ReactNoop.unstable_runWithPriority(ContinuousEventPriority, () =>
@@ -617,13 +618,13 @@ describe('ReactIncrementalUpdates', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['Committed: ']);
     expect(root).toMatchRenderedOutput(null);
 
-    await act(async () => {
+    await act(() => {
       React.startTransition(() => {
         pushToLog('A');
       });
@@ -662,7 +663,7 @@ describe('ReactIncrementalUpdates', () => {
         this.setState(prevState => ({log: prevState.log + msg}));
       };
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue('Committed: ' + this.state.log);
+        Scheduler.log('Committed: ' + this.state.log);
         if (this.state.log === 'B') {
           // Right after B commits, schedule additional updates.
           ReactNoop.unstable_runWithPriority(ContinuousEventPriority, () =>
@@ -678,13 +679,13 @@ describe('ReactIncrementalUpdates', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog([]);
     expect(root).toMatchRenderedOutput(null);
 
-    await act(async () => {
+    await act(() => {
       React.startTransition(() => {
         pushToLog('A');
       });
@@ -741,20 +742,20 @@ describe('ReactIncrementalUpdates', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App prop="A" />);
     });
     expect(root).toMatchRenderedOutput('0');
 
     // Changing the prop causes the count to increase by 100
-    await act(async () => {
+    await act(() => {
       root.render(<App prop="B" />);
     });
     expect(root).toMatchRenderedOutput('100');
 
     // Now increment the count by 1 with a state update. And, in the same
     // batch, change the prop back to its original value.
-    await act(async () => {
+    await act(() => {
       root.render(<App prop="A" />);
       app.setState(state => ({count: state.count + 1}));
     });

@@ -20,6 +20,7 @@ let TextResource;
 let textResourceShouldFail;
 let waitForAll;
 let assertLog;
+let waitForThrow;
 
 describe('ReactCache', () => {
   beforeEach(() => {
@@ -38,6 +39,7 @@ describe('ReactCache', () => {
     const InternalTestUtils = require('internal-test-utils');
     waitForAll = InternalTestUtils.waitForAll;
     assertLog = InternalTestUtils.assertLog;
+    waitForThrow = InternalTestUtils.waitForThrow;
 
     TextResource = createResource(
       ([text, ms = 0]) => {
@@ -52,16 +54,12 @@ describe('ReactCache', () => {
                   listeners = [{resolve, reject}];
                   setTimeout(() => {
                     if (textResourceShouldFail) {
-                      Scheduler.unstable_yieldValue(
-                        `Promise rejected [${text}]`,
-                      );
+                      Scheduler.log(`Promise rejected [${text}]`);
                       status = 'rejected';
                       value = new Error('Failed to load: ' + text);
                       listeners.forEach(listener => listener.reject(value));
                     } else {
-                      Scheduler.unstable_yieldValue(
-                        `Promise resolved [${text}]`,
-                      );
+                      Scheduler.log(`Promise resolved [${text}]`);
                       status = 'resolved';
                       value = text;
                       listeners.forEach(listener => listener.resolve(value));
@@ -91,7 +89,7 @@ describe('ReactCache', () => {
   });
 
   function Text(props) {
-    Scheduler.unstable_yieldValue(props.text);
+    Scheduler.log(props.text);
     return props.text;
   }
 
@@ -99,13 +97,13 @@ describe('ReactCache', () => {
     const text = props.text;
     try {
       TextResource.read([props.text, props.ms]);
-      Scheduler.unstable_yieldValue(text);
+      Scheduler.log(text);
       return text;
     } catch (promise) {
       if (typeof promise.then === 'function') {
-        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+        Scheduler.log(`Suspend! [${text}]`);
       } else {
-        Scheduler.unstable_yieldValue(`Error! [${text}]`);
+        Scheduler.log(`Error! [${text}]`);
       }
       throw promise;
     }
@@ -150,12 +148,12 @@ describe('ReactCache', () => {
     jest.advanceTimersByTime(100);
     assertLog(['Promise rejected [Hi]']);
 
-    expect(Scheduler).toFlushAndThrow('Failed to load: Hi');
+    await waitForThrow('Failed to load: Hi');
     assertLog(['Error! [Hi]', 'Error! [Hi]']);
 
     // Should throw again on a subsequent read
     root.update(<App />);
-    expect(Scheduler).toFlushAndThrow('Failed to load: Hi');
+    await waitForThrow('Failed to load: Hi');
     assertLog(['Error! [Hi]', 'Error! [Hi]']);
   });
 
@@ -169,7 +167,7 @@ describe('ReactCache', () => {
     });
 
     function App() {
-      Scheduler.unstable_yieldValue('App');
+      Scheduler.log('App');
       return BadTextResource.read(['Hi', 100]);
     }
 
@@ -183,7 +181,7 @@ describe('ReactCache', () => {
     );
 
     if (__DEV__) {
-      expect(async () => {
+      await expect(async () => {
         await waitForAll(['App', 'Loading...']);
       }).toErrorDev([
         'Invalid key type. Expected a string, number, symbol, or ' +
@@ -320,13 +318,13 @@ describe('ReactCache', () => {
       const text = props.text;
       try {
         const actualText = BadTextResource.read([props.text, props.ms]);
-        Scheduler.unstable_yieldValue(actualText);
+        Scheduler.log(actualText);
         return actualText;
       } catch (promise) {
         if (typeof promise.then === 'function') {
-          Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+          Scheduler.log(`Suspend! [${text}]`);
         } else {
-          Scheduler.unstable_yieldValue(`Error! [${text}]`);
+          Scheduler.log(`Error! [${text}]`);
         }
         throw promise;
       }

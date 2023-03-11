@@ -33,6 +33,7 @@ if (typeof fetch === 'undefined') {
 
 const express = require('express');
 const bodyParser = require('body-parser');
+const busboy = require('busboy');
 const app = express();
 const compress = require('compression');
 
@@ -95,11 +96,10 @@ app.get('/', async function (req, res) {
 });
 
 app.post('/', bodyParser.text(), async function (req, res) {
-  const {renderToPipeableStream} = await import(
-    'react-server-dom-webpack/server'
-  );
-  const serverReference = JSON.parse(req.get('rsc-action'));
-  const {filepath, name} = serverReference;
+  const {renderToPipeableStream, decodeReply, decodeReplyFromBusboy} =
+    await import('react-server-dom-webpack/server');
+  const serverReference = req.get('rsc-action');
+  const [filepath, name] = serverReference.split('#');
   const action = (await import(filepath))[name];
   // Validate that this is actually a function we intended to expose and
   // not the client trying to invoke arbitrary functions. In a real app,
@@ -108,9 +108,18 @@ app.post('/', bodyParser.text(), async function (req, res) {
     throw new Error('Invalid action');
   }
 
-  const args = JSON.parse(req.body);
-  const result = action.apply(null, args);
+  let args;
+  if (req.is('multipart/form-data')) {
+    // Use busboy to streamingly parse the reply from form-data.
+    const bb = busboy({headers: req.headers});
+    const reply = decodeReplyFromBusboy(bb);
+    req.pipe(bb);
+    args = await reply;
+  } else {
+    args = await decodeReply(req.body);
+  }
 
+  const result = action.apply(null, args);
   const {pipe} = renderToPipeableStream(result, {});
   pipe(res);
 });

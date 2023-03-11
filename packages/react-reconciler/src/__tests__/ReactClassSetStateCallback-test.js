@@ -11,14 +11,14 @@ describe('ReactClassSetStateCallback', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
 
     const InternalTestUtils = require('internal-test-utils');
     assertLog = InternalTestUtils.assertLog;
   });
 
   function Text({text}) {
-    Scheduler.unstable_yieldValue(text);
+    Scheduler.log(text);
     return text;
   }
 
@@ -33,27 +33,21 @@ describe('ReactClassSetStateCallback', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog([0]);
 
-    await act(async () => {
+    await act(() => {
       if (gate(flags => flags.enableUnifiedSyncLane)) {
         React.startTransition(() => {
-          app.setState({step: 1}, () =>
-            Scheduler.unstable_yieldValue('Callback 1'),
-          );
+          app.setState({step: 1}, () => Scheduler.log('Callback 1'));
         });
       } else {
-        app.setState({step: 1}, () =>
-          Scheduler.unstable_yieldValue('Callback 1'),
-        );
+        app.setState({step: 1}, () => Scheduler.log('Callback 1'));
       }
       ReactNoop.flushSync(() => {
-        app.setState({step: 2}, () =>
-          Scheduler.unstable_yieldValue('Callback 2'),
-        );
+        app.setState({step: 2}, () => Scheduler.log('Callback 2'));
       });
     });
     assertLog([2, 'Callback 2', 2, 'Callback 1']);

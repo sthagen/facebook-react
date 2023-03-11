@@ -17,7 +17,6 @@ import {
 
 let JSDOM;
 let Stream;
-let Scheduler;
 let React;
 let ReactDOM;
 let ReactDOMClient;
@@ -34,7 +33,7 @@ let hasErrored = false;
 let fatalError = undefined;
 let renderOptions;
 let waitForAll;
-let assertLog;
+let waitForThrow;
 
 function resetJSDOM(markup) {
   // Test Environment
@@ -57,7 +56,6 @@ describe('ReactDOMFloat', () => {
   beforeEach(() => {
     jest.resetModules();
     JSDOM = require('jsdom').JSDOM;
-    Scheduler = require('scheduler');
     React = require('react');
     ReactDOM = require('react-dom');
     ReactDOMClient = require('react-dom/client');
@@ -67,7 +65,7 @@ describe('ReactDOMFloat', () => {
 
     const InternalTestUtils = require('internal-test-utils');
     waitForAll = InternalTestUtils.waitForAll;
-    assertLog = InternalTestUtils.assertLog;
+    waitForThrow = InternalTestUtils.waitForThrow;
 
     textCache = new Map();
 
@@ -261,23 +259,6 @@ describe('ReactDOMFloat', () => {
     );
   }
 
-  function renderSafelyAndExpect(root, children) {
-    root.render(children);
-    return expect(() => {
-      try {
-        // TODO: Migrate this to waitForAll()
-        Scheduler.unstable_flushAll();
-        assertLog([]);
-      } catch (e) {
-        try {
-          // TODO: Migrate this to waitForAll()
-          Scheduler.unstable_flushAll();
-          assertLog([]);
-        } catch (f) {}
-      }
-    });
-  }
-
   // @gate enableFloat
   it('can render resources before singletons', async () => {
     const root = ReactDOMClient.createRoot(document);
@@ -369,7 +350,6 @@ describe('ReactDOMFloat', () => {
           <meta property="foo" content="bar" />
           <title>foo</title>
           <link rel="foo" href="bar" />
-          <link rel="foo" href="bar" />
           <noscript>&lt;link rel="icon" href="icon"/&gt;</noscript>
           <base target="foo" href="bar" />
           <script async="" src="foo" />
@@ -383,15 +363,24 @@ describe('ReactDOMFloat', () => {
   it('warns if you render resource-like elements above <head> or <body>', async () => {
     const root = ReactDOMClient.createRoot(document);
 
-    renderSafelyAndExpect(
-      root,
-      <>
-        <noscript>foo</noscript>
-        <html>
-          <body>foo</body>
-        </html>
-      </>,
-    ).toErrorDev(
+    await expect(async () => {
+      root.render(
+        <>
+          <noscript>foo</noscript>
+          <html>
+            <body>foo</body>
+          </html>
+        </>,
+      );
+      const aggregateError = await waitForThrow();
+      expect(aggregateError.errors.length).toBe(2);
+      expect(aggregateError.errors[0].message).toContain(
+        'Invalid insertion of NOSCRIPT',
+      );
+      expect(aggregateError.errors[1].message).toContain(
+        'The node to be removed is not a child of this node',
+      );
+    }).toErrorDev(
       [
         'Cannot render <noscript> outside the main document. Try moving it into the root <head> tag.',
         'Warning: validateDOMNesting(...): <noscript> cannot appear as a child of <#document>.',
@@ -399,37 +388,50 @@ describe('ReactDOMFloat', () => {
       {withoutStack: 1},
     );
 
-    renderSafelyAndExpect(
-      root,
-      <html>
-        <template>foo</template>
-        <body>foo</body>
-      </html>,
-    ).toErrorDev([
+    await expect(async () => {
+      root.render(
+        <html>
+          <template>foo</template>
+          <body>foo</body>
+        </html>,
+      );
+      await waitForAll([]);
+    }).toErrorDev([
       'Cannot render <template> outside the main document. Try moving it into the root <head> tag.',
       'Warning: validateDOMNesting(...): <template> cannot appear as a child of <html>.',
     ]);
 
-    renderSafelyAndExpect(
-      root,
-      <html>
-        <body>foo</body>
-        <style>foo</style>
-      </html>,
-    ).toErrorDev([
+    await expect(async () => {
+      root.render(
+        <html>
+          <body>foo</body>
+          <style>foo</style>
+        </html>,
+      );
+      await waitForAll([]);
+    }).toErrorDev([
       'Cannot render a <style> outside the main document without knowing its precedence and a unique href key. React can hoist and deduplicate <style> tags if you provide a `precedence` prop along with an `href` prop that does not conflic with the `href` values used in any other hoisted <style> or <link rel="stylesheet" ...> tags.  Note that hoisting <style> tags is considered an advanced feature that most will not use directly. Consider moving the <style> tag to the <head> or consider adding a `precedence="default"` and `href="some unique resource identifier"`, or move the <style> to the <style> tag.',
       'Warning: validateDOMNesting(...): <style> cannot appear as a child of <html>.',
     ]);
 
-    renderSafelyAndExpect(
-      root,
-      <>
-        <html>
-          <body>foo</body>
-        </html>
-        <link rel="stylesheet" href="foo" />
-      </>,
-    ).toErrorDev(
+    await expect(async () => {
+      root.render(
+        <>
+          <html>
+            <body>foo</body>
+          </html>
+          <link rel="stylesheet" href="foo" />
+        </>,
+      );
+      const aggregateError = await waitForThrow();
+      expect(aggregateError.errors.length).toBe(2);
+      expect(aggregateError.errors[0].message).toContain(
+        'Invalid insertion of LINK',
+      );
+      expect(aggregateError.errors[1].message).toContain(
+        'The node to be removed is not a child of this node',
+      );
+    }).toErrorDev(
       [
         'Cannot render a <link rel="stylesheet" /> outside the main document without knowing its precedence. Consider adding precedence="default" or moving it into the root <head> tag.',
         'Warning: validateDOMNesting(...): <link> cannot appear as a child of <#document>.',
@@ -437,40 +439,51 @@ describe('ReactDOMFloat', () => {
       {withoutStack: 1},
     );
 
-    renderSafelyAndExpect(
-      root,
-      <>
-        <html>
-          <body>foo</body>
-          <script href="foo" />
-        </html>
-      </>,
-    ).toErrorDev([
+    await expect(async () => {
+      root.render(
+        <>
+          <html>
+            <body>foo</body>
+            <script href="foo" />
+          </html>
+        </>,
+      );
+      await waitForAll([]);
+    }).toErrorDev([
       'Cannot render a sync or defer <script> outside the main document without knowing its order. Try adding async="" or moving it into the root <head> tag.',
       'Warning: validateDOMNesting(...): <script> cannot appear as a child of <html>.',
     ]);
 
-    renderSafelyAndExpect(
-      root,
-      <>
+    await expect(async () => {
+      root.render(
         <html>
           <script async={true} onLoad={() => {}} href="bar" />
           <body>foo</body>
-        </html>
-      </>,
-    ).toErrorDev([
+        </html>,
+      );
+      await waitForAll([]);
+    }).toErrorDev([
       'Cannot render a <script> with onLoad or onError listeners outside the main document. Try removing onLoad={...} and onError={...} or moving it into the root <head> tag or somewhere in the <body>.',
     ]);
 
-    renderSafelyAndExpect(
-      root,
-      <>
-        <link rel="foo" onLoad={() => {}} href="bar" />
-        <html>
-          <body>foo</body>
-        </html>
-      </>,
-    ).toErrorDev(
+    await expect(async () => {
+      root.render(
+        <>
+          <link rel="foo" onLoad={() => {}} href="bar" />
+          <html>
+            <body>foo</body>
+          </html>
+        </>,
+      );
+      const aggregateError = await waitForThrow();
+      expect(aggregateError.errors.length).toBe(2);
+      expect(aggregateError.errors[0].message).toContain(
+        'Invalid insertion of LINK',
+      );
+      expect(aggregateError.errors[1].message).toContain(
+        'The node to be removed is not a child of this node',
+      );
+    }).toErrorDev(
       [
         'Cannot render a <link> with onLoad or onError listeners outside the main document. Try removing onLoad={...} and onError={...} or moving it into the root <head> tag or somewhere in the <body>.',
       ],
@@ -2300,6 +2313,365 @@ body {
           <link rel="preload" as="font" href="qux" crossorigin="" />
         </head>
         <body />
+      </html>,
+    );
+  });
+
+  it('does not hoist anything with an itemprop prop', async () => {
+    function App() {
+      return (
+        <html>
+          <head>
+            <meta itemProp="outside" content="unscoped" />
+            <link itemProp="link" rel="foo" href="foo" />
+            <title itemProp="outside-title">title</title>
+            <link
+              itemProp="outside-stylesheet"
+              rel="stylesheet"
+              href="bar"
+              precedence="default"
+            />
+            <style itemProp="outside-style" href="baz" precedence="default">
+              outside style
+            </style>
+            <script itemProp="outside-script" async={true} src="qux" />
+          </head>
+          <body>
+            <div itemScope={true}>
+              <div>
+                <meta itemProp="inside-meta" content="scoped" />
+                <link itemProp="inside-link" rel="foo" href="foo" />
+                <title itemProp="inside-title">title</title>
+                <link
+                  itemProp="inside-stylesheet"
+                  rel="stylesheet"
+                  href="bar"
+                  precedence="default"
+                />
+                <style itemProp="inside-style" href="baz" precedence="default">
+                  inside style
+                </style>
+                <script itemProp="inside-script" async={true} src="qux" />
+              </div>
+            </div>
+          </body>
+        </html>
+      );
+    }
+    await actIntoEmptyDocument(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <meta itemprop="outside" content="unscoped" />
+          <link itemprop="link" rel="foo" href="foo" />
+          <title itemprop="outside-title">title</title>
+          <link
+            itemprop="outside-stylesheet"
+            rel="stylesheet"
+            href="bar"
+            precedence="default"
+          />
+          <style itemprop="outside-style" href="baz" precedence="default">
+            outside style
+          </style>
+          <script itemprop="outside-script" async="" src="qux" />
+        </head>
+        <body>
+          <div itemscope="">
+            <div>
+              <meta itemprop="inside-meta" content="scoped" />
+              <link itemprop="inside-link" rel="foo" href="foo" />
+              <title itemprop="inside-title">title</title>
+              <link
+                itemprop="inside-stylesheet"
+                rel="stylesheet"
+                href="bar"
+                precedence="default"
+              />
+              <style itemprop="inside-style" href="baz" precedence="default">
+                inside style
+              </style>
+              <script itemprop="inside-script" async="" src="qux" />
+            </div>
+          </div>
+        </body>
+      </html>,
+    );
+
+    ReactDOMClient.hydrateRoot(document, <App />);
+    await waitForAll([]);
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <meta itemprop="outside" content="unscoped" />
+          <link itemprop="link" rel="foo" href="foo" />
+          <title itemprop="outside-title">title</title>
+          <link
+            itemprop="outside-stylesheet"
+            rel="stylesheet"
+            href="bar"
+            precedence="default"
+          />
+          <style itemprop="outside-style" href="baz" precedence="default">
+            outside style
+          </style>
+          <script itemprop="outside-script" async="" src="qux" />
+        </head>
+        <body>
+          <div itemscope="">
+            <div>
+              <meta itemprop="inside-meta" content="scoped" />
+              <link itemprop="inside-link" rel="foo" href="foo" />
+              <title itemprop="inside-title">title</title>
+              <link
+                itemprop="inside-stylesheet"
+                rel="stylesheet"
+                href="bar"
+                precedence="default"
+              />
+              <style itemprop="inside-style" href="baz" precedence="default">
+                inside style
+              </style>
+              <script itemprop="inside-script" async="" src="qux" />
+            </div>
+          </div>
+        </body>
+      </html>,
+    );
+  });
+
+  it('warns if you render a tag with itemProp outside <body> or <head>', async () => {
+    const root = ReactDOMClient.createRoot(document);
+    root.render(
+      <html>
+        <meta itemProp="foo" />
+        <title itemProp="foo">title</title>
+        <style itemProp="foo">style</style>
+        <link itemProp="foo" />
+        <script itemProp="foo" />
+      </html>,
+    );
+    await expect(async () => {
+      await waitForAll([]);
+    }).toErrorDev([
+      'Cannot render a <meta> outside the main document if it has an `itemProp` prop. `itemProp` suggests the tag belongs to an `itemScope` which can appear anywhere in the DOM. If you were intending for React to hoist this <meta> remove the `itemProp` prop. Otherwise, try moving this tag into the <head> or <body> of the Document.',
+      'Cannot render a <title> outside the main document if it has an `itemProp` prop. `itemProp` suggests the tag belongs to an `itemScope` which can appear anywhere in the DOM. If you were intending for React to hoist this <title> remove the `itemProp` prop. Otherwise, try moving this tag into the <head> or <body> of the Document.',
+      'Cannot render a <style> outside the main document if it has an `itemProp` prop. `itemProp` suggests the tag belongs to an `itemScope` which can appear anywhere in the DOM. If you were intending for React to hoist this <style> remove the `itemProp` prop. Otherwise, try moving this tag into the <head> or <body> of the Document.',
+      'Cannot render a <link> outside the main document if it has an `itemProp` prop. `itemProp` suggests the tag belongs to an `itemScope` which can appear anywhere in the DOM. If you were intending for React to hoist this <link> remove the `itemProp` prop. Otherwise, try moving this tag into the <head> or <body> of the Document.',
+      'Cannot render a <script> outside the main document if it has an `itemProp` prop. `itemProp` suggests the tag belongs to an `itemScope` which can appear anywhere in the DOM. If you were intending for React to hoist this <script> remove the `itemProp` prop. Otherwise, try moving this tag into the <head> or <body> of the Document.',
+      'validateDOMNesting(...): <meta> cannot appear as a child of <html>',
+      'validateDOMNesting(...): <title> cannot appear as a child of <html>',
+      'validateDOMNesting(...): <style> cannot appear as a child of <html>',
+      'validateDOMNesting(...): <link> cannot appear as a child of <html>',
+      'validateDOMNesting(...): <script> cannot appear as a child of <html>',
+    ]);
+  });
+
+  // @gate enableFloat
+  it('can hydrate resources and components in the head and body even if a browser or 3rd party script injects extra html nodes', async () => {
+    // This is a stress test case for hydrating a complex combination of hoistable elements, hoistable resources and host components
+    // in an environment that has been manipulated by 3rd party scripts/extensions to modify the <head> and <body>
+    function App() {
+      return (
+        <>
+          <link rel="foo" href="foo" />
+          <script async={true} src="rendered" />
+          <link rel="stylesheet" href="stylesheet" precedence="default" />
+          <html itemScope={true}>
+            <head>
+              {/* Component */}
+              <link rel="stylesheet" href="stylesheet" />
+              <script src="sync rendered" data-meaningful="" />
+              <style>{'body { background-color: red; }'}</style>
+              <script src="async rendered" async={true} onLoad={() => {}} />
+              <noscript>
+                <meta name="noscript" content="noscript" />
+              </noscript>
+              <link rel="foo" href="foo" onLoad={() => {}} />
+            </head>
+            <body>
+              {/* Component because it has itemProp */}
+              <meta name="foo" content="foo" itemProp="a prop" />
+              {/* regular Hoistable */}
+              <meta name="foo" content="foo" />
+              {/* regular Hoistable */}
+              <title>title</title>
+              <div itemScope={true}>
+                <div>
+                  <div>deep hello</div>
+                  {/* Component because it has itemProp */}
+                  <meta name="foo" content="foo" itemProp="a prop" />
+                </div>
+              </div>
+            </body>
+          </html>
+          <link rel="foo" href="foo" />
+        </>
+      );
+    }
+
+    await actIntoEmptyDocument(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html itemscope="">
+        <head>
+          {/* Hoisted Resources and elements */}
+          <link rel="stylesheet" href="stylesheet" data-precedence="default" />
+          <script async="" src="rendered" />
+          <link rel="preload" as="script" href="sync rendered" />
+          <link rel="preload" as="script" href="async rendered" />
+          <link rel="foo" href="foo" />
+          <meta name="foo" content="foo" />
+          <title>title</title>
+          <link rel="foo" href="foo" />
+          {/* rendered host components */}
+          <link rel="stylesheet" href="stylesheet" />
+          <script src="sync rendered" data-meaningful="" />
+          <style>{'body { background-color: red; }'}</style>
+          <noscript>&lt;meta name="noscript" content="noscript"/&gt;</noscript>
+          <link rel="foo" href="foo" />
+        </head>
+        <body>
+          <meta name="foo" content="foo" itemprop="a prop" />
+          <div itemscope="">
+            <div>
+              <div>deep hello</div>
+              <meta name="foo" content="foo" itemprop="a prop" />
+            </div>
+          </div>
+        </body>
+      </html>,
+    );
+
+    // We inject some styles, divs, scripts into the begginning, middle, and end
+    // of the head / body.
+    const injectedStyle = document.createElement('style');
+    injectedStyle.textContent = 'body { background-color: blue; }';
+    document.head.prepend(injectedStyle.cloneNode(true));
+    document.head.appendChild(injectedStyle.cloneNode(true));
+    document.body.prepend(injectedStyle.cloneNode(true));
+    document.body.appendChild(injectedStyle.cloneNode(true));
+
+    const injectedDiv = document.createElement('div');
+    document.head.prepend(injectedDiv);
+    document.head.appendChild(injectedDiv.cloneNode(true));
+    // We do not prepend a <div> in body because this will conflict with hyration
+    // We still mostly hydrate by matchign tag and <div> does not have any attributes to
+    // differentiate between likely-inject and likely-rendered cases. If a <div> is prepended
+    // in the <body> and you render a <div> as the first child of <body> there will be a conflict.
+    // We consider this a rare edge case and even if it does happen the fallback to client rendering
+    // should patch up the DOM correctly
+    document.body.appendChild(injectedDiv.cloneNode(true));
+
+    const injectedScript = document.createElement('script');
+    injectedScript.setAttribute('async', '');
+    injectedScript.setAttribute('src', 'injected');
+    document.head.prepend(injectedScript);
+    document.head.appendChild(injectedScript.cloneNode(true));
+    document.body.prepend(injectedScript.cloneNode(true));
+    document.body.appendChild(injectedScript.cloneNode(true));
+
+    // We hydrate the same App and confirm the output is identical except for the async
+    // script insertion that happens because we do not SSR async scripts with load handlers.
+    // All the extra inject nodes are preset
+    const root = ReactDOMClient.hydrateRoot(document, <App />);
+    await waitForAll([]);
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html itemscope="">
+        <head>
+          <script async="" src="injected" />
+          <div />
+          <style>{'body { background-color: blue; }'}</style>
+          <link rel="stylesheet" href="stylesheet" data-precedence="default" />
+          <script async="" src="rendered" />
+          <link rel="preload" as="script" href="sync rendered" />
+          <link rel="preload" as="script" href="async rendered" />
+          <link rel="foo" href="foo" />
+          <meta name="foo" content="foo" />
+          <title>title</title>
+          <link rel="foo" href="foo" />
+          <link rel="stylesheet" href="stylesheet" />
+          <script src="sync rendered" data-meaningful="" />
+          <style>{'body { background-color: red; }'}</style>
+          <script src="async rendered" async="" />
+          <noscript>&lt;meta name="noscript" content="noscript"/&gt;</noscript>
+          <link rel="foo" href="foo" />
+          <style>{'body { background-color: blue; }'}</style>
+          <div />
+          <script async="" src="injected" />
+        </head>
+        <body>
+          <script async="" src="injected" />
+          <style>{'body { background-color: blue; }'}</style>
+          <meta name="foo" content="foo" itemprop="a prop" />
+          <div itemscope="">
+            <div>
+              <div>deep hello</div>
+              <meta name="foo" content="foo" itemprop="a prop" />
+            </div>
+          </div>
+          <style>{'body { background-color: blue; }'}</style>
+          <div />
+          <script async="" src="injected" />
+        </body>
+      </html>,
+    );
+
+    // We unmount. The nodes that remain are
+    // 1. Hoisted resources (we don't clean these up on unmount to address races with streaming suspense and navigation)
+    // 2. preloads that are injected to hint the browser to load a resource but are not associated to Fibers directly
+    // 3. Nodes that React skipped over during hydration
+    root.unmount();
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <script async="" src="injected" />
+          <div />
+          <style>{'body { background-color: blue; }'}</style>
+          <link rel="stylesheet" href="stylesheet" data-precedence="default" />
+          <script async="" src="rendered" />
+          <link rel="preload" as="script" href="sync rendered" />
+          <link rel="preload" as="script" href="async rendered" />
+          <style>{'body { background-color: blue; }'}</style>
+          <div />
+          <script async="" src="injected" />
+        </head>
+        <body>
+          <script async="" src="injected" />
+          <style>{'body { background-color: blue; }'}</style>
+          <style>{'body { background-color: blue; }'}</style>
+          <div />
+          <script async="" src="injected" />
+        </body>
+      </html>,
+    );
+  });
+
+  it('does not preload nomodule scripts', async () => {
+    await actIntoEmptyDocument(() => {
+      renderToPipeableStream(
+        <html>
+          <body>
+            <script src="foo" noModule={true} data-meaningful="" />
+            <script async={true} src="bar" noModule={true} data-meaningful="" />
+          </body>
+        </html>,
+      ).pipe(writable);
+    });
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <script async="" src="bar" nomodule="" data-meaningful="" />
+        </head>
+        <body>
+          <script src="foo" nomodule="" data-meaningful="" />
+        </body>
       </html>,
     );
   });
@@ -4398,7 +4770,7 @@ background-color: green;
           </body>
         </html>,
       );
-      expect(Scheduler).toFlushWithoutYielding();
+      await waitForAll([]);
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>
@@ -5070,6 +5442,120 @@ background-color: green;
       );
     });
 
+    it('can hydrate hoistable tags inside late suspense boundaries', async () => {
+      function App() {
+        return (
+          <html>
+            <body>
+              <link rel="rel1" href="linkhref" />
+              <link rel="rel2" href="linkhref" />
+              <meta name="name1" content="metacontent" />
+              <meta name="name2" content="metacontent" />
+              <Suspense fallback="loading...">
+                <link rel="rel3" href="linkhref" />
+                <link rel="rel4" href="linkhref" />
+                <meta name="name3" content="metacontent" />
+                <meta name="name4" content="metacontent" />
+                <BlockedOn value="release">
+                  <link rel="rel5" href="linkhref" />
+                  <link rel="rel6" href="linkhref" />
+                  <meta name="name5" content="metacontent" />
+                  <meta name="name6" content="metacontent" />
+                  <div>hello world</div>
+                </BlockedOn>
+              </Suspense>
+            </body>
+          </html>
+        );
+      }
+      await actIntoEmptyDocument(() => {
+        renderToPipeableStream(<App />).pipe(writable);
+      });
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="rel1" href="linkhref" />
+            <link rel="rel2" href="linkhref" />
+            <meta name="name1" content="metacontent" />
+            <meta name="name2" content="metacontent" />
+            <link rel="rel3" href="linkhref" />
+            <link rel="rel4" href="linkhref" />
+            <meta name="name3" content="metacontent" />
+            <meta name="name4" content="metacontent" />
+          </head>
+          <body>loading...</body>
+        </html>,
+      );
+
+      const root = ReactDOMClient.hydrateRoot(document, <App />);
+      await waitForAll([]);
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="rel1" href="linkhref" />
+            <link rel="rel2" href="linkhref" />
+            <meta name="name1" content="metacontent" />
+            <meta name="name2" content="metacontent" />
+            <link rel="rel3" href="linkhref" />
+            <link rel="rel4" href="linkhref" />
+            <meta name="name3" content="metacontent" />
+            <meta name="name4" content="metacontent" />
+          </head>
+          <body>loading...</body>
+        </html>,
+      );
+
+      const thirdPartyLink = document.createElement('link');
+      thirdPartyLink.setAttribute('href', 'linkhref');
+      thirdPartyLink.setAttribute('rel', '3rdparty');
+      document.body.prepend(thirdPartyLink);
+
+      const thirdPartyMeta = document.createElement('meta');
+      thirdPartyMeta.setAttribute('content', 'metacontent');
+      thirdPartyMeta.setAttribute('name', '3rdparty');
+      document.body.prepend(thirdPartyMeta);
+
+      await act(() => {
+        resolveText('release');
+      });
+      await waitForAll([]);
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <link rel="rel1" href="linkhref" />
+            <link rel="rel2" href="linkhref" />
+            <meta name="name1" content="metacontent" />
+            <meta name="name2" content="metacontent" />
+            <link rel="rel3" href="linkhref" />
+            <link rel="rel4" href="linkhref" />
+            <meta name="name3" content="metacontent" />
+            <meta name="name4" content="metacontent" />
+          </head>
+          <body>
+            <meta name="3rdparty" content="metacontent" />
+            <link rel="3rdparty" href="linkhref" />
+            <div>hello world</div>
+            <link rel="rel5" href="linkhref" />
+            <link rel="rel6" href="linkhref" />
+            <meta name="name5" content="metacontent" />
+            <meta name="name6" content="metacontent" />
+          </body>
+        </html>,
+      );
+
+      root.unmount();
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head />
+          <body>
+            <meta name="3rdparty" content="metacontent" />
+            <link rel="3rdparty" href="linkhref" />
+          </body>
+        </html>,
+      );
+    });
+
     // @gate enableFloat
     it('does not hoist inside an <svg> context', async () => {
       await actIntoEmptyDocument(() => {
@@ -5166,22 +5652,16 @@ background-color: green;
           },
         },
       );
-      try {
-        await expect(async () => {
-          await waitForAll([]);
-        }).toErrorDev(
-          [
-            'Warning: Text content did not match. Server: "server" Client: "client"',
-            'Warning: An error occurred during hydration. The server HTML was replaced with client content in <#document>.',
-          ],
-          {withoutStack: 1},
-        );
-      } catch (e) {
-        // When gates are false this test fails on a DOMException if you don't clear the scheduler after catching.
-        // When gates are true this branch should not be hit
+
+      await expect(async () => {
         await waitForAll([]);
-        throw e;
-      }
+      }).toErrorDev(
+        [
+          'Warning: Text content did not match. Server: "server" Client: "client"',
+          'Warning: An error occurred during hydration. The server HTML was replaced with client content in <#document>.',
+        ],
+        {withoutStack: 1},
+      );
       expect(getMeaningfulChildren(document)).toEqual(
         <html>
           <head>

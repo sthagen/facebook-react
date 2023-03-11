@@ -22,7 +22,7 @@ beforeEach(() => {
   React = require('react');
   ReactNoop = require('react-noop-renderer');
   Scheduler = require('scheduler');
-  act = require('jest-react').act;
+  act = require('internal-test-utils').act;
 
   const InternalTestUtils = require('internal-test-utils');
   assertLog = InternalTestUtils.assertLog;
@@ -94,16 +94,16 @@ function readText(text) {
   if (record !== undefined) {
     switch (record.status) {
       case 'pending':
-        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+        Scheduler.log(`Suspend! [${text}]`);
         throw record.value;
       case 'rejected':
-        Scheduler.unstable_yieldValue(`Error! [${text}]`);
+        Scheduler.log(`Error! [${text}]`);
         throw record.value;
       case 'resolved':
         return textCache.version;
     }
   } else {
-    Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+    Scheduler.log(`Suspend! [${text}]`);
 
     const thenable = {
       pings: [],
@@ -127,14 +127,14 @@ function readText(text) {
 }
 
 function Text({text}) {
-  Scheduler.unstable_yieldValue(text);
+  Scheduler.log(text);
   return <span prop={text} />;
 }
 
 function AsyncText({text, showVersion}) {
   const version = readText(text);
   const fullText = showVersion ? `${text} [v${version}]` : text;
-  Scheduler.unstable_yieldValue(fullText);
+  Scheduler.log(fullText);
   return <span prop={fullText} />;
 }
 
@@ -189,15 +189,15 @@ test('regression (#20932): return pointer is correct before entering deleted tre
   }
 
   const root = ReactNoop.createRoot();
-  await act(async () => {
+  await act(() => {
     root.render(<App />);
   });
   assertLog(['Suspend! [0]', 'Loading Async...', 'Loading Tail...']);
-  await act(async () => {
+  await act(() => {
     resolveText(0);
   });
   assertLog([0, 'Tail']);
-  await act(async () => {
+  await act(() => {
     setAsyncText(x => x + 1);
   });
   assertLog([

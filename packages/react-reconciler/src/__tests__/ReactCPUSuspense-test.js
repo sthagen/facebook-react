@@ -20,7 +20,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     Suspense = React.Suspense;
     useState = React.useState;
 
@@ -77,7 +77,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     //   const record = textCache.get(text);
     //   if (record !== undefined) {
     //     if (record.status === 'pending') {
-    //       Scheduler.unstable_yieldValue(`Promise rejected [${text}]`);
+    //       Scheduler.log(`Promise rejected [${text}]`);
     //       record.ping();
     //       record.status = 'rejected';
     //       clearTimeout(record.promise._timer);
@@ -95,7 +95,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
   });
 
   function Text(props) {
-    Scheduler.unstable_yieldValue(props.text);
+    Scheduler.log(props.text);
     return props.text;
   }
 
@@ -103,13 +103,13 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     const text = props.text;
     try {
       readText(text);
-      Scheduler.unstable_yieldValue(text);
+      Scheduler.log(text);
       return text;
     } catch (promise) {
       if (typeof promise.then === 'function') {
-        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+        Scheduler.log(`Suspend! [${text}]`);
       } else {
-        Scheduler.unstable_yieldValue(`Error! [${text}]`);
+        Scheduler.log(`Error! [${text}]`);
       }
       throw promise;
     }
@@ -176,7 +176,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     // Initial mount
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     // Inner contents finish in separate commit from outer
@@ -189,7 +189,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     );
 
     // Update
-    await act(async () => {
+    await act(() => {
       setCount(1);
     });
     // Entire update finishes in a single commit
@@ -277,7 +277,7 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     // Each level commits separately

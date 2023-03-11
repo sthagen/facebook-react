@@ -9,8 +9,6 @@ import {REACT_ELEMENT_TYPE, REACT_FRAGMENT_TYPE} from 'shared/ReactSymbols';
 
 import isArray from 'shared/isArray';
 
-export {act} from './internalAct';
-
 function captureAssertion(fn) {
   // Trick to use a Jest matcher inside another Jest matcher. `fn` contains an
   // assertion; if it throws, we capture the error and return it, so the stack
@@ -29,7 +27,7 @@ function captureAssertion(fn) {
 
 function assertYieldsWereCleared(root) {
   const Scheduler = root._Scheduler;
-  const actualYields = Scheduler.unstable_clearYields();
+  const actualYields = Scheduler.unstable_clearLog();
   if (actualYields.length !== 0) {
     const error = Error(
       'Log of yielded values is not empty. ' +

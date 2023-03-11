@@ -16,7 +16,7 @@ describe('ReactInterleavedUpdates', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     startTransition = React.startTransition;
     useState = React.useState;
     useEffect = React.useEffect;
@@ -28,7 +28,7 @@ describe('ReactInterleavedUpdates', () => {
   });
 
   function Text({text}) {
-    Scheduler.unstable_yieldValue(text);
+    Scheduler.log(text);
     return text;
   }
 
@@ -52,7 +52,7 @@ describe('ReactInterleavedUpdates', () => {
 
     const root = ReactNoop.createRoot();
 
-    await act(async () => {
+    await act(() => {
       root.render(
         <>
           <Child />
@@ -101,7 +101,7 @@ describe('ReactInterleavedUpdates', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['A0', 'B0', 'C0']);

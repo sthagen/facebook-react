@@ -200,7 +200,7 @@ describe('SimpleEventPlugin', function () {
           count: state.count + 1,
         }));
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue(`didUpdate - Count: ${this.state.count}`);
+        Scheduler.log(`didUpdate - Count: ${this.state.count}`);
       }
       render() {
         return (
@@ -250,7 +250,7 @@ describe('SimpleEventPlugin', function () {
       assertLog = InternalTestUtils.assertLog;
       waitForAll = InternalTestUtils.waitForAll;
 
-      act = require('jest-react').act;
+      act = require('internal-test-utils').act;
     });
 
     it('flushes pending interactive work before exiting event handler', async () => {
@@ -263,12 +263,12 @@ describe('SimpleEventPlugin', function () {
         state = {disabled: false};
         onClick = () => {
           // Perform some side-effect
-          Scheduler.unstable_yieldValue('Side-effect');
+          Scheduler.log('Side-effect');
           // Disable the button
           this.setState({disabled: true});
         };
         render() {
-          Scheduler.unstable_yieldValue(
+          Scheduler.log(
             `render button: ${this.state.disabled ? 'disabled' : 'enabled'}`,
           );
           return (
@@ -301,7 +301,7 @@ describe('SimpleEventPlugin', function () {
       }
 
       // Click the button to trigger the side-effect
-      await act(async () => click());
+      await act(() => click());
       assertLog([
         // The handler fired
         'Side-effect',
@@ -370,17 +370,17 @@ describe('SimpleEventPlugin', function () {
       }
 
       // Click the button a single time
-      await act(async () => click());
+      await act(() => click());
       // The counter should update synchronously, even in concurrent mode.
       expect(button.textContent).toEqual('Count: 1');
 
       // Click the button many more times
-      await act(async () => click());
-      await act(async () => click());
-      await act(async () => click());
-      await act(async () => click());
-      await act(async () => click());
-      await act(async () => click());
+      await act(() => click());
+      await act(() => click());
+      await act(() => click());
+      await act(() => click());
+      await act(() => click());
+      await act(() => click());
 
       // Flush the remaining work
       await waitForAll([]);

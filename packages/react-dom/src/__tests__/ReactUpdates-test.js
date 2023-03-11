@@ -26,7 +26,7 @@ describe('ReactUpdates', () => {
     ReactDOM = require('react-dom');
     ReactDOMClient = require('react-dom/client');
     ReactTestUtils = require('react-dom/test-utils');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     Scheduler = require('scheduler');
 
     const InternalTestUtils = require('internal-test-utils');
@@ -1331,7 +1331,7 @@ describe('ReactUpdates', () => {
     const container = document.createElement('div');
 
     function Baz() {
-      Scheduler.unstable_yieldValue('Baz');
+      Scheduler.log('Baz');
       return <p>baz</p>;
     }
 
@@ -1339,14 +1339,14 @@ describe('ReactUpdates', () => {
     function Bar() {
       const [counter, _setCounter] = React.useState(0);
       setCounter = _setCounter;
-      Scheduler.unstable_yieldValue('Bar');
+      Scheduler.log('Bar');
       return <p>bar {counter}</p>;
     }
 
     function Foo() {
-      Scheduler.unstable_yieldValue('Foo');
+      Scheduler.log('Foo');
       React.useEffect(() => {
-        Scheduler.unstable_yieldValue('Foo#effect');
+        Scheduler.log('Foo#effect');
       });
       return (
         <div>
@@ -1622,12 +1622,12 @@ describe('ReactUpdates', () => {
 
   // TODO: Replace this branch with @gate pragmas
   if (__DEV__) {
-    it('warns about a deferred infinite update loop with useEffect', () => {
+    it('warns about a deferred infinite update loop with useEffect', async () => {
       function NonTerminating() {
         const [step, setStep] = React.useState(0);
         React.useEffect(() => {
           setStep(x => x + 1);
-          Scheduler.unstable_yieldValue(step);
+          Scheduler.log(step);
         });
         return step;
       }
@@ -1646,24 +1646,22 @@ describe('ReactUpdates', () => {
       try {
         const container = document.createElement('div');
         expect(() => {
-          act(() => {
-            ReactDOM.render(<App />, container);
-            while (error === null) {
-              Scheduler.unstable_flushNumberOfYields(1);
-              Scheduler.unstable_clearYields();
-            }
-            expect(error).toContain('Warning: Maximum update depth exceeded.');
-            expect(stack).toContain(' NonTerminating');
-            // rethrow error to prevent going into an infinite loop when act() exits
-            throw error;
-          });
+          ReactDOM.render(<App />, container);
+          while (error === null) {
+            Scheduler.unstable_flushNumberOfYields(1);
+            Scheduler.unstable_clearLog();
+          }
+          expect(error).toContain('Warning: Maximum update depth exceeded.');
+          expect(stack).toContain(' NonTerminating');
+          // rethrow error to prevent going into an infinite loop when act() exits
+          throw error;
         }).toThrow('Maximum update depth exceeded.');
       } finally {
         console.error = originalConsoleError;
       }
     });
 
-    it('can have nested updates if they do not cross the limit', () => {
+    it('can have nested updates if they do not cross the limit', async () => {
       let _setStep;
       const LIMIT = 50;
 
@@ -1675,35 +1673,35 @@ describe('ReactUpdates', () => {
             setStep(x => x + 1);
           }
         });
-        Scheduler.unstable_yieldValue(step);
+        Scheduler.log(step);
         return step;
       }
 
       const container = document.createElement('div');
-      act(() => {
+      await act(() => {
         ReactDOM.render(<Terminating />, container);
       });
       expect(container.textContent).toBe('50');
-      act(() => {
+      await act(() => {
         _setStep(0);
       });
       expect(container.textContent).toBe('50');
     });
 
-    it('can have many updates inside useEffect without triggering a warning', () => {
+    it('can have many updates inside useEffect without triggering a warning', async () => {
       function Terminating() {
         const [step, setStep] = React.useState(0);
         React.useEffect(() => {
           for (let i = 0; i < 1000; i++) {
             setStep(x => x + 1);
           }
-          Scheduler.unstable_yieldValue('Done');
+          Scheduler.log('Done');
         }, []);
         return step;
       }
 
       const container = document.createElement('div');
-      act(() => {
+      await act(() => {
         ReactDOM.render(<Terminating />, container);
       });
 

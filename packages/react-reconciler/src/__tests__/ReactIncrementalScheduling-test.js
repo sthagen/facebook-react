@@ -26,7 +26,7 @@ describe('ReactIncrementalScheduling', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
 
     const InternalTestUtils = require('internal-test-utils');
     waitForAll = InternalTestUtils.waitForAll;
@@ -93,16 +93,16 @@ describe('ReactIncrementalScheduling', () => {
     expect(ReactNoop).toMatchRenderedOutput(<span prop={5} />);
   });
 
-  it('works on deferred roots in the order they were scheduled', () => {
+  it('works on deferred roots in the order they were scheduled', async () => {
     const {useEffect} = React;
     function Text({text}) {
       useEffect(() => {
-        Scheduler.unstable_yieldValue(text);
+        Scheduler.log(text);
       }, [text]);
       return text;
     }
 
-    act(() => {
+    await act(() => {
       ReactNoop.renderToRootWithID(<Text text="a:1" />, 'a');
       ReactNoop.renderToRootWithID(<Text text="b:1" />, 'b');
       ReactNoop.renderToRootWithID(<Text text="c:1" />, 'c');
@@ -114,7 +114,7 @@ describe('ReactIncrementalScheduling', () => {
     expect(ReactNoop.getChildrenAsJSX('c')).toEqual('c:1');
 
     // Schedule deferred work in the reverse order
-    act(async () => {
+    await act(async () => {
       React.startTransition(() => {
         ReactNoop.renderToRootWithID(<Text text="c:2" />, 'c');
         ReactNoop.renderToRootWithID(<Text text="b:2" />, 'b');
@@ -151,24 +151,22 @@ describe('ReactIncrementalScheduling', () => {
       state = {tick: 0};
 
       componentDidMount() {
-        Scheduler.unstable_yieldValue(
+        Scheduler.log(
           'componentDidMount (before setState): ' + this.state.tick,
         );
         this.setState({tick: 1});
         // We're in a batch. Update hasn't flushed yet.
-        Scheduler.unstable_yieldValue(
-          'componentDidMount (after setState): ' + this.state.tick,
-        );
+        Scheduler.log('componentDidMount (after setState): ' + this.state.tick);
       }
 
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue('componentDidUpdate: ' + this.state.tick);
+        Scheduler.log('componentDidUpdate: ' + this.state.tick);
         if (this.state.tick === 2) {
-          Scheduler.unstable_yieldValue(
+          Scheduler.log(
             'componentDidUpdate (before setState): ' + this.state.tick,
           );
           this.setState({tick: 3});
-          Scheduler.unstable_yieldValue(
+          Scheduler.log(
             'componentDidUpdate (after setState): ' + this.state.tick,
           );
           // We're in a batch. Update hasn't flushed yet.
@@ -176,7 +174,7 @@ describe('ReactIncrementalScheduling', () => {
       }
 
       render() {
-        Scheduler.unstable_yieldValue('render: ' + this.state.tick);
+        Scheduler.log('render: ' + this.state.tick);
         instance = this;
         return <span prop={this.state.tick} />;
       }
@@ -220,11 +218,11 @@ describe('ReactIncrementalScheduling', () => {
 
       componentDidMount() {
         React.startTransition(() => {
-          Scheduler.unstable_yieldValue(
+          Scheduler.log(
             'componentDidMount (before setState): ' + this.state.tick,
           );
           this.setState({tick: 1});
-          Scheduler.unstable_yieldValue(
+          Scheduler.log(
             'componentDidMount (after setState): ' + this.state.tick,
           );
         });
@@ -232,15 +230,13 @@ describe('ReactIncrementalScheduling', () => {
 
       componentDidUpdate() {
         React.startTransition(() => {
-          Scheduler.unstable_yieldValue(
-            'componentDidUpdate: ' + this.state.tick,
-          );
+          Scheduler.log('componentDidUpdate: ' + this.state.tick);
           if (this.state.tick === 2) {
-            Scheduler.unstable_yieldValue(
+            Scheduler.log(
               'componentDidUpdate (before setState): ' + this.state.tick,
             );
             this.setState({tick: 3});
-            Scheduler.unstable_yieldValue(
+            Scheduler.log(
               'componentDidUpdate (after setState): ' + this.state.tick,
             );
           }
@@ -248,7 +244,7 @@ describe('ReactIncrementalScheduling', () => {
       }
 
       render() {
-        Scheduler.unstable_yieldValue('render: ' + this.state.tick);
+        Scheduler.log('render: ' + this.state.tick);
         instance = this;
         return <span prop={this.state.tick} />;
       }
@@ -299,7 +295,7 @@ describe('ReactIncrementalScheduling', () => {
         });
       }
       render() {
-        Scheduler.unstable_yieldValue('Foo');
+        Scheduler.log('Foo');
         return <span prop={this.state.step} />;
       }
     }

@@ -60,7 +60,7 @@ describe('ChangeEventPlugin', () => {
     React = require('react');
     ReactDOM = require('react-dom');
     ReactDOMClient = require('react-dom/client');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     Scheduler = require('scheduler');
 
     const InternalTestUtils = require('internal-test-utils');
@@ -512,7 +512,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
+          Scheduler.log(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -556,7 +556,7 @@ describe('ChangeEventPlugin', () => {
           this.setState({checked: event.target.checked});
         };
         render() {
-          Scheduler.unstable_yieldValue(`render: ${this.state.checked}`);
+          Scheduler.log(`render: ${this.state.checked}`);
           const controlledValue = this.props.reverse
             ? !this.state.checked
             : this.state.checked;
@@ -609,7 +609,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
+          Scheduler.log(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -651,7 +651,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
+          Scheduler.log(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -700,7 +700,7 @@ describe('ChangeEventPlugin', () => {
           this.setState({value: ''});
         };
         render() {
-          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
+          Scheduler.log(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -753,12 +753,12 @@ describe('ChangeEventPlugin', () => {
         );
       }
 
-      await act(async () => {
+      await act(() => {
         root.render(<Foo />);
       });
       expect(container.textContent).toEqual('not hovered');
 
-      await act(async () => {
+      await act(() => {
         const mouseOverEvent = document.createEvent('MouseEvents');
         mouseOverEvent.initEvent('mouseover', true, true);
         target.current.dispatchEvent(mouseOverEvent);

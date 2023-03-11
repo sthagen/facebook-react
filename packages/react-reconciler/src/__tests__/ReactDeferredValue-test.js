@@ -25,7 +25,7 @@ describe('ReactDeferredValue', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     startTransition = React.startTransition;
     useDeferredValue = React.useDeferredValue;
     useMemo = React.useMemo;
@@ -37,7 +37,7 @@ describe('ReactDeferredValue', () => {
   });
 
   function Text({text}) {
-    Scheduler.unstable_yieldValue(text);
+    Scheduler.log(text);
     return text;
   }
 
@@ -68,7 +68,7 @@ describe('ReactDeferredValue', () => {
     const root = ReactNoop.createRoot();
 
     // Initial render
-    await act(async () => {
+    await act(() => {
       root.render(<App value={1} />);
     });
     assertLog(['Original: 1', 'Deferred: 1']);
@@ -129,7 +129,7 @@ describe('ReactDeferredValue', () => {
     const root = ReactNoop.createRoot();
 
     // Initial render
-    await act(async () => {
+    await act(() => {
       root.render(<App value={1} />);
     });
     assertLog(['Original: 1', 'Deferred: 1']);
@@ -195,7 +195,7 @@ describe('ReactDeferredValue', () => {
     const root = ReactNoop.createRoot();
 
     // Initial render
-    await act(async () => {
+    await act(() => {
       root.render(<App value={1} />);
     });
     assertLog(['Original: 1', 'Deferred: 1']);

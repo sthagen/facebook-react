@@ -28,7 +28,7 @@ describe('ReactEffectOrdering', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     useEffect = React.useEffect;
     useLayoutEffect = React.useLayoutEffect;
 
@@ -41,23 +41,23 @@ describe('ReactEffectOrdering', () => {
 
     function Parent() {
       useLayoutEffect(() => {
-        return () => Scheduler.unstable_yieldValue('Unmount parent');
+        return () => Scheduler.log('Unmount parent');
       });
       return <Child />;
     }
 
     function Child() {
       useLayoutEffect(() => {
-        return () => Scheduler.unstable_yieldValue('Unmount child');
+        return () => Scheduler.log('Unmount child');
       });
       return 'Child';
     }
 
-    await act(async () => {
+    await act(() => {
       root.render(<Parent />);
     });
     expect(root).toMatchRenderedOutput('Child');
-    await act(async () => {
+    await act(() => {
       root.render(null);
     });
     assertLog(['Unmount parent', 'Unmount child']);
@@ -68,23 +68,23 @@ describe('ReactEffectOrdering', () => {
 
     function Parent() {
       useEffect(() => {
-        return () => Scheduler.unstable_yieldValue('Unmount parent');
+        return () => Scheduler.log('Unmount parent');
       });
       return <Child />;
     }
 
     function Child() {
       useEffect(() => {
-        return () => Scheduler.unstable_yieldValue('Unmount child');
+        return () => Scheduler.log('Unmount child');
       });
       return 'Child';
     }
 
-    await act(async () => {
+    await act(() => {
       root.render(<Parent />);
     });
     expect(root).toMatchRenderedOutput('Child');
-    await act(async () => {
+    await act(() => {
       root.render(null);
     });
     assertLog(['Unmount parent', 'Unmount child']);

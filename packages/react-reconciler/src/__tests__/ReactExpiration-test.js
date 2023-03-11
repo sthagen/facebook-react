@@ -29,7 +29,7 @@ describe('ReactExpiration', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('jest-react').act;
+    act = require('internal-test-utils').act;
     startTransition = React.startTransition;
     useState = React.useState;
     useEffect = React.useEffect;
@@ -69,7 +69,7 @@ describe('ReactExpiration', () => {
       const record = textCache.get(text);
       if (record !== undefined) {
         if (record.status === 'pending') {
-          Scheduler.unstable_yieldValue(`Promise resolved [${text}]`);
+          Scheduler.log(`Promise resolved [${text}]`);
           record.ping();
           record.ping = null;
           record.status = 'resolved';
@@ -88,7 +88,7 @@ describe('ReactExpiration', () => {
   });
 
   function Text(props) {
-    Scheduler.unstable_yieldValue(props.text);
+    Scheduler.log(props.text);
     return props.text;
   }
 
@@ -96,64 +96,59 @@ describe('ReactExpiration', () => {
     const text = props.text;
     try {
       readText(text);
-      Scheduler.unstable_yieldValue(text);
+      Scheduler.log(text);
       return text;
     } catch (promise) {
       if (typeof promise.then === 'function') {
-        Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
+        Scheduler.log(`Suspend! [${text}]`);
         if (typeof props.ms === 'number' && promise._timer === undefined) {
           promise._timer = setTimeout(() => {
             resolveText(text);
           }, props.ms);
         }
       } else {
-        Scheduler.unstable_yieldValue(`Error! [${text}]`);
+        Scheduler.log(`Error! [${text}]`);
       }
       throw promise;
     }
   }
 
-  function flushNextRenderIfExpired() {
-    // This will start rendering the next level of work. If the work hasn't
-    // expired yet, React will exit without doing anything. If it has expired,
-    // it will schedule a sync task.
-    Scheduler.unstable_flushExpired();
-    // Flush the sync task.
-    ReactNoop.flushSync();
-  }
-
-  it('increases priority of updates as time progresses', () => {
+  it('increases priority of updates as time progresses', async () => {
+    ReactNoop.render(<Text text="Step 1" />);
     React.startTransition(() => {
-      ReactNoop.render(<span prop="done" />);
+      ReactNoop.render(<Text text="Step 2" />);
     });
 
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    await waitFor(['Step 1']);
+
+    expect(ReactNoop).toMatchRenderedOutput('Step 1');
 
     // Nothing has expired yet because time hasn't advanced.
-    flushNextRenderIfExpired();
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    Scheduler.unstable_flushExpired();
+    expect(ReactNoop).toMatchRenderedOutput('Step 1');
 
     // Advance time a bit, but not enough to expire the low pri update.
     ReactNoop.expire(4500);
-    flushNextRenderIfExpired();
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    Scheduler.unstable_flushExpired();
+    expect(ReactNoop).toMatchRenderedOutput('Step 1');
 
-    // Advance by another second. Now the update should expire and flush.
+    // Advance by a little bit more. Now the update should expire and flush.
     ReactNoop.expire(500);
-    flushNextRenderIfExpired();
-    expect(ReactNoop).toMatchRenderedOutput(<span prop="done" />);
+    Scheduler.unstable_flushExpired();
+    assertLog(['Step 2']);
+    expect(ReactNoop).toMatchRenderedOutput('Step 2');
   });
 
   it('two updates of like priority in the same event always flush within the same batch', async () => {
     class TextClass extends React.Component {
       componentDidMount() {
-        Scheduler.unstable_yieldValue(`${this.props.text} [commit]`);
+        Scheduler.log(`${this.props.text} [commit]`);
       }
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue(`${this.props.text} [commit]`);
+        Scheduler.log(`${this.props.text} [commit]`);
       }
       render() {
-        Scheduler.unstable_yieldValue(`${this.props.text} [render]`);
+        Scheduler.log(`${this.props.text} [render]`);
         return <span prop={this.props.text} />;
       }
     }
@@ -204,13 +199,13 @@ describe('ReactExpiration', () => {
     async () => {
       class TextClass extends React.Component {
         componentDidMount() {
-          Scheduler.unstable_yieldValue(`${this.props.text} [commit]`);
+          Scheduler.log(`${this.props.text} [commit]`);
         }
         componentDidUpdate() {
-          Scheduler.unstable_yieldValue(`${this.props.text} [commit]`);
+          Scheduler.log(`${this.props.text} [commit]`);
         }
         render() {
-          Scheduler.unstable_yieldValue(`${this.props.text} [render]`);
+          Scheduler.log(`${this.props.text} [render]`);
           return <span prop={this.props.text} />;
         }
       }
@@ -268,19 +263,13 @@ describe('ReactExpiration', () => {
       state = {text: store.text};
       componentDidMount() {
         subscribers.push(this);
-        Scheduler.unstable_yieldValue(
-          `${this.state.text} [${this.props.label}] [commit]`,
-        );
+        Scheduler.log(`${this.state.text} [${this.props.label}] [commit]`);
       }
       componentDidUpdate() {
-        Scheduler.unstable_yieldValue(
-          `${this.state.text} [${this.props.label}] [commit]`,
-        );
+        Scheduler.log(`${this.state.text} [${this.props.label}] [commit]`);
       }
       render() {
-        Scheduler.unstable_yieldValue(
-          `${this.state.text} [${this.props.label}] [render]`,
-        );
+        Scheduler.log(`${this.state.text} [${this.props.label}] [render]`);
         return <span prop={this.state.text} />;
       }
     }
@@ -350,7 +339,7 @@ describe('ReactExpiration', () => {
 
     Scheduler.unstable_advanceTime(10000);
 
-    flushNextRenderIfExpired();
+    Scheduler.unstable_flushExpired();
     assertLog(['D', 'E']);
     expect(root).toMatchRenderedOutput('ABCDE');
   });
@@ -380,17 +369,21 @@ describe('ReactExpiration', () => {
 
     Scheduler.unstable_advanceTime(10000);
 
-    flushNextRenderIfExpired();
+    Scheduler.unstable_flushExpired();
     assertLog(['D', 'E']);
     expect(root).toMatchRenderedOutput('ABCDE');
   });
 
-  it('should measure expiration times relative to module initialization', () => {
+  it('should measure expiration times relative to module initialization', async () => {
     // Tests an implementation detail where expiration times are computed using
     // bitwise operations.
 
     jest.resetModules();
     Scheduler = require('scheduler');
+    const InternalTestUtils = require('internal-test-utils');
+    waitFor = InternalTestUtils.waitFor;
+    assertLog = InternalTestUtils.assertLog;
+
     // Before importing the renderer, advance the current time by a number
     // larger than the maximum allowed for bitwise operations.
     const maxSigned31BitInt = 1073741823;
@@ -399,22 +392,25 @@ describe('ReactExpiration', () => {
     // Now import the renderer. On module initialization, it will read the
     // current time.
     ReactNoop = require('react-noop-renderer');
+    React = require('react');
 
+    ReactNoop.render(<Text text="Step 1" />);
     React.startTransition(() => {
-      ReactNoop.render('Hi');
+      ReactNoop.render(<Text text="Step 2" />);
     });
+    await waitFor(['Step 1']);
 
     // The update should not have expired yet.
-    flushNextRenderIfExpired();
+    Scheduler.unstable_flushExpired();
     assertLog([]);
 
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    expect(ReactNoop).toMatchRenderedOutput('Step 1');
 
     // Advance the time some more to expire the update.
     Scheduler.unstable_advanceTime(10000);
-    flushNextRenderIfExpired();
-    assertLog([]);
-    expect(ReactNoop).toMatchRenderedOutput('Hi');
+    Scheduler.unstable_flushExpired();
+    assertLog(['Step 2']);
+    expect(ReactNoop).toMatchRenderedOutput('Step 2');
   });
 
   it('should measure callback timeout relative to current time, not start-up time', () => {
@@ -428,14 +424,14 @@ describe('ReactExpiration', () => {
     React.startTransition(() => {
       ReactNoop.render('Hi');
     });
-    flushNextRenderIfExpired();
+    Scheduler.unstable_flushExpired();
     assertLog([]);
     expect(ReactNoop).toMatchRenderedOutput(null);
 
     // Advancing by ~5 seconds should be sufficient to expire the update. (I
     // used a slightly larger number to allow for possible rounding.)
     Scheduler.unstable_advanceTime(6000);
-    flushNextRenderIfExpired();
+    Scheduler.unstable_flushExpired();
     assertLog([]);
     expect(ReactNoop).toMatchRenderedOutput('Hi');
   });
@@ -462,7 +458,7 @@ describe('ReactExpiration', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['Sync pri: 0', 'Normal pri: 0']);
@@ -533,7 +529,7 @@ describe('ReactExpiration', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['Sync pri: 0', 'Idle pri: 0']);
@@ -596,7 +592,7 @@ describe('ReactExpiration', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['A0', 'B0', 'C']);
@@ -688,7 +684,7 @@ describe('ReactExpiration', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App />);
     });
     assertLog(['A0', 'B0']);
@@ -717,7 +713,7 @@ describe('ReactExpiration', () => {
   it('passive effects of expired update flush after paint', async () => {
     function App({step}) {
       useEffect(() => {
-        Scheduler.unstable_yieldValue('Effect: ' + step);
+        Scheduler.log('Effect: ' + step);
       }, [step]);
       return (
         <>
@@ -729,13 +725,13 @@ describe('ReactExpiration', () => {
     }
 
     const root = ReactNoop.createRoot();
-    await act(async () => {
+    await act(() => {
       root.render(<App step={0} />);
     });
     assertLog(['A0', 'B0', 'C0', 'Effect: 0']);
     expect(root).toMatchRenderedOutput('A0B0C0');
 
-    await act(async () => {
+    await act(() => {
       startTransition(() => {
         root.render(<App step={1} />);
       });
