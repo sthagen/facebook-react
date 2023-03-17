@@ -8,6 +8,7 @@ let use;
 let useDebugValue;
 let useState;
 let useMemo;
+let useEffect;
 let Suspense;
 let startTransition;
 let cache;
@@ -17,7 +18,7 @@ let waitForPaint;
 let assertLog;
 let waitForAll;
 
-describe('ReactThenable', () => {
+describe('ReactUse', () => {
   beforeEach(() => {
     jest.resetModules();
 
@@ -29,6 +30,7 @@ describe('ReactThenable', () => {
     useDebugValue = React.useDebugValue;
     useState = React.useState;
     useMemo = React.useMemo;
+    useEffect = React.useEffect;
     Suspense = React.Suspense;
     startTransition = React.startTransition;
     cache = React.cache;
@@ -1181,5 +1183,309 @@ describe('ReactThenable', () => {
     });
     assertLog(['A1']);
     expect(root).toMatchRenderedOutput('A1');
+  });
+
+  test('basic promise as child', async () => {
+    const promise = Promise.resolve(<Text text="Hi" />);
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      startTransition(() => {
+        root.render(promise);
+      });
+    });
+    assertLog(['Hi']);
+    expect(root).toMatchRenderedOutput('Hi');
+  });
+
+  test('basic async component', async () => {
+    async function App() {
+      await getAsyncText('Hi');
+      return <Text text="Hi" />;
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      startTransition(() => {
+        root.render(<App />);
+      });
+    });
+    assertLog(['Async text requested [Hi]']);
+
+    await act(() => resolveTextRequests('Hi'));
+    assertLog([
+      // TODO: We shouldn't have to replay the function body again. Skip
+      // straight to reconciliation.
+      'Async text requested [Hi]',
+      'Hi',
+    ]);
+    expect(root).toMatchRenderedOutput('Hi');
+  });
+
+  test('async child of a non-function component (e.g. a class)', async () => {
+    class App extends React.Component {
+      async render() {
+        const text = await getAsyncText('Hi');
+        return <Text text={text} />;
+      }
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(<App />);
+      });
+    });
+    assertLog(['Async text requested [Hi]']);
+
+    await act(async () => resolveTextRequests('Hi'));
+    assertLog([
+      // TODO: We shouldn't have to replay the render function again. We could
+      // skip straight to reconciliation. However, it's not as urgent to fix
+      // this for fiber types that aren't function components, so we can special
+      // case those in the meantime.
+      'Async text requested [Hi]',
+      'Hi',
+    ]);
+    expect(root).toMatchRenderedOutput('Hi');
+  });
+
+  test('async children are recursively unwrapped', async () => {
+    // This is a Usable of a Usable. `use` would only unwrap a single level, but
+    // when passed as a child, the reconciler recurisvely unwraps until it
+    // resolves to a non-Usable value.
+    const thenable = {
+      then() {},
+      status: 'fulfilled',
+      value: {
+        then() {},
+        status: 'fulfilled',
+        value: <Text text="Hi" />,
+      },
+    };
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      root.render(thenable);
+    });
+    assertLog(['Hi']);
+    expect(root).toMatchRenderedOutput('Hi');
+  });
+
+  test('async children are transparently unwrapped before being reconciled (top level)', async () => {
+    function Child({text}) {
+      useEffect(() => {
+        Scheduler.log(`Mount: ${text}`);
+      }, [text]);
+      return <Text text={text} />;
+    }
+
+    async function App({text}) {
+      // The child returned by this component is always a promise (async
+      // functions always return promises). React should unwrap it and reconcile
+      // the result, not the promise itself.
+      return <Child text={text} />;
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      startTransition(() => {
+        root.render(<App text="A" />);
+      });
+    });
+    assertLog(['A', 'Mount: A']);
+    expect(root).toMatchRenderedOutput('A');
+
+    // Update the child's props. It should not remount.
+    await act(() => {
+      startTransition(() => {
+        root.render(<App text="B" />);
+      });
+    });
+    assertLog(['B', 'Mount: B']);
+    expect(root).toMatchRenderedOutput('B');
+  });
+
+  test('async children are transparently unwrapped before being reconciled (siblings)', async () => {
+    function Child({text}) {
+      useEffect(() => {
+        Scheduler.log(`Mount: ${text}`);
+      }, [text]);
+      return <Text text={text} />;
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(
+          <>
+            {Promise.resolve(<Child text="A" />)}
+            {Promise.resolve(<Child text="B" />)}
+            {Promise.resolve(<Child text="C" />)}
+          </>,
+        );
+      });
+    });
+    assertLog(['A', 'B', 'C', 'Mount: A', 'Mount: B', 'Mount: C']);
+    expect(root).toMatchRenderedOutput('ABC');
+
+    await act(() => {
+      startTransition(() => {
+        root.render(
+          <>
+            {Promise.resolve(<Child text="A" />)}
+            {Promise.resolve(<Child text="B" />)}
+            {Promise.resolve(<Child text="C" />)}
+          </>,
+        );
+      });
+    });
+    // Nothing should have remounted
+    assertLog(['A', 'B', 'C']);
+    expect(root).toMatchRenderedOutput('ABC');
+  });
+
+  test('async children are transparently unwrapped before being reconciled (siblings, reordered)', async () => {
+    function Child({text}) {
+      useEffect(() => {
+        Scheduler.log(`Mount: ${text}`);
+      }, [text]);
+      return <Text text={text} />;
+    }
+
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      startTransition(() => {
+        root.render(
+          <>
+            {Promise.resolve(<Child key="A" text="A" />)}
+            {Promise.resolve(<Child key="B" text="B" />)}
+            {Promise.resolve(<Child key="C" text="C" />)}
+          </>,
+        );
+      });
+    });
+    assertLog(['A', 'B', 'C', 'Mount: A', 'Mount: B', 'Mount: C']);
+    expect(root).toMatchRenderedOutput('ABC');
+
+    await act(() => {
+      startTransition(() => {
+        root.render(
+          <>
+            {Promise.resolve(<Child key="B" text="B" />)}
+            {Promise.resolve(<Child key="A" text="A" />)}
+            {Promise.resolve(<Child key="C" text="C" />)}
+          </>,
+        );
+      });
+    });
+    // Nothing should have remounted
+    assertLog(['B', 'A', 'C']);
+    expect(root).toMatchRenderedOutput('BAC');
+  });
+
+  test('basic Context as node', async () => {
+    const Context = React.createContext(null);
+
+    function Indirection({children}) {
+      Scheduler.log('Indirection');
+      return children;
+    }
+
+    function ParentOfContextNode() {
+      Scheduler.log('ParentOfContextNode');
+      return Context;
+    }
+
+    function Child({text}) {
+      useEffect(() => {
+        Scheduler.log('Mount');
+        return () => {
+          Scheduler.log('Unmount');
+        };
+      }, []);
+      return <Text text={text} />;
+    }
+
+    function App({contextValue, children}) {
+      const memoizedChildren = useMemo(
+        () => (
+          <Indirection>
+            <ParentOfContextNode />
+          </Indirection>
+        ),
+        [children],
+      );
+      return (
+        <Context.Provider value={contextValue}>
+          {memoizedChildren}
+        </Context.Provider>
+      );
+    }
+
+    // Initial render
+    const root = ReactNoop.createRoot();
+    await act(() => {
+      root.render(<App contextValue={<Child text="A" />} />);
+    });
+    assertLog(['Indirection', 'ParentOfContextNode', 'A', 'Mount']);
+    expect(root).toMatchRenderedOutput('A');
+
+    // Update the child to a new value
+    await act(async () => {
+      root.render(<App contextValue={<Child text="B" />} />);
+    });
+    assertLog([
+      // Notice that the <Indirection /> did not rerender, because the
+      // update was sent via Context.
+
+      // TODO: We shouldn't have to re-render the parent of the context node.
+      // This happens because we need to reconcile the parent's children again.
+      // However, we should be able to skip directly to reconcilation without
+      // evaluating the component. One way to do this might be to mark the
+      // context dependency with a flag that says it was added
+      // during reconcilation.
+      'ParentOfContextNode',
+
+      // Notice that this was an update, not a remount.
+      'B',
+    ]);
+    expect(root).toMatchRenderedOutput('B');
+
+    // Delete the old child and replace it with a new one, by changing the key
+    await act(async () => {
+      root.render(<App contextValue={<Child key="C" text="C" />} />);
+    });
+    assertLog([
+      'ParentOfContextNode',
+
+      // A new instance is mounted
+      'C',
+      'Unmount',
+      'Mount',
+    ]);
+  });
+
+  test('context as node, at the root', async () => {
+    const Context = React.createContext(<Text text="Hi" />);
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(Context);
+      });
+    });
+    assertLog(['Hi']);
+    expect(root).toMatchRenderedOutput('Hi');
+  });
+
+  test('promises that resolves to a context, rendered as a node', async () => {
+    const Context = React.createContext(<Text text="Hi" />);
+    const promise = Promise.resolve(Context);
+    const root = ReactNoop.createRoot();
+    await act(async () => {
+      startTransition(() => {
+        root.render(promise);
+      });
+    });
+    assertLog(['Hi']);
+    expect(root).toMatchRenderedOutput('Hi');
   });
 });

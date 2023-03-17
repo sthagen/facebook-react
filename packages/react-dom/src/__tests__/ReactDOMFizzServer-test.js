@@ -1624,6 +1624,7 @@ describe('ReactDOMFizzServer', () => {
     }
   });
 
+  // @gate !disableLegacyContext
   it('should can suspend in a class component with legacy context', async () => {
     class TestProvider extends React.Component {
       static childContextTypes = {
@@ -3812,7 +3813,7 @@ describe('ReactDOMFizzServer', () => {
         'Logged recoverable error: There was an error while hydrating this Suspense boundary. Switched to client rendering.',
       ]);
     }).toErrorDev(
-      'Warning: Prop `name` did not match. Server: "initial" Client: "replaced"',
+      'Warning: Text content did not match. Server: "initial" Client: "replaced',
     );
     expect(getVisibleChildren(container)).toEqual(
       <div>
@@ -5399,6 +5400,52 @@ describe('ReactDOMFizzServer', () => {
         const {pipe} = renderToPipeableStream(<App />);
         pipe(writable);
       });
+      expect(getVisibleChildren(container)).toEqual('Hi');
+    });
+
+    it('promise as node', async () => {
+      const promise = Promise.resolve('Hi');
+      await act(async () => {
+        const {pipe} = renderToPipeableStream(promise);
+        pipe(writable);
+      });
+
+      // TODO: The `act` implementation in this file doesn't unwrap microtasks
+      // automatically. We can't use the same `act` we use for Fiber tests
+      // because that relies on the mock Scheduler. Doesn't affect any public
+      // API but we might want to fix this for our own internal tests.
+      await act(async () => {
+        await promise;
+      });
+
+      expect(getVisibleChildren(container)).toEqual('Hi');
+    });
+
+    it('context as node', async () => {
+      const Context = React.createContext('Hi');
+      await act(async () => {
+        const {pipe} = renderToPipeableStream(Context);
+        pipe(writable);
+      });
+      expect(getVisibleChildren(container)).toEqual('Hi');
+    });
+
+    it('recursive Usable as node', async () => {
+      const Context = React.createContext('Hi');
+      const promiseForContext = Promise.resolve(Context);
+      await act(async () => {
+        const {pipe} = renderToPipeableStream(promiseForContext);
+        pipe(writable);
+      });
+
+      // TODO: The `act` implementation in this file doesn't unwrap microtasks
+      // automatically. We can't use the same `act` we use for Fiber tests
+      // because that relies on the mock Scheduler. Doesn't affect any public
+      // API but we might want to fix this for our own internal tests.
+      await act(async () => {
+        await promiseForContext;
+      });
+
       expect(getVisibleChildren(container)).toEqual('Hi');
     });
   });

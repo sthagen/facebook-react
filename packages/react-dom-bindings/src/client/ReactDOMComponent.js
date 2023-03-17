@@ -55,14 +55,14 @@ import {
   setValueForStyles,
   validateShorthandPropertyCollisionInDev,
 } from './CSSPropertyOperations';
-import {HTML_NAMESPACE, getIntrinsicNamespace} from '../shared/DOMNamespaces';
+import {HTML_NAMESPACE, getIntrinsicNamespace} from './DOMNamespaces';
 import {
   getPropertyInfo,
   shouldIgnoreAttribute,
   shouldRemoveAttribute,
 } from '../shared/DOMProperty';
-import assertValidProps from '../shared/assertValidProps';
-import {DOCUMENT_NODE} from '../shared/HTMLNodeType';
+import assertValidProps from './assertValidProps';
+import {DOCUMENT_NODE} from './HTMLNodeType';
 import isCustomComponent from '../shared/isCustomComponent';
 import possibleStandardNames from '../shared/possibleStandardNames';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
@@ -74,6 +74,7 @@ import {
   enableCustomElementPropertySupport,
   enableClientRenderFallbackOnTextMismatch,
   enableHostSingletons,
+  disableIEWorkarounds,
 } from 'shared/ReactFeatureFlags';
 import {
   mediaEventTypes,
@@ -94,14 +95,7 @@ const HTML = '__html';
 let warnedUnknownTags: {
   [key: string]: boolean,
 };
-
-let validatePropertiesInDevelopment;
-let warnForPropDifference;
-let warnForExtraAttributes;
-let warnForInvalidEventListener;
 let canDiffStyleForHydrationWarning;
-
-let normalizeHTML;
 
 if (__DEV__) {
   warnedUnknownTags = {
@@ -115,15 +109,6 @@ if (__DEV__) {
     webview: true,
   };
 
-  validatePropertiesInDevelopment = function (type: string, props: any) {
-    validateARIAProperties(type, props);
-    validateInputProperties(type, props);
-    validateUnknownProperties(type, props, {
-      registrationNameDependencies,
-      possibleRegistrationNames,
-    });
-  };
-
   // IE 11 parses & normalizes the style attribute as opposed to other
   // browsers. It adds spaces and sorts the properties in some
   // non-alphabetical order. Handling that would require sorting CSS
@@ -132,13 +117,27 @@ if (__DEV__) {
   // normalized. Since it only affects IE, we're skipping style warnings
   // in that browser completely in favor of doing all that work.
   // See https://github.com/facebook/react/issues/11807
-  canDiffStyleForHydrationWarning = canUseDOM && !document.documentMode;
+  canDiffStyleForHydrationWarning =
+    disableIEWorkarounds || (canUseDOM && !document.documentMode);
+}
 
-  warnForPropDifference = function (
-    propName: string,
-    serverValue: mixed,
-    clientValue: mixed,
-  ) {
+function validatePropertiesInDevelopment(type: string, props: any) {
+  if (__DEV__) {
+    validateARIAProperties(type, props);
+    validateInputProperties(type, props);
+    validateUnknownProperties(type, props, {
+      registrationNameDependencies,
+      possibleRegistrationNames,
+    });
+  }
+}
+
+function warnForPropDifference(
+  propName: string,
+  serverValue: mixed,
+  clientValue: mixed,
+) {
+  if (__DEV__) {
     if (didWarnInvalidHydration) {
       return;
     }
@@ -156,9 +155,11 @@ if (__DEV__) {
       JSON.stringify(normalizedServerValue),
       JSON.stringify(normalizedClientValue),
     );
-  };
+  }
+}
 
-  warnForExtraAttributes = function (attributeNames: Set<string>) {
+function warnForExtraAttributes(attributeNames: Set<string>) {
+  if (__DEV__) {
     if (didWarnInvalidHydration) {
       return;
     }
@@ -168,12 +169,11 @@ if (__DEV__) {
       names.push(name);
     });
     console.error('Extra attributes from the server: %s', names);
-  };
+  }
+}
 
-  warnForInvalidEventListener = function (
-    registrationName: string,
-    listener: any,
-  ) {
+function warnForInvalidEventListener(registrationName: string, listener: any) {
+  if (__DEV__) {
     if (listener === false) {
       console.error(
         'Expected `%s` listener to be a function, instead got `false`.\n\n' +
@@ -190,11 +190,13 @@ if (__DEV__) {
         typeof listener,
       );
     }
-  };
+  }
+}
 
-  // Parse the HTML and read it back to normalize the HTML string so that it
-  // can be used for comparison.
-  normalizeHTML = function (parent: Element, html: string) {
+// Parse the HTML and read it back to normalize the HTML string so that it
+// can be used for comparison.
+function normalizeHTML(parent: Element, html: string) {
+  if (__DEV__) {
     // We could have created a separate document here to avoid
     // re-initializing custom elements if they exist. But this breaks
     // how <noscript> is being handled. So we use the same document.
@@ -208,7 +210,7 @@ if (__DEV__) {
           );
     testElement.innerHTML = html;
     return testElement.innerHTML;
-  };
+  }
 }
 
 // HTML parsing normalizes CR and CRLF to LF.
@@ -308,7 +310,11 @@ function setInitialDOMProperties(
     } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
       const nextHtml = nextProp ? nextProp[HTML] : undefined;
       if (nextHtml != null) {
-        setInnerHTML(domElement, nextHtml);
+        if (disableIEWorkarounds) {
+          domElement.innerHTML = nextHtml;
+        } else {
+          setInnerHTML(domElement, nextHtml);
+        }
       }
     } else if (propKey === CHILDREN) {
       if (typeof nextProp === 'string') {
@@ -366,7 +372,11 @@ function updateDOMProperties(
     if (propKey === STYLE) {
       setValueForStyles(domElement, propValue);
     } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
-      setInnerHTML(domElement, propValue);
+      if (disableIEWorkarounds) {
+        domElement.innerHTML = propValue;
+      } else {
+        setInnerHTML(domElement, propValue);
+      }
     } else if (propKey === CHILDREN) {
       setTextContent(domElement, propValue);
     } else {
@@ -883,11 +893,9 @@ export function diffHydratedProperties(
   shouldWarnDev: boolean,
   parentNamespaceDev: string,
 ): null | Array<mixed> {
-  let isCustomComponentTag;
   let extraAttributeNames: Set<string>;
 
   if (__DEV__) {
-    isCustomComponentTag = isCustomComponent(tag, rawProps);
     validatePropertiesInDevelopment(tag, rawProps);
   }
 
@@ -953,6 +961,10 @@ export function diffHydratedProperties(
       break;
   }
 
+  if (rawProps.hasOwnProperty('onScroll')) {
+    listenToNonDelegatedEvent('scroll', domElement);
+  }
+
   assertValidProps(tag, rawProps);
 
   if (__DEV__) {
@@ -978,207 +990,196 @@ export function diffHydratedProperties(
   }
 
   let updatePayload = null;
-  for (const propKey in rawProps) {
-    if (!rawProps.hasOwnProperty(propKey)) {
-      continue;
-    }
-    const nextProp = rawProps[propKey];
-    if (propKey === CHILDREN) {
-      // For text content children we compare against textContent. This
-      // might match additional HTML that is hidden when we read it using
-      // textContent. E.g. "foo" will match "f<span>oo</span>" but that still
-      // satisfies our requirement. Our requirement is not to produce perfect
-      // HTML and attributes. Ideally we should preserve structure but it's
-      // ok not to if the visible content is still enough to indicate what
-      // even listeners these nodes might be wired up to.
-      // TODO: Warn if there is more than a single textNode as a child.
-      // TODO: Should we use domElement.firstChild.nodeValue to compare?
-      if (typeof nextProp === 'string') {
-        if (domElement.textContent !== nextProp) {
-          if (rawProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-            checkForUnmatchedText(
-              domElement.textContent,
-              nextProp,
-              isConcurrentMode,
-              shouldWarnDev,
-            );
-          }
-          updatePayload = [CHILDREN, nextProp];
-        }
-      } else if (typeof nextProp === 'number') {
-        if (domElement.textContent !== '' + nextProp) {
-          if (rawProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-            checkForUnmatchedText(
-              domElement.textContent,
-              nextProp,
-              isConcurrentMode,
-              shouldWarnDev,
-            );
-          }
-          updatePayload = [CHILDREN, '' + nextProp];
-        }
-      }
-    } else if (registrationNameDependencies.hasOwnProperty(propKey)) {
-      if (nextProp != null) {
-        if (__DEV__ && typeof nextProp !== 'function') {
-          warnForInvalidEventListener(propKey, nextProp);
-        }
-        if (propKey === 'onScroll') {
-          listenToNonDelegatedEvent('scroll', domElement);
-        }
-      }
-    } else if (
-      shouldWarnDev &&
-      __DEV__ &&
-      // Convince Flow we've calculated it (it's DEV-only in this method.)
-      typeof isCustomComponentTag === 'boolean'
-    ) {
-      // Validate that the properties correspond to their expected values.
-      let serverValue;
-      const propertyInfo =
-        isCustomComponentTag && enableCustomElementPropertySupport
-          ? null
-          : getPropertyInfo(propKey);
-      if (rawProps[SUPPRESS_HYDRATION_WARNING] === true) {
-        // Don't bother comparing. We're ignoring all these warnings.
-      } else if (
-        propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
-        propKey === SUPPRESS_HYDRATION_WARNING ||
-        // Controlled attributes are not validated
-        // TODO: Only ignore them on controlled tags.
-        propKey === 'value' ||
-        propKey === 'checked' ||
-        propKey === 'selected'
-      ) {
-        // Noop
-      } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
-        const serverHTML = domElement.innerHTML;
-        const nextHtml = nextProp ? nextProp[HTML] : undefined;
-        if (nextHtml != null) {
-          const expectedHTML = normalizeHTML(domElement, nextHtml);
-          if (expectedHTML !== serverHTML) {
-            warnForPropDifference(propKey, serverHTML, expectedHTML);
-          }
-        }
-      } else if (propKey === STYLE) {
-        // $FlowFixMe - Should be inferred as not undefined.
-        extraAttributeNames.delete(propKey);
 
-        if (canDiffStyleForHydrationWarning) {
-          const expectedStyle = createDangerousStringForStyles(nextProp);
-          serverValue = domElement.getAttribute('style');
-          if (expectedStyle !== serverValue) {
-            warnForPropDifference(propKey, serverValue, expectedStyle);
-          }
-        }
-      } else if (
-        enableCustomElementPropertySupport &&
-        isCustomComponentTag &&
-        (propKey === 'offsetParent' ||
-          propKey === 'offsetTop' ||
-          propKey === 'offsetLeft' ||
-          propKey === 'offsetWidth' ||
-          propKey === 'offsetHeight' ||
-          propKey === 'isContentEditable' ||
-          propKey === 'outerText' ||
-          propKey === 'outerHTML')
-      ) {
-        // $FlowFixMe - Should be inferred as not undefined.
-        extraAttributeNames.delete(propKey.toLowerCase());
-        if (__DEV__) {
-          console.error(
-            'Assignment to read-only property will result in a no-op: `%s`',
-            propKey,
-          );
-        }
-      } else if (isCustomComponentTag && !enableCustomElementPropertySupport) {
-        // $FlowFixMe - Should be inferred as not undefined.
-        extraAttributeNames.delete(propKey.toLowerCase());
-        serverValue = getValueForAttribute(
-          domElement,
-          propKey,
-          nextProp,
-          isCustomComponentTag,
+  const children = rawProps.children;
+  // For text content children we compare against textContent. This
+  // might match additional HTML that is hidden when we read it using
+  // textContent. E.g. "foo" will match "f<span>oo</span>" but that still
+  // satisfies our requirement. Our requirement is not to produce perfect
+  // HTML and attributes. Ideally we should preserve structure but it's
+  // ok not to if the visible content is still enough to indicate what
+  // even listeners these nodes might be wired up to.
+  // TODO: Warn if there is more than a single textNode as a child.
+  // TODO: Should we use domElement.firstChild.nodeValue to compare?
+  if (typeof children === 'string' || typeof children === 'number') {
+    if (domElement.textContent !== '' + children) {
+      if (rawProps[SUPPRESS_HYDRATION_WARNING] !== true) {
+        checkForUnmatchedText(
+          domElement.textContent,
+          children,
+          isConcurrentMode,
+          shouldWarnDev,
         );
+      }
+      if (!isConcurrentMode) {
+        updatePayload = [CHILDREN, children];
+      }
+    }
+  }
 
-        if (nextProp !== serverValue) {
-          warnForPropDifference(propKey, serverValue, nextProp);
+  if (__DEV__ && shouldWarnDev) {
+    const isCustomComponentTag = isCustomComponent(tag, rawProps);
+
+    for (const propKey in rawProps) {
+      if (!rawProps.hasOwnProperty(propKey)) {
+        continue;
+      }
+      const nextProp = rawProps[propKey];
+      if (propKey === CHILDREN) {
+        // Checked above already
+      } else if (registrationNameDependencies.hasOwnProperty(propKey)) {
+        if (nextProp != null) {
+          if (typeof nextProp !== 'function') {
+            warnForInvalidEventListener(propKey, nextProp);
+          }
         }
-      } else if (
-        !shouldIgnoreAttribute(propKey, propertyInfo, isCustomComponentTag) &&
-        !shouldRemoveAttribute(
-          propKey,
-          nextProp,
-          propertyInfo,
-          isCustomComponentTag,
-        )
-      ) {
-        let isMismatchDueToBadCasing = false;
-        if (propertyInfo !== null) {
-          // $FlowFixMe - Should be inferred as not undefined.
-          extraAttributeNames.delete(propertyInfo.attributeName);
-          serverValue = getValueForProperty(
-            domElement,
-            propKey,
-            nextProp,
-            propertyInfo,
-          );
-        } else {
-          let ownNamespaceDev = parentNamespaceDev;
-          if (ownNamespaceDev === HTML_NAMESPACE) {
-            ownNamespaceDev = getIntrinsicNamespace(tag);
-          }
-          if (ownNamespaceDev === HTML_NAMESPACE) {
-            // $FlowFixMe - Should be inferred as not undefined.
-            extraAttributeNames.delete(propKey.toLowerCase());
-          } else {
-            const standardName = getPossibleStandardName(propKey);
-            if (standardName !== null && standardName !== propKey) {
-              // If an SVG prop is supplied with bad casing, it will
-              // be successfully parsed from HTML, but will produce a mismatch
-              // (and would be incorrectly rendered on the client).
-              // However, we already warn about bad casing elsewhere.
-              // So we'll skip the misleading extra mismatch warning in this case.
-              isMismatchDueToBadCasing = true;
-              // $FlowFixMe - Should be inferred as not undefined.
-              extraAttributeNames.delete(standardName);
+      } else {
+        // Validate that the properties correspond to their expected values.
+        let serverValue;
+        const propertyInfo =
+          isCustomComponentTag && enableCustomElementPropertySupport
+            ? null
+            : getPropertyInfo(propKey);
+        if (rawProps[SUPPRESS_HYDRATION_WARNING] === true) {
+          // Don't bother comparing. We're ignoring all these warnings.
+        } else if (
+          propKey === SUPPRESS_CONTENT_EDITABLE_WARNING ||
+          propKey === SUPPRESS_HYDRATION_WARNING ||
+          // Controlled attributes are not validated
+          // TODO: Only ignore them on controlled tags.
+          propKey === 'value' ||
+          propKey === 'checked' ||
+          propKey === 'selected'
+        ) {
+          // Noop
+        } else if (propKey === DANGEROUSLY_SET_INNER_HTML) {
+          const serverHTML = domElement.innerHTML;
+          const nextHtml = nextProp ? nextProp[HTML] : undefined;
+          if (nextHtml != null) {
+            const expectedHTML = normalizeHTML(domElement, nextHtml);
+            if (expectedHTML !== serverHTML) {
+              warnForPropDifference(propKey, serverHTML, expectedHTML);
             }
-            // $FlowFixMe - Should be inferred as not undefined.
-            extraAttributeNames.delete(propKey);
           }
+        } else if (propKey === STYLE) {
+          // $FlowFixMe - Should be inferred as not undefined.
+          extraAttributeNames.delete(propKey);
+
+          if (canDiffStyleForHydrationWarning) {
+            const expectedStyle = createDangerousStringForStyles(nextProp);
+            serverValue = domElement.getAttribute('style');
+            if (expectedStyle !== serverValue) {
+              warnForPropDifference(propKey, serverValue, expectedStyle);
+            }
+          }
+        } else if (
+          enableCustomElementPropertySupport &&
+          isCustomComponentTag &&
+          (propKey === 'offsetParent' ||
+            propKey === 'offsetTop' ||
+            propKey === 'offsetLeft' ||
+            propKey === 'offsetWidth' ||
+            propKey === 'offsetHeight' ||
+            propKey === 'isContentEditable' ||
+            propKey === 'outerText' ||
+            propKey === 'outerHTML')
+        ) {
+          // $FlowFixMe - Should be inferred as not undefined.
+          extraAttributeNames.delete(propKey.toLowerCase());
+          if (__DEV__) {
+            console.error(
+              'Assignment to read-only property will result in a no-op: `%s`',
+              propKey,
+            );
+          }
+        } else if (
+          isCustomComponentTag &&
+          !enableCustomElementPropertySupport
+        ) {
+          // $FlowFixMe - Should be inferred as not undefined.
+          extraAttributeNames.delete(propKey.toLowerCase());
           serverValue = getValueForAttribute(
             domElement,
             propKey,
             nextProp,
             isCustomComponentTag,
           );
-        }
 
-        const dontWarnCustomElement =
-          enableCustomElementPropertySupport &&
-          isCustomComponentTag &&
-          (typeof nextProp === 'function' || typeof nextProp === 'object');
-        if (
-          !dontWarnCustomElement &&
-          nextProp !== serverValue &&
-          !isMismatchDueToBadCasing
+          if (nextProp !== serverValue) {
+            warnForPropDifference(propKey, serverValue, nextProp);
+          }
+        } else if (
+          !shouldIgnoreAttribute(propKey, propertyInfo, isCustomComponentTag) &&
+          !shouldRemoveAttribute(
+            propKey,
+            nextProp,
+            propertyInfo,
+            isCustomComponentTag,
+          )
         ) {
-          warnForPropDifference(propKey, serverValue, nextProp);
+          let isMismatchDueToBadCasing = false;
+          if (propertyInfo !== null) {
+            // $FlowFixMe - Should be inferred as not undefined.
+            extraAttributeNames.delete(propertyInfo.attributeName);
+            serverValue = getValueForProperty(
+              domElement,
+              propKey,
+              nextProp,
+              propertyInfo,
+            );
+          } else {
+            let ownNamespaceDev = parentNamespaceDev;
+            if (ownNamespaceDev === HTML_NAMESPACE) {
+              ownNamespaceDev = getIntrinsicNamespace(tag);
+            }
+            if (ownNamespaceDev === HTML_NAMESPACE) {
+              // $FlowFixMe - Should be inferred as not undefined.
+              extraAttributeNames.delete(propKey.toLowerCase());
+            } else {
+              const standardName = getPossibleStandardName(propKey);
+              if (standardName !== null && standardName !== propKey) {
+                // If an SVG prop is supplied with bad casing, it will
+                // be successfully parsed from HTML, but will produce a mismatch
+                // (and would be incorrectly rendered on the client).
+                // However, we already warn about bad casing elsewhere.
+                // So we'll skip the misleading extra mismatch warning in this case.
+                isMismatchDueToBadCasing = true;
+                // $FlowFixMe - Should be inferred as not undefined.
+                extraAttributeNames.delete(standardName);
+              }
+              // $FlowFixMe - Should be inferred as not undefined.
+              extraAttributeNames.delete(propKey);
+            }
+            serverValue = getValueForAttribute(
+              domElement,
+              propKey,
+              nextProp,
+              isCustomComponentTag,
+            );
+          }
+
+          const dontWarnCustomElement =
+            enableCustomElementPropertySupport &&
+            isCustomComponentTag &&
+            (typeof nextProp === 'function' || typeof nextProp === 'object');
+          if (
+            !dontWarnCustomElement &&
+            nextProp !== serverValue &&
+            !isMismatchDueToBadCasing
+          ) {
+            warnForPropDifference(propKey, serverValue, nextProp);
+          }
         }
       }
     }
-  }
 
-  if (__DEV__) {
-    if (shouldWarnDev) {
-      if (
-        // $FlowFixMe - Should be inferred as not undefined.
-        extraAttributeNames.size > 0 &&
-        rawProps[SUPPRESS_HYDRATION_WARNING] !== true
-      ) {
-        // $FlowFixMe - Should be inferred as not undefined.
-        warnForExtraAttributes(extraAttributeNames);
-      }
+    if (
+      // $FlowFixMe - Should be inferred as not undefined.
+      extraAttributeNames.size > 0 &&
+      rawProps[SUPPRESS_HYDRATION_WARNING] !== true
+    ) {
+      // $FlowFixMe - Should be inferred as not undefined.
+      warnForExtraAttributes(extraAttributeNames);
     }
   }
 
