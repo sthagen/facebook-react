@@ -241,6 +241,13 @@ export function getPublicInstance(instance: Instance): null | PublicInstance {
   return null;
 }
 
+export function getPublicInstanceFromInternalInstanceHandle(
+  internalInstanceHandle: Object,
+): null | PublicInstance {
+  const instance: Instance = internalInstanceHandle.stateNode;
+  return getPublicInstance(instance);
+}
+
 export function prepareForCommit(containerInfo: Container): null | Object {
   // Noop
   return null;
@@ -414,8 +421,12 @@ export function requestPostPaintCallback(callback: (time: number) => void) {
   // noop
 }
 
-export function shouldSuspendCommit(type: Type, props: Props): boolean {
+export function maySuspendCommit(type: Type, props: Props): boolean {
   return false;
+}
+
+export function preloadInstance(type: Type, props: Props): boolean {
+  return true;
 }
 
 export function startSuspendingCommit(): void {}
