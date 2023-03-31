@@ -553,6 +553,10 @@ function serializeUndefined(): string {
   return '$undefined';
 }
 
+function serializeBigInt(n: bigint): string {
+  return '$n' + n.toString(10);
+}
+
 function serializeClientReference(
   request: Request,
   parent:
@@ -666,7 +670,7 @@ export function resolveModelToJSON(
   value: ReactClientValue,
 ): ReactJSONValue {
   if (__DEV__) {
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-use]
     const originalValue = parent[key];
     if (typeof originalValue === 'object' && originalValue !== value) {
       if (objectName(originalValue) !== 'Object') {
@@ -865,7 +869,7 @@ export function resolveModelToJSON(
       }
     }
 
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-return]
     return value;
   }
 
@@ -909,14 +913,14 @@ export function resolveModelToJSON(
     if (existingId !== undefined) {
       return serializeByValueID(existingId);
     }
-    // $FlowFixMe `description` might be undefined
+    // $FlowFixMe[incompatible-type] `description` might be undefined
     const name: string = value.description;
 
     if (Symbol.for(name) !== value) {
       throw new Error(
         'Only global symbols received from Symbol.for(...) can be passed to Client Components. ' +
           `The symbol Symbol.for(${
-            // $FlowFixMe `description` might be undefined
+            // $FlowFixMe[incompatible-type] `description` might be undefined
             value.description
           }) cannot be found among global symbols.` +
           describeObjectForErrorMessage(parent, key),
@@ -931,10 +935,7 @@ export function resolveModelToJSON(
   }
 
   if (typeof value === 'bigint') {
-    throw new Error(
-      `BigInt (${value}) is not yet supported in Client Component props.` +
-        describeObjectForErrorMessage(parent, key),
-    );
+    return serializeBigInt(value);
   }
 
   throw new Error(

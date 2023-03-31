@@ -36,13 +36,9 @@ describe('ReactIncrementalUpdates', () => {
     assertLog = InternalTestUtils.assertLog;
   });
 
-  function flushNextRenderIfExpired() {
-    // This will start rendering the next level of work. If the work hasn't
-    // expired yet, React will exit without doing anything. If it has expired,
-    // it will schedule a sync task.
-    Scheduler.unstable_flushExpired();
-    // Flush the sync task.
-    ReactNoop.flushSync();
+  function Text({text}) {
+    Scheduler.log(text);
+    return text;
   }
 
   it('applies updates in order of priority', async () => {
@@ -391,11 +387,7 @@ describe('ReactIncrementalUpdates', () => {
 
     expect(instance.state).toEqual({a: 'a', b: 'b'});
 
-    if (gate(flags => flags.deferRenderPhaseUpdateToNextBatch)) {
-      assertLog(['componentWillReceiveProps', 'render', 'render']);
-    } else {
-      assertLog(['componentWillReceiveProps', 'render']);
-    }
+    assertLog(['componentWillReceiveProps', 'render']);
   });
 
   it('updates triggered from inside a class setState updater', async () => {
@@ -423,26 +415,12 @@ describe('ReactIncrementalUpdates', () => {
 
     await expect(
       async () =>
-        await waitForAll(
-          gate(flags =>
-            flags.deferRenderPhaseUpdateToNextBatch
-              ? [
-                  'setState updater',
-                  // In the new reconciler, updates inside the render phase are
-                  // treated as if they came from an event, so the update gets
-                  // shifted to a subsequent render.
-                  'render',
-                  'render',
-                ]
-              : [
-                  'setState updater',
-                  // In the old reconciler, updates in the render phase receive
-                  // the currently rendering expiration time, so the update
-                  // flushes immediately in the same render.
-                  'render',
-                ],
-          ),
-        ),
+        await waitForAll([
+          'setState updater',
+          // Updates in the render phase receive the currently rendering
+          // lane, so the update flushes immediately in the same render.
+          'render',
+        ]),
     ).toErrorDev(
       'An update (setState, replaceState, or forceUpdate) was scheduled ' +
         'from inside an update function. Update functions should be pure, ' +
@@ -458,15 +436,9 @@ describe('ReactIncrementalUpdates', () => {
     });
     await waitForAll(
       gate(flags =>
-        flags.deferRenderPhaseUpdateToNextBatch
-          ? // In the new reconciler, updates inside the render phase are
-            // treated as if they came from an event, so the update gets shifted
-            // to a subsequent render.
-            ['render', 'render']
-          : // In the old reconciler, updates in the render phase receive
-            // the currently rendering expiration time, so the update flushes
-            // immediately in the same render.
-            ['render'],
+        // Updates in the render phase receive the currently rendering
+        // lane, so the update flushes immediately in the same render.
+        ['render'],
       ),
     );
   });
@@ -528,35 +500,38 @@ describe('ReactIncrementalUpdates', () => {
       setCount = _setCount;
       Scheduler.log('Render: ' + count);
       useLayoutEffect(() => {
-        setCount(prevCount => prevCount + 1);
+        setCount(1);
         Scheduler.log('Commit: ' + count);
       }, []);
-      return null;
+      return <Text text="Child" />;
     }
 
     await act(async () => {
       React.startTransition(() => {
         ReactNoop.render(<App />);
       });
-      flushNextRenderIfExpired();
       assertLog([]);
-      await waitForAll(['Render: 0', 'Commit: 0', 'Render: 1']);
+      await waitForAll([
+        'Render: 0',
+        'Child',
+        'Commit: 0',
+        'Render: 1',
+        'Child',
+      ]);
 
       Scheduler.unstable_advanceTime(10000);
       React.startTransition(() => {
         setCount(2);
       });
-      flushNextRenderIfExpired();
-      assertLog([]);
+      // The transition should not have expired, so we should be able to
+      // partially render it.
+      await waitFor(['Render: 2']);
+      // Now do the rest
+      await waitForAll(['Child']);
     });
   });
 
-  it('regression: does not expire soon due to previous flushSync', () => {
-    function Text({text}) {
-      Scheduler.log(text);
-      return text;
-    }
-
+  it('regression: does not expire soon due to previous flushSync', async () => {
     ReactNoop.flushSync(() => {
       ReactNoop.render(<Text text="A" />);
     });
@@ -565,32 +540,70 @@ describe('ReactIncrementalUpdates', () => {
     Scheduler.unstable_advanceTime(10000);
 
     React.startTransition(() => {
-      ReactNoop.render(<Text text="B" />);
+      ReactNoop.render(
+        <>
+          <Text text="A" />
+          <Text text="B" />
+          <Text text="C" />
+          <Text text="D" />
+        </>,
+      );
     });
-    flushNextRenderIfExpired();
-    assertLog([]);
+    // The transition should not have expired, so we should be able to
+    // partially render it.
+    await waitFor(['A']);
+
+    // FIXME:  We should be able to partially render B, too, but currently it
+    // expires. This is an existing bug that I discovered, which will be fixed
+    // in a PR that I'm currently working on.
+    //
+    // Correct behavior:
+    //   await waitFor(['B']);
+    //   await waitForAll(['C', 'D']);
+    //
+    // Current behavior:
+    await waitFor(['B'], {
+      additionalLogsAfterAttemptingToYield: ['C', 'D'],
+    });
   });
 
-  it('regression: does not expire soon due to previous expired work', () => {
-    function Text({text}) {
-      Scheduler.log(text);
-      return text;
-    }
-
+  it('regression: does not expire soon due to previous expired work', async () => {
     React.startTransition(() => {
-      ReactNoop.render(<Text text="A" />);
+      ReactNoop.render(
+        <>
+          <Text text="A" />
+          <Text text="B" />
+          <Text text="C" />
+          <Text text="D" />
+        </>,
+      );
     });
+    await waitFor(['A']);
+
+    // This will expire the rest of the update
     Scheduler.unstable_advanceTime(10000);
-    flushNextRenderIfExpired();
-    assertLog(['A']);
+    await waitFor(['B'], {
+      additionalLogsAfterAttemptingToYield: ['C', 'D'],
+    });
 
     Scheduler.unstable_advanceTime(10000);
 
+    // Now do another transition. This one should not expire.
     React.startTransition(() => {
-      ReactNoop.render(<Text text="B" />);
+      ReactNoop.render(
+        <>
+          <Text text="A" />
+          <Text text="B" />
+          <Text text="C" />
+          <Text text="D" />
+        </>,
+      );
     });
-    flushNextRenderIfExpired();
-    assertLog([]);
+    // The transition should not have expired, so we should be able to
+    // partially render it.
+    await waitFor(['A']);
+    await waitFor(['B']);
+    await waitForAll(['C', 'D']);
   });
 
   it('when rebasing, does not exclude updates that were already committed, regardless of priority', async () => {

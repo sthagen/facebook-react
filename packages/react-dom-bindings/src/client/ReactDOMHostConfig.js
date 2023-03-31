@@ -44,10 +44,6 @@ import {
 export {detachDeletedInstance};
 import {hasRole} from './DOMAccessibilityRoles';
 import {
-  createHTMLElement,
-  createPotentiallyInlineScriptElement,
-  createSelectElement,
-  createTextNode,
   setInitialProperties,
   diffProperties,
   updateProperties,
@@ -59,7 +55,6 @@ import {
   warnForDeletedHydratableText,
   warnForInsertedHydratedElement,
   warnForInsertedHydratedText,
-  getOwnerDocumentFromRootContainer,
 } from './ReactDOMComponent';
 import {getSelectionInformation, restoreSelection} from './ReactInputSelection';
 import setTextContent from './setTextContent';
@@ -90,6 +85,7 @@ import {
   enableScopeAPI,
   enableFloat,
   enableHostSingletons,
+  enableTrustedTypesIntegration,
 } from 'shared/ReactFeatureFlags';
 import {
   HostComponent,
@@ -119,6 +115,9 @@ export type Props = {
   left?: null | number,
   right?: null | number,
   top?: null | number,
+  is?: string,
+  size?: number,
+  multiple?: boolean,
   ...
 };
 type RawProps = {
@@ -181,6 +180,14 @@ let eventsEnabled: ?boolean = null;
 let selectionInformation: null | SelectionInformation = null;
 
 export * from 'react-reconciler/src/ReactFiberHostConfigWithNoPersistence';
+
+function getOwnerDocumentFromRootContainer(
+  rootContainerElement: Element | Document | DocumentFragment,
+): Document {
+  return rootContainerElement.nodeType === DOCUMENT_NODE
+    ? (rootContainerElement: any)
+    : rootContainerElement.ownerDocument;
+}
 
 export function getRootHostContext(
   rootContainerInstance: Container,
@@ -285,13 +292,28 @@ export function createHoistableInstance(
   const ownerDocument = getOwnerDocumentFromRootContainer(
     rootContainerInstance,
   );
-  const domElement: Instance = createHTMLElement(type, props, ownerDocument);
+
+  const domElement: Instance = ownerDocument.createElement(type);
   precacheFiberNode(internalInstanceHandle, domElement);
   updateFiberProps(domElement, props);
   setInitialProperties(domElement, type, props);
   markNodeAsHoistable(domElement);
   return domElement;
 }
+
+let didWarnScriptTags = false;
+const warnedUnknownTags: {
+  [key: string]: boolean,
+} = {
+  // There are working polyfills for <dialog>. Let people use it.
+  dialog: true,
+  // Electron ships a custom <webview> tag to display external web content in
+  // an isolated frame and process.
+  // This tag is not present in non Electron environments such as JSDom which
+  // is often used for testing purposes.
+  // @see https://electronjs.org/docs/api/webview-tag
+  webview: true,
+};
 
 export function createInstance(
   type: string,
@@ -334,20 +356,94 @@ export function createInstance(
       break;
     default:
       switch (type) {
-        case 'svg':
+        case 'svg': {
           domElement = ownerDocument.createElementNS(SVG_NAMESPACE, type);
           break;
-        case 'math':
+        }
+        case 'math': {
           domElement = ownerDocument.createElementNS(MATH_NAMESPACE, type);
           break;
-        case 'script':
-          domElement = createPotentiallyInlineScriptElement(ownerDocument);
+        }
+        case 'script': {
+          // Create the script via .innerHTML so its "parser-inserted" flag is
+          // set to true and it does not execute
+          const div = ownerDocument.createElement('div');
+          if (__DEV__) {
+            if (enableTrustedTypesIntegration && !didWarnScriptTags) {
+              console.error(
+                'Encountered a script tag while rendering React component. ' +
+                  'Scripts inside React components are never executed when rendering ' +
+                  'on the client. Consider using template tag instead ' +
+                  '(https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template).',
+              );
+              didWarnScriptTags = true;
+            }
+          }
+          div.innerHTML = '<script><' + '/script>'; // eslint-disable-line
+          // This is guaranteed to yield a script element.
+          const firstChild = ((div.firstChild: any): HTMLScriptElement);
+          domElement = div.removeChild(firstChild);
           break;
-        case 'select':
-          domElement = createSelectElement(props, ownerDocument);
+        }
+        case 'select': {
+          if (typeof props.is === 'string') {
+            domElement = ownerDocument.createElement('select', {is: props.is});
+          } else {
+            // Separate else branch instead of using `props.is || undefined` above because of a Firefox bug.
+            // See discussion in https://github.com/facebook/react/pull/6896
+            // and discussion in https://bugzilla.mozilla.org/show_bug.cgi?id=1276240
+            domElement = ownerDocument.createElement('select');
+          }
+          if (props.multiple) {
+            domElement.multiple = true;
+          } else if (props.size) {
+            // Setting a size greater than 1 causes a select to behave like `multiple=true`, where
+            // it is possible that no option is selected.
+            //
+            // This is only necessary when a select in "single selection mode".
+            domElement.size = props.size;
+          }
           break;
-        default:
-          domElement = createHTMLElement(type, props, ownerDocument);
+        }
+        default: {
+          if (typeof props.is === 'string') {
+            domElement = ownerDocument.createElement(type, {is: props.is});
+          } else {
+            // Separate else branch instead of using `props.is || undefined` above because of a Firefox bug.
+            // See discussion in https://github.com/facebook/react/pull/6896
+            // and discussion in https://bugzilla.mozilla.org/show_bug.cgi?id=1276240
+            domElement = ownerDocument.createElement(type);
+          }
+
+          if (__DEV__) {
+            if (type.indexOf('-') === -1) {
+              // We're not SVG/MathML and we don't have a dash, so we're not a custom element
+              // Even if you use `is`, these should be of known type and lower case.
+              if (type !== type.toLowerCase()) {
+                console.error(
+                  '<%s /> is using incorrect casing. ' +
+                    'Use PascalCase for React components, ' +
+                    'or lowercase for HTML elements.',
+                  type,
+                );
+              }
+              if (
+                // $FlowFixMe[method-unbinding]
+                Object.prototype.toString.call(domElement) ===
+                  '[object HTMLUnknownElement]' &&
+                !hasOwnProperty.call(warnedUnknownTags, type)
+              ) {
+                warnedUnknownTags[type] = true;
+                console.error(
+                  'The tag <%s> is unrecognized in this browser. ' +
+                    'If you meant to render a React component, start its name with ' +
+                    'an uppercase letter.',
+                  type,
+                );
+              }
+            }
+          }
+        }
       }
   }
   precacheFiberNode(internalInstanceHandle, domElement);
@@ -429,7 +525,9 @@ export function createTextInstance(
     const hostContextDev = ((hostContext: any): HostContextDev);
     validateDOMNesting(null, text, hostContextDev.ancestorInfo);
   }
-  const textNode: TextInstance = createTextNode(text, rootContainerInstance);
+  const textNode: TextInstance = getOwnerDocumentFromRootContainer(
+    rootContainerInstance,
+  ).createTextNode(text);
   precacheFiberNode(internalInstanceHandle, textNode);
   return textNode;
 }
@@ -641,7 +739,7 @@ function dispatchBeforeDetachedBlur(
     // Dispatch "beforeblur" directly on the target,
     // so it gets picked up by the event system and
     // can propagate through the React internal tree.
-    // $FlowFixMe: internal field
+    // $FlowFixMe[prop-missing]: internal field
     event._detachedInterceptFiber = internalInstanceHandle;
     target.dispatchEvent(event);
   }
@@ -1324,7 +1422,7 @@ export function didNotHydrateInstanceWithinSuspenseInstance(
   instance: HydratableInstance,
 ) {
   if (__DEV__) {
-    // $FlowFixMe: Only Element or Document can be parent nodes.
+    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
     const parentNode: Element | Document | null = parentInstance.parentNode;
     if (parentNode !== null) {
       if (instance.nodeType === ELEMENT_NODE) {
@@ -1391,7 +1489,7 @@ export function didNotFindHydratableInstanceWithinSuspenseInstance(
   props: Props,
 ) {
   if (__DEV__) {
-    // $FlowFixMe: Only Element or Document can be parent nodes.
+    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
     const parentNode: Element | Document | null = parentInstance.parentNode;
     if (parentNode !== null)
       warnForInsertedHydratedElement(parentNode, type, props);
@@ -1403,7 +1501,7 @@ export function didNotFindHydratableTextInstanceWithinSuspenseInstance(
   text: string,
 ) {
   if (__DEV__) {
-    // $FlowFixMe: Only Element or Document can be parent nodes.
+    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
     const parentNode: Element | Document | null = parentInstance.parentNode;
     if (parentNode !== null) warnForInsertedHydratedText(parentNode, text);
   }
@@ -1788,7 +1886,7 @@ type StyleTagResource = TResource<'style', null>;
 type StyleResource = StyleTagResource | StylesheetResource;
 type ScriptResource = TResource<'script', null>;
 type VoidResource = TResource<'void', null>;
-type Resource = StyleResource | ScriptResource | VoidResource;
+export type Resource = StyleResource | ScriptResource | VoidResource;
 
 type LoadingState = number;
 const NotLoaded = /*       */ 0b000;
@@ -2170,6 +2268,7 @@ function preinit(href: string, options: PreinitOptions) {
             state.loading |= Errored;
           });
 
+          state.loading |= Inserted;
           insertStylesheet(instance, precedence, resourceRoot);
         }
 
@@ -2518,6 +2617,11 @@ export function acquireResource(
 
         markNodeAsHoistable(instance);
         setInitialProperties(instance, 'style', styleProps);
+
+        // TODO: `style` does not have loading state for tracking insertions. I
+        // guess because these aren't suspensey? Not sure whether this is a
+        // factoring smell.
+        // resource.state.loading |= Inserted;
         insertStylesheet(instance, qualifiedProps.precedence, hoistableRoot);
         resource.instance = instance;
 
@@ -2556,6 +2660,7 @@ export function acquireResource(
           linkInstance.onerror = reject;
         });
         setInitialProperties(instance, 'link', stylesheetProps);
+        resource.state.loading |= Inserted;
         insertStylesheet(instance, qualifiedProps.precedence, hoistableRoot);
         resource.instance = instance;
 
@@ -2604,6 +2709,28 @@ export function acquireResource(
         );
       }
     }
+  } else {
+    // In the case of stylesheets, they might have already been assigned an
+    // instance during `suspendResource`. But that doesn't mean they were
+    // inserted, because the commit might have been interrupted. So we need to
+    // check now.
+    //
+    // The other resource types are unaffected because they are not
+    // yet suspensey.
+    //
+    // TODO: This is a bit of a code smell. Consider refactoring how
+    // `suspendResource` and `acquireResource` work together. The idea is that
+    // `suspendResource` does all the same stuff as `acquireResource` except
+    // for the insertion.
+    if (
+      resource.type === 'stylesheet' &&
+      (resource.state.loading & Inserted) === NotLoaded
+    ) {
+      const qualifiedProps: StylesheetQualifyingProps = props;
+      const instance: Instance = resource.instance;
+      resource.state.loading |= Inserted;
+      insertStylesheet(instance, qualifiedProps.precedence, hoistableRoot);
+    }
   }
   return resource.instance;
 }
@@ -2613,7 +2740,7 @@ export function releaseResource(resource: Resource): void {
 }
 
 function insertStylesheet(
-  instance: HTMLElement,
+  instance: Element,
   precedence: string,
   root: HoistableRoot,
 ): void {

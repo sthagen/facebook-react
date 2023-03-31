@@ -12,41 +12,40 @@ import enqueueTask from './enqueueTask';
 
 export {act} from './internalAct';
 
-function assertYieldsWereCleared(Scheduler) {
-  const actualYields = Scheduler.unstable_clearLog();
+function assertYieldsWereCleared(caller) {
+  const actualYields = SchedulerMock.unstable_clearLog();
   if (actualYields.length !== 0) {
     const error = Error(
       'The event log is not empty. Call assertLog(...) first.',
     );
-    Error.captureStackTrace(error, assertYieldsWereCleared);
+    Error.captureStackTrace(error, caller);
     throw error;
   }
 }
 
-async function waitForMicrotasks() {
+export async function waitForMicrotasks() {
   return new Promise(resolve => {
     enqueueTask(() => resolve());
   });
 }
 
-export async function waitFor(expectedLog) {
-  assertYieldsWereCleared(SchedulerMock);
+export async function waitFor(expectedLog, options) {
+  assertYieldsWereCleared(waitFor);
 
   // Create the error object before doing any async work, to get a better
   // stack trace.
   const error = new Error();
   Error.captureStackTrace(error, waitFor);
 
+  const stopAfter = expectedLog.length;
   const actualLog = [];
   do {
     // Wait until end of current task/microtask.
     await waitForMicrotasks();
     if (SchedulerMock.unstable_hasPendingWork()) {
-      SchedulerMock.unstable_flushNumberOfYields(
-        expectedLog.length - actualLog.length,
-      );
+      SchedulerMock.unstable_flushNumberOfYields(stopAfter - actualLog.length);
       actualLog.push(...SchedulerMock.unstable_clearLog());
-      if (expectedLog.length > actualLog.length) {
+      if (stopAfter > actualLog.length) {
         // Continue flushing until we've logged the expected number of items.
       } else {
         // Once we've reached the expected sequence, wait one more microtask to
@@ -61,6 +60,12 @@ export async function waitFor(expectedLog) {
     }
   } while (true);
 
+  if (options && options.additionalLogsAfterAttemptingToYield) {
+    expectedLog = expectedLog.concat(
+      options.additionalLogsAfterAttemptingToYield,
+    );
+  }
+
   if (equals(actualLog, expectedLog)) {
     return;
   }
@@ -74,7 +79,7 @@ ${diff(expectedLog, actualLog)}
 }
 
 export async function waitForAll(expectedLog) {
-  assertYieldsWereCleared(SchedulerMock);
+  assertYieldsWereCleared(waitForAll);
 
   // Create the error object before doing any async work, to get a better
   // stack trace.
@@ -105,7 +110,7 @@ ${diff(expectedLog, actualLog)}
 }
 
 export async function waitForThrow(expectedError: mixed): mixed {
-  assertYieldsWereCleared(SchedulerMock);
+  assertYieldsWereCleared(waitForThrow);
 
   // Create the error object before doing any async work, to get a better
   // stack trace.
@@ -151,12 +156,40 @@ ${diff(expectedError, x)}
   } while (true);
 }
 
+// This is prefixed with `unstable_` because you should almost always try to
+// avoid using it in tests. It's really only for testing a particular
+// implementation detail (update starvation prevention).
+export async function unstable_waitForExpired(expectedLog): mixed {
+  assertYieldsWereCleared(unstable_waitForExpired);
+
+  // Create the error object before doing any async work, to get a better
+  // stack trace.
+  const error = new Error();
+  Error.captureStackTrace(error, unstable_waitForExpired);
+
+  // Wait until end of current task/microtask.
+  await waitForMicrotasks();
+  SchedulerMock.unstable_flushExpired();
+
+  const actualLog = SchedulerMock.unstable_clearLog();
+  if (equals(actualLog, expectedLog)) {
+    return;
+  }
+
+  error.message = `
+Expected sequence of events did not occur.
+
+${diff(expectedLog, actualLog)}
+`;
+  throw error;
+}
+
 // TODO: This name is a bit misleading currently because it will stop as soon as
 // React yields for any reason, not just for a paint. I've left it this way for
 // now because that's how untable_flushUntilNextPaint already worked, but maybe
 // we should split these use cases into separate APIs.
 export async function waitForPaint(expectedLog) {
-  assertYieldsWereCleared(SchedulerMock);
+  assertYieldsWereCleared(waitForPaint);
 
   // Create the error object before doing any async work, to get a better
   // stack trace.
@@ -171,6 +204,30 @@ export async function waitForPaint(expectedLog) {
     // Wait one more microtask to flush any remaining synchronous work.
     await waitForMicrotasks();
   }
+
+  const actualLog = SchedulerMock.unstable_clearLog();
+  if (equals(actualLog, expectedLog)) {
+    return;
+  }
+
+  error.message = `
+Expected sequence of events did not occur.
+
+${diff(expectedLog, actualLog)}
+`;
+  throw error;
+}
+
+export async function waitForDiscrete(expectedLog) {
+  assertYieldsWereCleared(waitForDiscrete);
+
+  // Create the error object before doing any async work, to get a better
+  // stack trace.
+  const error = new Error();
+  Error.captureStackTrace(error, waitForDiscrete);
+
+  // Wait until end of current task/microtask.
+  await waitForMicrotasks();
 
   const actualLog = SchedulerMock.unstable_clearLog();
   if (equals(actualLog, expectedLog)) {

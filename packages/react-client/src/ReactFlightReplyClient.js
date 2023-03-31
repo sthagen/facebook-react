@@ -75,6 +75,10 @@ function serializeUndefined(): string {
   return '$undefined';
 }
 
+function serializeBigInt(n: bigint): string {
+  return '$n' + n.toString(10);
+}
+
 function escapeStringValue(value: string): string {
   if (value[0] === '$') {
     // We need to escape $ prefixed strings since we use those to encode
@@ -103,7 +107,7 @@ export function processReply(
   ): ReactJSONValue {
     const parent = this;
     if (__DEV__) {
-      // $FlowFixMe
+      // $FlowFixMe[incompatible-use]
       const originalValue = this[key];
       if (typeof originalValue === 'object' && originalValue !== value) {
         if (objectName(originalValue) !== 'Object') {
@@ -212,7 +216,7 @@ export function processReply(
         }
       }
 
-      // $FlowFixMe
+      // $FlowFixMe[incompatible-return]
       return value;
     }
 
@@ -249,13 +253,13 @@ export function processReply(
     }
 
     if (typeof value === 'symbol') {
-      // $FlowFixMe `description` might be undefined
+      // $FlowFixMe[incompatible-type] `description` might be undefined
       const name: string = value.description;
       if (Symbol.for(name) !== value) {
         throw new Error(
           'Only global symbols received from Symbol.for(...) can be passed to Server Functions. ' +
             `The symbol Symbol.for(${
-              // $FlowFixMe `description` might be undefined
+              // $FlowFixMe[incompatible-type] `description` might be undefined
               value.description
             }) cannot be found among global symbols.`,
         );
@@ -264,9 +268,7 @@ export function processReply(
     }
 
     if (typeof value === 'bigint') {
-      throw new Error(
-        `BigInt (${value}) is not yet supported as an argument to a Server Function.`,
-      );
+      return serializeBigInt(value);
     }
 
     throw new Error(

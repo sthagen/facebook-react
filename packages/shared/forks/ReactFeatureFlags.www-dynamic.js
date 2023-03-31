@@ -16,7 +16,6 @@
 export const disableInputAttributeSyncing = __VARIANT__;
 export const disableIEWorkarounds = __VARIANT__;
 export const enableLegacyFBSupport = __VARIANT__;
-export const skipUnmountedBoundaries = __VARIANT__;
 export const enableUseRefAccessWarning = __VARIANT__;
 export const enableProfilerNestedUpdateScheduledHook = __VARIANT__;
 export const disableSchedulerTimeoutInWorkLoop = __VARIANT__;
@@ -35,16 +34,6 @@ export const enableDebugTracing = __EXPERIMENTAL__;
 
 export const enableSchedulingProfiler = __VARIANT__;
 
-// This only has an effect in the new reconciler. But also, the new reconciler
-// is only enabled when __VARIANT__ is true. So this is set to the opposite of
-// __VARIANT__ so that it's `false` when running against the new reconciler.
-// Ideally we would test both against the new reconciler, but until then, we
-// should test the value that is used in www. Which is `false`.
-//
-// Once Lanes has landed in both reconciler forks, we'll get coverage of
-// both branches.
-export const deferRenderPhaseUpdateToNextBatch = !__VARIANT__;
-
 // These are already tested in both modes using the build type dimension,
 // so we don't need to use __VARIANT__ to get extra coverage.
 export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
@@ -59,7 +48,5 @@ export const revertRemovalOfSiblingPrerendering = false;
 // Update the tests so that they pass in either mode, then set these
 // to __VARIANT__.
 export const enableTrustedTypesIntegration = false;
-export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
-export const disableNativeComponentFrames = false;
 // You probably *don't* want to add more hardcoded ones.
 // Instead, try to add them above with the __VARIANT__ value.

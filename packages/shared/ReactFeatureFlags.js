@@ -14,7 +14,6 @@
 // -----------------------------------------------------------------------------
 
 export const enableComponentStackLocations = true;
-export const disableSchedulerTimeoutBasedOnReactExpirationTime = false;
 
 // -----------------------------------------------------------------------------
 // Killswitch
@@ -34,10 +33,6 @@ export const revertRemovalOfSiblingPrerendering = false;
 // Flags that can be probably deleted or landed, but might require extra effort
 // like migrating internal callers or performance testing.
 // -----------------------------------------------------------------------------
-
-// This rolled out to 10% public in www, so we should be able to land, but some
-// internal tests need to be updated. The open source behavior is correct.
-export const skipUnmountedBoundaries = true;
 
 // TODO: Finish rolling out in www
 export const enableClientRenderFallbackOnTextMismatch = true;
@@ -153,14 +148,6 @@ export const enableUnifiedSyncLane = __EXPERIMENTAL__;
 // startTransition. Only relevant when enableSyncDefaultUpdates is disabled.
 export const allowConcurrentByDefault = false;
 
-// Updates that occur in the render phase are not officially supported. But when
-// they do occur, we defer them to a subsequent render by picking a lane that's
-// not currently rendering. We treat them the same as if they came from an
-// interleaved event. Remove this flag once we have migrated to the
-// new behavior.
-// NOTE: Not sure if we'll end up doing this or not.
-export const deferRenderPhaseUpdateToNextBatch = false;
-
 // -----------------------------------------------------------------------------
 // React DOM Chopping Block
 //
@@ -231,8 +218,6 @@ export const enableDebugTracing = false;
 // Track which Fiber(s) schedule render work.
 export const enableUpdaterTracking = __PROFILE__;
 
-// Only enabled in RN, related to enableComponentStackLocations
-export const disableNativeComponentFrames = false;
 export const enableServerContext = true;
 
 // Internal only.
