@@ -37,10 +37,6 @@ export const revertRemovalOfSiblingPrerendering = false;
 // TODO: Finish rolling out in www
 export const enableClientRenderFallbackOnTextMismatch = true;
 
-// TODO: Need to review this code one more time before landing
-export const enableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay =
-  true;
-
 // Recoil still uses useMutableSource in www, need to delete
 export const enableUseMutableSource = false;
 
@@ -51,6 +47,10 @@ export const enableSchedulerDebugging = false;
 
 // Need to remove didTimeout argument from Scheduler before landing
 export const disableSchedulerTimeoutInWorkLoop = false;
+
+// This will break some internal tests at Meta so we need to gate this until
+// those can be fixed.
+export const enableDeferRootSchedulingToMicrotask = true;
 
 // -----------------------------------------------------------------------------
 // Slated for removal in the future (significant effort)
