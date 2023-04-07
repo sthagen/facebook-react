@@ -39,14 +39,8 @@ import {
 } from 'react-server/src/ReactServerStreamConfig';
 
 import isAttributeNameSafe from '../shared/isAttributeNameSafe';
-import {
-  getPropertyInfo,
-  BOOLEAN,
-  OVERLOADED_BOOLEAN,
-  NUMERIC,
-  POSITIVE_NUMERIC,
-} from '../shared/DOMProperty';
 import isUnitlessNumber from '../shared/isUnitlessNumber';
+import getAttributeAlias from '../shared/getAttributeAlias';
 
 import {checkControlledValueProps} from '../shared/ReactControlledValuePropTypes';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
@@ -621,14 +615,104 @@ function pushBooleanAttribute(
   }
 }
 
+function pushStringAttribute(
+  target: Array<Chunk | PrecomputedChunk>,
+  name: string,
+  value: string | boolean | number | Function | Object, // not null or undefined
+): void {
+  if (
+    typeof value !== 'function' &&
+    typeof value !== 'symbol' &&
+    typeof value !== 'boolean'
+  ) {
+    target.push(
+      attributeSeparator,
+      stringToChunk(name),
+      attributeAssign,
+      stringToChunk(escapeTextForBrowser(value)),
+      attributeEnd,
+    );
+  }
+}
+
 function pushAttribute(
   target: Array<Chunk | PrecomputedChunk>,
   name: string,
   value: string | boolean | number | Function | Object, // not null or undefined
 ): void {
   switch (name) {
+    // These are very common props and therefore are in the beginning of the switch.
+    // TODO: aria-label is a very common prop but allows booleans so is not like the others
+    // but should ideally go in this list too.
+    case 'className': {
+      pushStringAttribute(target, 'class', value);
+      break;
+    }
+    case 'tabIndex': {
+      pushStringAttribute(target, 'tabindex', value);
+      break;
+    }
+    case 'dir':
+    case 'role':
+    case 'viewBox':
+    case 'width':
+    case 'height': {
+      pushStringAttribute(target, name, value);
+      break;
+    }
     case 'style': {
       pushStyleAttribute(target, value);
+      return;
+    }
+    case 'src':
+    case 'href':
+    case 'action':
+      if (enableFilterEmptyStringAttributesDOM) {
+        if (value === '') {
+          if (__DEV__) {
+            if (name === 'src') {
+              console.error(
+                'An empty string ("") was passed to the %s attribute. ' +
+                  'This may cause the browser to download the whole page again over the network. ' +
+                  'To fix this, either do not render the element at all ' +
+                  'or pass null to %s instead of an empty string.',
+                name,
+                name,
+              );
+            } else {
+              console.error(
+                'An empty string ("") was passed to the %s attribute. ' +
+                  'To fix this, either do not render the element at all ' +
+                  'or pass null to %s instead of an empty string.',
+                name,
+                name,
+              );
+            }
+          }
+          return;
+        }
+      }
+    // Fall through to the last case which shouldn't remove empty strings.
+    case 'formAction': {
+      if (
+        value == null ||
+        typeof value === 'function' ||
+        typeof value === 'symbol' ||
+        typeof value === 'boolean'
+      ) {
+        return;
+      }
+      if (__DEV__) {
+        checkAttributeStringCoercion(value, name);
+      }
+      const sanitizedValue = sanitizeURL('' + value);
+      target.push(
+        attributeSeparator,
+        stringToChunk(name),
+        attributeAssign,
+        stringToChunk(escapeTextForBrowser(sanitizedValue)),
+        attributeEnd,
+      );
       return;
     }
     case 'defaultValue':
@@ -638,151 +722,209 @@ function pushAttribute(
     case 'suppressHydrationWarning':
       // Ignored. These are built-in to React on the client.
       return;
+    case 'autoFocus':
     case 'multiple':
-    case 'muted':
-      pushBooleanAttribute(target, name, value);
+    case 'muted': {
+      pushBooleanAttribute(target, name.toLowerCase(), value);
       return;
-  }
-  if (
-    // shouldIgnoreAttribute
-    // We have already filtered out null/undefined and reserved words.
-    name.length > 2 &&
-    (name[0] === 'o' || name[0] === 'O') &&
-    (name[1] === 'n' || name[1] === 'N')
-  ) {
-    return;
-  }
-
-  const propertyInfo = getPropertyInfo(name);
-  if (propertyInfo !== null) {
-    // shouldRemoveAttribute
-    switch (typeof value) {
-      case 'function':
-      case 'symbol': // eslint-disable-line
-        return;
-      case 'boolean': {
-        if (!propertyInfo.acceptsBooleans) {
-          return;
-        }
-      }
     }
-    if (enableFilterEmptyStringAttributesDOM) {
-      if (propertyInfo.removeEmptyString && value === '') {
-        if (__DEV__) {
-          if (name === 'src') {
-            console.error(
-              'An empty string ("") was passed to the %s attribute. ' +
-                'This may cause the browser to download the whole page again over the network. ' +
-                'To fix this, either do not render the element at all ' +
-                'or pass null to %s instead of an empty string.',
-              name,
-              name,
-            );
-          } else {
-            console.error(
-              'An empty string ("") was passed to the %s attribute. ' +
-                'To fix this, either do not render the element at all ' +
-                'or pass null to %s instead of an empty string.',
-              name,
-              name,
-            );
-          }
-        }
+    case 'xlinkHref': {
+      if (
+        typeof value === 'function' ||
+        typeof value === 'symbol' ||
+        typeof value === 'boolean'
+      ) {
         return;
       }
+      if (__DEV__) {
+        checkAttributeStringCoercion(value, name);
+      }
+      const sanitizedValue = sanitizeURL('' + value);
+      target.push(
+        attributeSeparator,
+        stringToChunk('xlink:href'),
+        attributeAssign,
+        stringToChunk(escapeTextForBrowser(sanitizedValue)),
+        attributeEnd,
+      );
+      return;
     }
-
-    const attributeName = propertyInfo.attributeName;
-    const attributeNameChunk = stringToChunk(attributeName); // TODO: If it's known we can cache the chunk.
-
-    switch (propertyInfo.type) {
-      case BOOLEAN:
-        if (value) {
-          target.push(
-            attributeSeparator,
-            attributeNameChunk,
-            attributeEmptyString,
-          );
-        }
-        return;
-      case OVERLOADED_BOOLEAN:
-        if (value === true) {
-          target.push(
-            attributeSeparator,
-            attributeNameChunk,
-            attributeEmptyString,
-          );
-        } else if (value === false) {
-          // Ignored
-        } else {
-          target.push(
-            attributeSeparator,
-            attributeNameChunk,
-            attributeAssign,
-            stringToChunk(escapeTextForBrowser(value)),
-            attributeEnd,
-          );
-        }
-        return;
-      case NUMERIC:
-        if (!isNaN(value)) {
-          target.push(
-            attributeSeparator,
-            attributeNameChunk,
-            attributeAssign,
-            stringToChunk(escapeTextForBrowser(value)),
-            attributeEnd,
-          );
-        }
-        break;
-      case POSITIVE_NUMERIC:
-        if (!isNaN(value) && (value: any) >= 1) {
-          target.push(
-            attributeSeparator,
-            attributeNameChunk,
-            attributeAssign,
-            stringToChunk(escapeTextForBrowser(value)),
-            attributeEnd,
-          );
-        }
-        break;
-      default:
-        if (__DEV__) {
-          checkAttributeStringCoercion(value, attributeName);
-        }
-        if (propertyInfo.sanitizeURL) {
-          // We've already checked above.
-          // eslint-disable-next-line react-internal/safe-string-coercion
-          value = sanitizeURL('' + (value: any));
-        }
+    case 'contentEditable':
+    case 'spellCheck':
+    case 'draggable':
+    case 'value':
+    case 'autoReverse':
+    case 'externalResourcesRequired':
+    case 'focusable':
+    case 'preserveAlpha': {
+      // Booleanish String
+      // These are "enumerated" attributes that accept "true" and "false".
+      // In React, we let users pass `true` and `false` even though technically
+      // these aren't boolean attributes (they are coerced to strings).
+      if (typeof value !== 'function' && typeof value !== 'symbol') {
         target.push(
           attributeSeparator,
-          attributeNameChunk,
+          stringToChunk(name),
           attributeAssign,
           stringToChunk(escapeTextForBrowser(value)),
           attributeEnd,
         );
-    }
-  } else if (isAttributeNameSafe(name)) {
-    // shouldRemoveAttribute
-    switch (typeof value) {
-      case 'function':
-      case 'symbol': // eslint-disable-line
-        return;
-      case 'boolean': {
-        const prefix = name.toLowerCase().slice(0, 5);
-        if (prefix !== 'data-' && prefix !== 'aria-') {
-          return;
-        }
       }
+      return;
     }
-    target.push(
-      attributeSeparator,
-      stringToChunk(name),
-      attributeAssign,
-      stringToChunk(escapeTextForBrowser(value)),
-      attributeEnd,
-    );
+    case 'allowFullScreen':
+    case 'async':
+    case 'autoPlay':
+    case 'controls':
+    case 'default':
+    case 'defer':
+    case 'disabled':
+    case 'disablePictureInPicture':
+    case 'disableRemotePlayback':
+    case 'formNoValidate':
+    case 'hidden':
+    case 'loop':
+    case 'noModule':
+    case 'noValidate':
+    case 'open':
+    case 'playsInline':
+    case 'readOnly':
+    case 'required':
+    case 'reversed':
+    case 'scoped':
+    case 'seamless':
+    case 'itemScope': {
+      // Boolean
+      if (value && typeof value !== 'function' && typeof value !== 'symbol') {
+        target.push(
+          attributeSeparator,
+          stringToChunk(name),
+          attributeEmptyString,
+        );
+      }
+      return;
+    }
+    case 'capture':
+    case 'download': {
+      // Overloaded Boolean
+      if (value === true) {
+        target.push(
+          attributeSeparator,
+          stringToChunk(name),
+          attributeEmptyString,
+        );
+      } else if (value === false) {
+        // Ignored
+      } else if (typeof value !== 'function' && typeof value !== 'symbol') {
+        target.push(
+          attributeSeparator,
+          stringToChunk(name),
+          attributeAssign,
+          stringToChunk(escapeTextForBrowser(value)),
+          attributeEnd,
+        );
+      }
+      return;
+    }
+    case 'cols':
+    case 'rows':
+    case 'size':
+    case 'span': {
+      // These are HTML attributes that must be positive numbers.
+      if (
+        typeof value !== 'function' &&
+        typeof value !== 'symbol' &&
+        !isNaN(value) &&
+        (value: any) >= 1
+      ) {
+        target.push(
+          attributeSeparator,
+          stringToChunk(name),
+          attributeAssign,
+          stringToChunk(escapeTextForBrowser(value)),
+          attributeEnd,
+        );
+      }
+      return;
+    }
+    case 'rowSpan':
+    case 'start': {
+      // These are HTML attributes that must be numbers.
+      if (
+        typeof value !== 'function' &&
+        typeof value !== 'symbol' &&
+        !isNaN(value)
+      ) {
+        target.push(
+          attributeSeparator,
+          stringToChunk(name),
+          attributeAssign,
+          stringToChunk(escapeTextForBrowser(value)),
+          attributeEnd,
+        );
+      }
+      return;
+    }
+    case 'xlinkActuate':
+      pushStringAttribute(target, 'xlink:actuate', value);
+      return;
+    case 'xlinkArcrole':
+      pushStringAttribute(target, 'xlink:arcrole', value);
+      return;
+    case 'xlinkRole':
+      pushStringAttribute(target, 'xlink:role', value);
+      return;
+    case 'xlinkShow':
+      pushStringAttribute(target, 'xlink:show', value);
+      return;
+    case 'xlinkTitle':
+      pushStringAttribute(target, 'xlink:title', value);
+      return;
+    case 'xlinkType':
+      pushStringAttribute(target, 'xlink:type', value);
+      return;
+    case 'xmlBase':
+      pushStringAttribute(target, 'xml:base', value);
+      return;
+    case 'xmlLang':
+      pushStringAttribute(target, 'xml:lang', value);
+      return;
+    case 'xmlSpace':
+      pushStringAttribute(target, 'xml:space', value);
+      return;
+    default:
+      if (
+        // shouldIgnoreAttribute
+        // We have already filtered out null/undefined and reserved words.
+        name.length > 2 &&
+        (name[0] === 'o' || name[0] === 'O') &&
+        (name[1] === 'n' || name[1] === 'N')
+      ) {
+        return;
+      }
+
+      const attributeName = getAttributeAlias(name);
+      if (isAttributeNameSafe(attributeName)) {
+        // shouldRemoveAttribute
+        switch (typeof value) {
+          case 'function':
+          case 'symbol': // eslint-disable-line
+            return;
+          case 'boolean': {
+            const prefix = attributeName.toLowerCase().slice(0, 5);
+            if (prefix !== 'data-' && prefix !== 'aria-') {
+              return;
+            }
+          }
+        }
+        target.push(
+          attributeSeparator,
+          stringToChunk(attributeName),
+          attributeAssign,
+          stringToChunk(escapeTextForBrowser(value)),
+          attributeEnd,
+        );
+      }
   }
 }
 
@@ -980,11 +1122,9 @@ function pushStartOption(
         case 'dangerouslySetInnerHTML':
           innerHTML = propValue;
           break;
-        // eslint-disable-next-line-no-fallthrough
         case 'value':
           value = propValue;
         // We intentionally fallthrough to also set the attribute on the node.
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -1105,7 +1245,6 @@ function pushInput(
             `${'input'} is a self-closing tag and must neither have \`children\` nor ` +
               'use `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         case 'defaultChecked':
           defaultChecked = propValue;
           break;
@@ -1187,7 +1326,6 @@ function pushStartTextArea(
           throw new Error(
             '`dangerouslySetInnerHTML` does not make sense on <textarea>.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -1534,7 +1672,6 @@ function pushLinkImpl(
             `${'link'} is a self-closing tag and must neither have \`children\` nor ` +
               'use `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -1763,7 +1900,6 @@ function pushSelfClosing(
             `${tag} is a self-closing tag and must neither have \`children\` nor ` +
               'use `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -1793,7 +1929,6 @@ function pushStartMenuItem(
           throw new Error(
             'menuitems cannot have `children` nor `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -1945,7 +2080,6 @@ function pushStartTitle(
           throw new Error(
             '`dangerouslySetInnerHTML` does not make sense on <title>.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           pushAttribute(target, propKey, propValue);
           break;
@@ -2495,6 +2629,16 @@ export function pushStartInstance(
   }
 
   switch (type) {
+    case 'div':
+    case 'span':
+    case 'svg':
+    case 'path':
+    case 'a':
+    case 'g':
+    case 'p':
+    case 'li':
+      // Fast track very common tags
+      break;
     // Special tags
     case 'select':
       return pushStartSelect(target, props);
@@ -2604,15 +2748,14 @@ export function pushStartInstance(
       );
     }
     default: {
-      if (type.indexOf('-') === -1) {
-        // Generic element
-        return pushStartGenericElement(target, props, type);
-      } else {
+      if (type.indexOf('-') !== -1) {
         // Custom element
         return pushStartCustomElement(target, props, type);
       }
     }
   }
+  // Generic element
+  return pushStartGenericElement(target, props, type);
 }
 
 const endTag1 = stringToPrecomputedChunk('</');
@@ -2635,11 +2778,12 @@ export function pushEndInstance(
       if (!enableFloat) {
         break;
       }
+      // Fall through
     }
+
     // Omitted close tags
     // TODO: Instead of repeating this switch we could try to pass a flag from above.
     // That would require returning a tuple. Which might be ok if it gets inlined.
-    // eslint-disable-next-line-no-fallthrough
     case 'area':
     case 'base':
     case 'br':
@@ -3892,7 +4036,6 @@ function writeStyleResourceDependencyInJS(
             `${'link'} is a self-closing tag and must neither have \`children\` nor ` +
               'use `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           writeStyleResourceAttributeInJS(destination, propKey, propValue);
           break;
@@ -4088,7 +4231,6 @@ function writeStyleResourceDependencyInAttr(
             `${'link'} is a self-closing tag and must neither have \`children\` nor ` +
               'use `dangerouslySetInnerHTML`.',
           );
-        // eslint-disable-next-line-no-fallthrough
         default:
           writeStyleResourceAttributeInAttr(destination, propKey, propValue);
           break;

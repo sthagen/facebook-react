@@ -592,9 +592,10 @@ function commitHookEffectListUnmount(
     do {
       if ((effect.tag & flags) === flags) {
         // Unmount
-        const destroy = effect.destroy;
-        effect.destroy = undefined;
+        const inst = effect.inst;
+        const destroy = inst.destroy;
         if (destroy !== undefined) {
+          inst.destroy = undefined;
           if (enableSchedulingProfiler) {
             if ((flags & HookPassive) !== NoHookEffect) {
               markComponentPassiveEffectUnmountStarted(finishedWork);
@@ -653,7 +654,9 @@ function commitHookEffectListMount(flags: HookFlags, finishedWork: Fiber) {
             setIsRunningInsertionEffect(true);
           }
         }
-        effect.destroy = create();
+        const inst = effect.inst;
+        const destroy = create();
+        inst.destroy = destroy;
         if (__DEV__) {
           if ((flags & HookInsertion) !== NoHookEffect) {
             setIsRunningInsertionEffect(false);
@@ -669,7 +672,6 @@ function commitHookEffectListMount(flags: HookFlags, finishedWork: Fiber) {
         }
 
         if (__DEV__) {
-          const destroy = effect.destroy;
           if (destroy !== undefined && typeof destroy !== 'function') {
             let hookName;
             if ((effect.tag & HookLayout) !== NoFlags) {
@@ -1129,8 +1131,8 @@ function commitLayoutEffectOnFiber(
         }
         break;
       }
+      // Fall through
     }
-    // eslint-disable-next-line-no-fallthrough
     case HostSingleton:
     case HostComponent: {
       recursivelyTraverseLayoutEffects(
@@ -1827,8 +1829,8 @@ function commitPlacement(finishedWork: Fiber): void {
         insertOrAppendPlacementNode(finishedWork, before, parent);
         break;
       }
+      // Fall through
     }
-    // eslint-disable-next-line no-fallthrough
     case HostComponent: {
       const parent: Instance = parentFiber.stateNode;
       if (parentFiber.flags & ContentReset) {
@@ -1851,7 +1853,6 @@ function commitPlacement(finishedWork: Fiber): void {
       insertOrAppendPlacementNodeIntoContainer(finishedWork, before, parent);
       break;
     }
-    // eslint-disable-next-line-no-fallthrough
     default:
       throw new Error(
         'Invalid host parent fiber. This error is likely caused by a bug ' +
@@ -2042,8 +2043,8 @@ function commitDeletionEffectsOnFiber(
         }
         return;
       }
+      // Fall through
     }
-    // eslint-disable-next-line no-fallthrough
     case HostSingleton: {
       if (enableHostSingletons && supportsSingletons) {
         if (!offscreenSubtreeWasHidden) {
@@ -2071,15 +2072,14 @@ function commitDeletionEffectsOnFiber(
 
         return;
       }
+      // Fall through
     }
-    // eslint-disable-next-line no-fallthrough
     case HostComponent: {
       if (!offscreenSubtreeWasHidden) {
         safelyDetachRef(deletedFiber, nearestMountedAncestor);
       }
       // Intentional fallthrough to next branch
     }
-    // eslint-disable-next-line-no-fallthrough
     case HostText: {
       // We only need to remove the nearest host child. Set the host parent
       // to `null` on the stack to indicate that nested children don't
@@ -2190,9 +2190,12 @@ function commitDeletionEffectsOnFiber(
 
             let effect = firstEffect;
             do {
-              const {destroy, tag} = effect;
+              const tag = effect.tag;
+              const inst = effect.inst;
+              const destroy = inst.destroy;
               if (destroy !== undefined) {
                 if ((tag & HookInsertion) !== NoHookEffect) {
+                  inst.destroy = undefined;
                   safelyCallDestroy(
                     deletedFiber,
                     nearestMountedAncestor,
@@ -2205,6 +2208,7 @@ function commitDeletionEffectsOnFiber(
 
                   if (shouldProfile(deletedFiber)) {
                     startLayoutEffectTimer();
+                    inst.destroy = undefined;
                     safelyCallDestroy(
                       deletedFiber,
                       nearestMountedAncestor,
@@ -2212,6 +2216,7 @@ function commitDeletionEffectsOnFiber(
                     );
                     recordLayoutEffectDuration(deletedFiber);
                   } else {
+                    inst.destroy = undefined;
                     safelyCallDestroy(
                       deletedFiber,
                       nearestMountedAncestor,
@@ -2707,8 +2712,8 @@ function commitMutationEffectsOnFiber(
         }
         return;
       }
+      // Fall through
     }
-    // eslint-disable-next-line-no-fallthrough
     case HostSingleton: {
       if (enableHostSingletons && supportsSingletons) {
         if (flags & Update) {
@@ -2727,8 +2732,8 @@ function commitMutationEffectsOnFiber(
           }
         }
       }
+      // Fall through
     }
-    // eslint-disable-next-line-no-fallthrough
     case HostComponent: {
       recursivelyTraverseMutationEffects(root, finishedWork, lanes);
       commitReconciliationEffects(finishedWork);
@@ -3772,7 +3777,6 @@ function commitPassiveMountOnFiber(
       }
       // Intentional fallthrough to next branch
     }
-    // eslint-disable-next-line-no-fallthrough
     default: {
       recursivelyTraversePassiveMountEffects(
         finishedRoot,
@@ -3966,7 +3970,6 @@ export function reconnectPassiveEffects(
       }
       // Intentional fallthrough to next branch
     }
-    // eslint-disable-next-line-no-fallthrough
     default: {
       recursivelyTraverseReconnectPassiveEffects(
         finishedRoot,
@@ -4047,7 +4050,6 @@ function commitAtomicPassiveEffects(
       }
       break;
     }
-    // eslint-disable-next-line-no-fallthrough
     default: {
       recursivelyTraverseAtomicPassiveEffects(
         finishedRoot,

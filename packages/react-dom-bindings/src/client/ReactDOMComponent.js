@@ -16,14 +16,15 @@ import {
 
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import {checkHtmlStringCoercion} from 'shared/CheckStringCoercion';
+import {checkAttributeStringCoercion} from 'shared/CheckStringCoercion';
 
 import {
   getValueForAttribute,
   getValueForAttributeOnCustomComponent,
-  getValueForProperty,
-  setValueForProperty,
   setValueForPropertyOnCustomComponent,
+  setValueForKnownAttribute,
   setValueForAttribute,
+  setValueForNamespacedAttribute,
 } from './DOMPropertyOperations';
 import {
   initWrapperState as ReactDOMInputInitWrapperState,
@@ -57,18 +58,21 @@ import {
   validateShorthandPropertyCollisionInDev,
 } from './CSSPropertyOperations';
 import {HTML_NAMESPACE, getIntrinsicNamespace} from './DOMNamespaces';
-import {getPropertyInfo} from '../shared/DOMProperty';
 import isCustomElement from '../shared/isCustomElement';
+import getAttributeAlias from '../shared/getAttributeAlias';
 import possibleStandardNames from '../shared/possibleStandardNames';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
 import {validateProperties as validateInputProperties} from '../shared/ReactDOMNullInputValuePropHook';
 import {validateProperties as validateUnknownProperties} from '../shared/ReactDOMUnknownPropertyHook';
+import sanitizeURL from '../shared/sanitizeURL';
 
 import {
   enableCustomElementPropertySupport,
   enableClientRenderFallbackOnTextMismatch,
   enableHostSingletons,
   disableIEWorkarounds,
+  enableTrustedTypesIntegration,
+  enableFilterEmptyStringAttributesDOM,
 } from 'shared/ReactFeatureFlags';
 import {
   mediaEventTypes,
@@ -120,6 +124,9 @@ function warnForPropDifference(
 ) {
   if (__DEV__) {
     if (didWarnInvalidHydration) {
+      return;
+    }
+    if (serverValue === clientValue) {
       return;
     }
     const normalizedClientValue =
@@ -259,32 +266,128 @@ export function trapClickOnNonInteractiveElement(node: HTMLElement) {
   node.onclick = noop;
 }
 
+const xlinkNamespace = 'http://www.w3.org/1999/xlink';
+const xmlNamespace = 'http://www.w3.org/XML/1998/namespace';
+
 function setProp(
   domElement: Element,
   tag: string,
   key: string,
   value: mixed,
-  isCustomElementTag: boolean,
   props: any,
 ): void {
   switch (key) {
-    case 'style': {
-      if (value != null && typeof value !== 'object') {
-        throw new Error(
-          'The `style` prop expects a mapping from style properties to values, ' +
-            "not a string. For example, style={{marginRight: spacing + 'em'}} when " +
-            'using JSX.',
-        );
-      }
-      if (__DEV__) {
-        if (value) {
-          // Freeze the next style object so that we can assume it won't be
-          // mutated. We have already warned for this in the past.
-          Object.freeze(value);
+    case 'children': {
+      if (typeof value === 'string') {
+        // Avoid setting initial textContent when the text is empty. In IE11 setting
+        // textContent on a <textarea> will cause the placeholder to not
+        // show within the <textarea> until it has been focused and blurred again.
+        // https://github.com/facebook/react/issues/6731#issuecomment-254874553
+        const canSetTextContent =
+          (!enableHostSingletons || tag !== 'body') &&
+          (tag !== 'textarea' || value !== '');
+        if (canSetTextContent) {
+          setTextContent(domElement, value);
+        }
+      } else if (typeof value === 'number') {
+        const canSetTextContent = !enableHostSingletons || tag !== 'body';
+        if (canSetTextContent) {
+          setTextContent(domElement, '' + value);
         }
       }
-      // Relies on `updateStylesByID` not mutating `styleUpdates`.
+      break;
+    }
+    // These are very common props and therefore are in the beginning of the switch.
+    // TODO: aria-label is a very common prop but allows booleans so is not like the others
+    // but should ideally go in this list too.
+    case 'className':
+      setValueForKnownAttribute(domElement, 'class', value);
+      break;
+    case 'tabIndex':
+      // This has to be case sensitive in SVG.
+      setValueForKnownAttribute(domElement, 'tabindex', value);
+      break;
+    case 'dir':
+    case 'role':
+    case 'viewBox':
+    case 'width':
+    case 'height': {
+      setValueForKnownAttribute(domElement, key, value);
+      break;
+    }
+    case 'style': {
       setValueForStyles(domElement, value);
+      break;
+    }
+    // These attributes accept URLs. These must not allow javascript: URLS.
+    case 'src':
+    case 'href':
+    case 'action':
+      if (enableFilterEmptyStringAttributesDOM) {
+        if (value === '') {
+          if (__DEV__) {
+            if (key === 'src') {
+              console.error(
+                'An empty string ("") was passed to the %s attribute. ' +
+                  'This may cause the browser to download the whole page again over the network. ' +
+                  'To fix this, either do not render the element at all ' +
+                  'or pass null to %s instead of an empty string.',
+                key,
+                key,
+              );
+            } else {
+              console.error(
+                'An empty string ("") was passed to the %s attribute. ' +
+                  'To fix this, either do not render the element at all ' +
+                  'or pass null to %s instead of an empty string.',
+                key,
+                key,
+              );
+            }
+          }
+          domElement.removeAttribute(key);
+          break;
+        }
+      }
+    // Fall through to the last case which shouldn't remove empty strings.
+    case 'formAction': {
+      if (
+        value == null ||
+        typeof value === 'function' ||
+        typeof value === 'symbol' ||
+        typeof value === 'boolean'
+      ) {
+        domElement.removeAttribute(key);
+        break;
+      }
+      // `setAttribute` with objects becomes only `[object]` in IE8/9,
+      // ('' + value) makes it output the correct toString()-value.
+      if (__DEV__) {
+        checkAttributeStringCoercion(value, key);
+      }
+      const sanitizedValue = (sanitizeURL(
+        enableTrustedTypesIntegration ? value : '' + (value: any),
+      ): any);
+      domElement.setAttribute(key, sanitizedValue);
+      break;
+    }
+    case 'onClick': {
+      // TODO: This cast may not be sound for SVG, MathML or custom elements.
+      if (value != null) {
+        if (__DEV__ && typeof value !== 'function') {
+          warnForInvalidEventListener(key, value);
+        }
+        trapClickOnNonInteractiveElement(((domElement: any): HTMLElement));
+      }
+      break;
+    }
+    case 'onScroll': {
+      if (value != null) {
+        if (__DEV__ && typeof value !== 'function') {
+          warnForInvalidEventListener(key, value);
+        }
+        listenToNonDelegatedEvent('scroll', domElement);
+      }
       break;
     }
     case 'dangerouslySetInnerHTML': {
@@ -309,45 +412,6 @@ function setProp(
             setInnerHTML(domElement, nextHtml);
           }
         }
-      }
-      break;
-    }
-    case 'children': {
-      if (typeof value === 'string') {
-        // Avoid setting initial textContent when the text is empty. In IE11 setting
-        // textContent on a <textarea> will cause the placeholder to not
-        // show within the <textarea> until it has been focused and blurred again.
-        // https://github.com/facebook/react/issues/6731#issuecomment-254874553
-        const canSetTextContent =
-          (!enableHostSingletons || tag !== 'body') &&
-          (tag !== 'textarea' || value !== '');
-        if (canSetTextContent) {
-          setTextContent(domElement, value);
-        }
-      } else if (typeof value === 'number') {
-        const canSetTextContent = !enableHostSingletons || tag !== 'body';
-        if (canSetTextContent) {
-          setTextContent(domElement, '' + value);
-        }
-      }
-      break;
-    }
-    case 'onScroll': {
-      if (value != null) {
-        if (__DEV__ && typeof value !== 'function') {
-          warnForInvalidEventListener(key, value);
-        }
-        listenToNonDelegatedEvent('scroll', domElement);
-      }
-      break;
-    }
-    case 'onClick': {
-      // TODO: This cast may not be sound for SVG, MathML or custom elements.
-      if (value != null) {
-        if (__DEV__ && typeof value !== 'function') {
-          warnForInvalidEventListener(key, value);
-        }
-        trapClickOnNonInteractiveElement(((domElement: any): HTMLElement));
       }
       break;
     }
@@ -378,45 +442,339 @@ function setProp(
       // on server rendering (but we *do* want to emit it in SSR).
       break;
     }
+    case 'xlinkHref': {
+      if (
+        value == null ||
+        typeof value === 'function' ||
+        typeof value === 'boolean' ||
+        typeof value === 'symbol'
+      ) {
+        domElement.removeAttribute('xlink:href');
+        break;
+      }
+      // `setAttribute` with objects becomes only `[object]` in IE8/9,
+      // ('' + value) makes it output the correct toString()-value.
+      if (__DEV__) {
+        checkAttributeStringCoercion(value, key);
+      }
+      const sanitizedValue = (sanitizeURL(
+        enableTrustedTypesIntegration ? value : '' + (value: any),
+      ): any);
+      domElement.setAttributeNS(xlinkNamespace, 'xlink:href', sanitizedValue);
+      break;
+    }
+    case 'contentEditable':
+    case 'spellCheck':
+    case 'draggable':
+    case 'value':
+    case 'autoReverse':
+    case 'externalResourcesRequired':
+    case 'focusable':
+    case 'preserveAlpha': {
+      // Booleanish String
+      // These are "enumerated" attributes that accept "true" and "false".
+      // In React, we let users pass `true` and `false` even though technically
+      // these aren't boolean attributes (they are coerced to strings).
+      // The SVG attributes are case-sensitive. Since the HTML attributes are
+      // insensitive they also work even though we canonically use lower case.
+      if (
+        value != null &&
+        typeof value !== 'function' &&
+        typeof value !== 'symbol'
+      ) {
+        if (__DEV__) {
+          checkAttributeStringCoercion(value, key);
+        }
+        domElement.setAttribute(key, (value: any));
+      } else {
+        domElement.removeAttribute(key);
+      }
+      break;
+    }
+    // Boolean
+    case 'allowFullScreen':
+    case 'async':
+    case 'autoPlay':
+    case 'controls':
+    case 'default':
+    case 'defer':
+    case 'disabled':
+    case 'disablePictureInPicture':
+    case 'disableRemotePlayback':
+    case 'formNoValidate':
+    case 'hidden':
+    case 'loop':
+    case 'noModule':
+    case 'noValidate':
+    case 'open':
+    case 'playsInline':
+    case 'readOnly':
+    case 'required':
+    case 'reversed':
+    case 'scoped':
+    case 'seamless':
+    case 'itemScope': {
+      if (value && typeof value !== 'function' && typeof value !== 'symbol') {
+        domElement.setAttribute(key, '');
+      } else {
+        domElement.removeAttribute(key);
+      }
+      break;
+    }
+    // Overloaded Boolean
+    case 'capture':
+    case 'download': {
+      // An attribute that can be used as a flag as well as with a value.
+      // When true, it should be present (set either to an empty string or its name).
+      // When false, it should be omitted.
+      // For any other value, should be present with that value.
+      if (value === true) {
+        domElement.setAttribute(key, '');
+      } else if (
+        value !== false &&
+        value != null &&
+        typeof value !== 'function' &&
+        typeof value !== 'symbol'
+      ) {
+        if (__DEV__) {
+          checkAttributeStringCoercion(value, key);
+        }
+        domElement.setAttribute(key, (value: any));
+      } else {
+        domElement.removeAttribute(key);
+      }
+      break;
+    }
+    case 'cols':
+    case 'rows':
+    case 'size':
+    case 'span': {
+      // These are HTML attributes that must be positive numbers.
+      if (
+        value != null &&
+        typeof value !== 'function' &&
+        typeof value !== 'symbol' &&
+        !isNaN(value) &&
+        (value: any) >= 1
+      ) {
+        if (__DEV__) {
+          checkAttributeStringCoercion(value, key);
+        }
+        domElement.setAttribute(key, (value: any));
+      } else {
+        domElement.removeAttribute(key);
+      }
+      break;
+    }
+    case 'rowSpan':
+    case 'start': {
+      // These are HTML attributes that must be numbers.
+      if (
+        value != null &&
+        typeof value !== 'function' &&
+        typeof value !== 'symbol' &&
+        !isNaN(value)
+      ) {
+        if (__DEV__) {
+          checkAttributeStringCoercion(value, key);
+        }
+        domElement.setAttribute(key, (value: any));
+      } else {
+        domElement.removeAttribute(key);
+      }
+      break;
+    }
+    case 'xlinkActuate':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:actuate',
+        value,
+      );
+      break;
+    case 'xlinkArcrole':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:arcrole',
+        value,
+      );
+      break;
+    case 'xlinkRole':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:role',
+        value,
+      );
+      break;
+    case 'xlinkShow':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:show',
+        value,
+      );
+      break;
+    case 'xlinkTitle':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:title',
+        value,
+      );
+      break;
+    case 'xlinkType':
+      setValueForNamespacedAttribute(
+        domElement,
+        xlinkNamespace,
+        'xlink:type',
+        value,
+      );
+      break;
+    case 'xmlBase':
+      setValueForNamespacedAttribute(
+        domElement,
+        xmlNamespace,
+        'xml:base',
+        value,
+      );
+      break;
+    case 'xmlLang':
+      setValueForNamespacedAttribute(
+        domElement,
+        xmlNamespace,
+        'xml:lang',
+        value,
+      );
+      break;
+    case 'xmlSpace':
+      setValueForNamespacedAttribute(
+        domElement,
+        xmlNamespace,
+        'xml:space',
+        value,
+      );
+      break;
+    // Properties that should not be allowed on custom elements.
+    case 'innerText':
+    case 'textContent':
+      if (enableCustomElementPropertySupport) {
+        break;
+      }
+    // Fall through
+    default: {
+      if (
+        key.length > 2 &&
+        (key[0] === 'o' || key[0] === 'O') &&
+        (key[1] === 'n' || key[1] === 'N')
+      ) {
+        if (
+          __DEV__ &&
+          registrationNameDependencies.hasOwnProperty(key) &&
+          value != null &&
+          typeof value !== 'function'
+        ) {
+          warnForInvalidEventListener(key, value);
+        }
+      } else {
+        const attributeName = getAttributeAlias(key);
+        setValueForAttribute(domElement, attributeName, value);
+      }
+    }
+  }
+}
+
+function setPropOnCustomElement(
+  domElement: Element,
+  tag: string,
+  key: string,
+  value: mixed,
+  props: any,
+): void {
+  switch (key) {
+    case 'style': {
+      setValueForStyles(domElement, value);
+      break;
+    }
+    case 'dangerouslySetInnerHTML': {
+      if (value != null) {
+        if (typeof value !== 'object' || !('__html' in value)) {
+          throw new Error(
+            '`props.dangerouslySetInnerHTML` must be in the form `{__html: ...}`. ' +
+              'Please visit https://reactjs.org/link/dangerously-set-inner-html ' +
+              'for more information.',
+          );
+        }
+        const nextHtml: any = value.__html;
+        if (nextHtml != null) {
+          if (props.children != null) {
+            throw new Error(
+              'Can only set one of `children` or `props.dangerouslySetInnerHTML`.',
+            );
+          }
+          if (disableIEWorkarounds) {
+            domElement.innerHTML = nextHtml;
+          } else {
+            setInnerHTML(domElement, nextHtml);
+          }
+        }
+      }
+      break;
+    }
+    case 'children': {
+      if (typeof value === 'string') {
+        setTextContent(domElement, value);
+      } else if (typeof value === 'number') {
+        setTextContent(domElement, '' + value);
+      }
+      break;
+    }
+    case 'onScroll': {
+      if (value != null) {
+        if (__DEV__ && typeof value !== 'function') {
+          warnForInvalidEventListener(key, value);
+        }
+        listenToNonDelegatedEvent('scroll', domElement);
+      }
+      break;
+    }
+    case 'onClick': {
+      // TODO: This cast may not be sound for SVG, MathML or custom elements.
+      if (value != null) {
+        if (__DEV__ && typeof value !== 'function') {
+          warnForInvalidEventListener(key, value);
+        }
+        trapClickOnNonInteractiveElement(((domElement: any): HTMLElement));
+      }
+      break;
+    }
+    case 'suppressContentEditableWarning':
+    case 'suppressHydrationWarning':
+    case 'innerHTML': {
+      // Noop
+      break;
+    }
     case 'innerText': // Properties
     case 'textContent':
       if (enableCustomElementPropertySupport) {
         break;
       }
-    // eslint-disable-next-line no-fallthrough
+    // Fall through
     default: {
       if (registrationNameDependencies.hasOwnProperty(key)) {
         if (__DEV__ && value != null && typeof value !== 'function') {
           warnForInvalidEventListener(key, value);
         }
       } else {
-        if (isCustomElementTag) {
-          if (enableCustomElementPropertySupport) {
-            setValueForPropertyOnCustomComponent(domElement, key, value);
-          } else {
-            if (typeof value === 'boolean') {
-              // Special case before the new flag is on
-              value = '' + (value: any);
-            }
-            setValueForAttribute(domElement, key, value);
-          }
+        if (enableCustomElementPropertySupport) {
+          setValueForPropertyOnCustomComponent(domElement, key, value);
         } else {
-          if (
-            // shouldIgnoreAttribute
-            // We have already filtered out reserved words.
-            key.length > 2 &&
-            (key[0] === 'o' || key[0] === 'O') &&
-            (key[1] === 'n' || key[1] === 'N')
-          ) {
-            return;
+          if (typeof value === 'boolean') {
+            // Special case before the new flag is on
+            value = '' + (value: any);
           }
-
-          const propertyInfo = getPropertyInfo(key);
-          if (propertyInfo !== null) {
-            setValueForProperty(domElement, propertyInfo, value);
-          } else {
-            setValueForAttribute(domElement, key, value);
-          }
+          setValueForAttribute(domElement, key, value);
         }
       }
     }
@@ -435,6 +793,17 @@ export function setInitialProperties(
   // TODO: Make sure that we check isMounted before firing any of these events.
 
   switch (tag) {
+    case 'div':
+    case 'span':
+    case 'svg':
+    case 'path':
+    case 'a':
+    case 'g':
+    case 'p':
+    case 'li': {
+      // Fast track the most common tag types
+      break;
+    }
     case 'input': {
       ReactDOMInputInitWrapperState(domElement, props);
       // We listen to this event in case to ensure emulated bubble
@@ -449,6 +818,21 @@ export function setInitialProperties(
           continue;
         }
         switch (propKey) {
+          case 'type': {
+            // Fast path since 'type' is very common on inputs
+            if (
+              propValue != null &&
+              typeof propValue !== 'function' &&
+              typeof propValue !== 'symbol' &&
+              typeof propValue !== 'boolean'
+            ) {
+              if (__DEV__) {
+                checkAttributeStringCoercion(propValue, propKey);
+              }
+              domElement.setAttribute(propKey, propValue);
+            }
+            break;
+          }
           case 'checked': {
             const node = ((domElement: any): InputWithWrapperState);
             const checked =
@@ -475,7 +859,7 @@ export function setInitialProperties(
           }
           // defaultChecked and defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, props);
+            setProp(domElement, tag, propKey, propValue, props);
           }
         }
       }
@@ -505,7 +889,7 @@ export function setInitialProperties(
           }
           // defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, props);
+            setProp(domElement, tag, propKey, propValue, props);
           }
         }
       }
@@ -545,7 +929,7 @@ export function setInitialProperties(
           }
           // defaultValue is ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, props);
+            setProp(domElement, tag, propKey, propValue, props);
           }
         }
       }
@@ -575,7 +959,7 @@ export function setInitialProperties(
             break;
           }
           default: {
-            setProp(domElement, tag, propKey, propValue, false, props);
+            setProp(domElement, tag, propKey, propValue, props);
           }
         }
       }
@@ -625,7 +1009,6 @@ export function setInitialProperties(
       listenToNonDelegatedEvent('load', domElement);
       // We fallthrough to the return of the void elements
     }
-    // eslint-disable-next-line no-fallthrough
     case 'area':
     case 'base':
     case 'br':
@@ -657,15 +1040,29 @@ export function setInitialProperties(
           }
           // defaultChecked and defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, props);
+            setProp(domElement, tag, propKey, propValue, props);
           }
         }
       }
       return;
     }
+    default: {
+      if (isCustomElement(tag, props)) {
+        for (const propKey in props) {
+          if (!props.hasOwnProperty(propKey)) {
+            continue;
+          }
+          const propValue = props[propKey];
+          if (propValue == null) {
+            continue;
+          }
+          setPropOnCustomElement(domElement, tag, propKey, propValue, props);
+        }
+        return;
+      }
+    }
   }
 
-  const isCustomElementTag = isCustomElement(tag, props);
   for (const propKey in props) {
     if (!props.hasOwnProperty(propKey)) {
       continue;
@@ -674,7 +1071,7 @@ export function setInitialProperties(
     if (propValue == null) {
       continue;
     }
-    setProp(domElement, tag, propKey, propValue, isCustomElementTag, props);
+    setProp(domElement, tag, propKey, propValue, props);
   }
 }
 
@@ -775,7 +1172,7 @@ export function diffProperties(
               'Cannot update the "is" prop after it has been initialized.',
             );
           }
-        // eslint-disable-next-line no-fallthrough
+        // Fall through
         default: {
           (updatePayload = updatePayload || []).push(propKey, nextProp);
         }
@@ -800,6 +1197,17 @@ export function updateProperties(
   nextProps: Object,
 ): void {
   switch (tag) {
+    case 'div':
+    case 'span':
+    case 'svg':
+    case 'path':
+    case 'a':
+    case 'g':
+    case 'p':
+    case 'li': {
+      // Fast track the most common tag types
+      break;
+    }
     case 'input': {
       // Update checked *before* name.
       // In the middle of an update, it is possible to have multiple checked.
@@ -837,7 +1245,7 @@ export function updateProperties(
           }
           // defaultChecked and defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, nextProps);
+            setProp(domElement, tag, propKey, propValue, nextProps);
           }
         }
       }
@@ -858,7 +1266,7 @@ export function updateProperties(
           }
           // defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, nextProps);
+            setProp(domElement, tag, propKey, propValue, nextProps);
           }
         }
       }
@@ -891,7 +1299,7 @@ export function updateProperties(
           }
           // defaultValue is ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, nextProps);
+            setProp(domElement, tag, propKey, propValue, nextProps);
           }
         }
       }
@@ -912,7 +1320,7 @@ export function updateProperties(
             break;
           }
           default: {
-            setProp(domElement, tag, propKey, propValue, false, nextProps);
+            setProp(domElement, tag, propKey, propValue, nextProps);
           }
         }
       }
@@ -951,20 +1359,35 @@ export function updateProperties(
           }
           // defaultChecked and defaultValue are ignored by setProp
           default: {
-            setProp(domElement, tag, propKey, propValue, false, nextProps);
+            setProp(domElement, tag, propKey, propValue, nextProps);
           }
         }
       }
       return;
     }
+    default: {
+      if (isCustomElement(tag, nextProps)) {
+        for (let i = 0; i < updatePayload.length; i += 2) {
+          const propKey = updatePayload[i];
+          const propValue = updatePayload[i + 1];
+          setPropOnCustomElement(
+            domElement,
+            tag,
+            propKey,
+            propValue,
+            nextProps,
+          );
+        }
+        return;
+      }
+    }
   }
 
-  const isCustomElementTag = isCustomElement(tag, nextProps);
   // Apply the diff.
   for (let i = 0; i < updatePayload.length; i += 2) {
     const propKey = updatePayload[i];
     const propValue = updatePayload[i + 1];
-    setProp(domElement, tag, propKey, propValue, isCustomElementTag, nextProps);
+    setProp(domElement, tag, propKey, propValue, nextProps);
   }
 }
 
@@ -990,10 +1413,314 @@ function diffHydratedStyles(domElement: Element, value: mixed) {
   if (canDiffStyleForHydrationWarning) {
     const expectedStyle = createDangerousStringForStyles(value);
     const serverValue = domElement.getAttribute('style');
-    if (expectedStyle !== serverValue) {
-      warnForPropDifference('style', serverValue, expectedStyle);
+    warnForPropDifference('style', serverValue, expectedStyle);
+  }
+}
+
+function hydrateAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+      case 'boolean':
+        return;
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+        case 'boolean':
+          break;
+        default: {
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, propKey);
+          }
+          if (serverValue === '' + value) {
+            return;
+          }
+        }
+      }
     }
   }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydrateBooleanAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'function':
+      case 'symbol':
+        return;
+    }
+    if (!value) {
+      return;
+    }
+  } else {
+    switch (typeof value) {
+      case 'function':
+      case 'symbol':
+        break;
+      default: {
+        if (value) {
+          // If this was a boolean, it doesn't matter what the value is
+          // the fact that we have it is the same as the expected.
+          // As long as it's positive.
+          return;
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydrateOverloadedBooleanAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+        return;
+      default:
+        if (value === false) {
+          return;
+        }
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+          break;
+        case 'boolean':
+          if (value === true && serverValue === '') {
+            return;
+          }
+          break;
+        default: {
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, propKey);
+          }
+          if (serverValue === '' + value) {
+            return;
+          }
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydrateBooleanishAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+        return;
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+          break;
+        default: {
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, attributeName);
+          }
+          if (serverValue === '' + (value: any)) {
+            return;
+          }
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydrateNumericAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+      case 'boolean':
+        return;
+      default:
+        if (isNaN(value)) {
+          return;
+        }
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+        case 'boolean':
+          break;
+        default: {
+          if (isNaN(value)) {
+            // We had an attribute but shouldn't have had one, so read it
+            // for the error message.
+            break;
+          }
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, propKey);
+          }
+          if (serverValue === '' + value) {
+            return;
+          }
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydratePositiveNumericAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+      case 'boolean':
+        return;
+      default:
+        if (isNaN(value) || value < 1) {
+          return;
+        }
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+        case 'boolean':
+          break;
+        default: {
+          if (isNaN(value) || value < 1) {
+            // We had an attribute but shouldn't have had one, so read it
+            // for the error message.
+            break;
+          }
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, propKey);
+          }
+          if (serverValue === '' + value) {
+            return;
+          }
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
+}
+
+function hydrateSanitizedAttribute(
+  domElement: Element,
+  propKey: string,
+  attributeName: string,
+  value: any,
+  extraAttributes: Set<string>,
+): void {
+  extraAttributes.delete(attributeName);
+  const serverValue = domElement.getAttribute(attributeName);
+  if (serverValue === null) {
+    switch (typeof value) {
+      case 'undefined':
+      case 'function':
+      case 'symbol':
+      case 'boolean':
+        return;
+    }
+  } else {
+    if (value == null) {
+      // We had an attribute but shouldn't have had one, so read it
+      // for the error message.
+    } else {
+      switch (typeof value) {
+        case 'function':
+        case 'symbol':
+        case 'boolean':
+          break;
+        default: {
+          if (__DEV__) {
+            checkAttributeStringCoercion(value, propKey);
+          }
+          const sanitizedValue = sanitizeURL('' + value);
+          if (serverValue === sanitizedValue) {
+            return;
+          }
+        }
+      }
+    }
+  }
+  warnForPropDifference(propKey, serverValue, value);
 }
 
 function diffHydratedCustomComponent(
@@ -1001,19 +1728,19 @@ function diffHydratedCustomComponent(
   tag: string,
   props: Object,
   parentNamespaceDev: string,
-  extraAttributeNames: Set<string>,
+  extraAttributes: Set<string>,
 ) {
   for (const propKey in props) {
     if (!props.hasOwnProperty(propKey)) {
       continue;
     }
-    const nextProp = props[propKey];
-    if (nextProp == null) {
+    const value = props[propKey];
+    if (value == null) {
       continue;
     }
     if (registrationNameDependencies.hasOwnProperty(propKey)) {
-      if (typeof nextProp !== 'function') {
-        warnForInvalidEventListener(propKey, nextProp);
+      if (typeof value !== 'function') {
+        warnForInvalidEventListener(propKey, value);
       }
       continue;
     }
@@ -1033,17 +1760,15 @@ function diffHydratedCustomComponent(
         continue;
       case 'dangerouslySetInnerHTML':
         const serverHTML = domElement.innerHTML;
-        const nextHtml = nextProp ? nextProp.__html : undefined;
+        const nextHtml = value ? value.__html : undefined;
         if (nextHtml != null) {
           const expectedHTML = normalizeHTML(domElement, nextHtml);
-          if (expectedHTML !== serverHTML) {
-            warnForPropDifference(propKey, serverHTML, expectedHTML);
-          }
+          warnForPropDifference(propKey, serverHTML, expectedHTML);
         }
         continue;
       case 'style':
-        extraAttributeNames.delete(propKey);
-        diffHydratedStyles(domElement, nextProp);
+        extraAttributes.delete(propKey);
+        diffHydratedStyles(domElement, value);
         continue;
       case 'offsetParent':
       case 'offsetTop':
@@ -1054,7 +1779,7 @@ function diffHydratedCustomComponent(
       case 'outerText':
       case 'outerHTML':
         if (enableCustomElementPropertySupport) {
-          extraAttributeNames.delete(propKey.toLowerCase());
+          extraAttributes.delete(propKey.toLowerCase());
           if (__DEV__) {
             console.error(
               'Assignment to read-only property will result in a no-op: `%s`',
@@ -1063,40 +1788,36 @@ function diffHydratedCustomComponent(
           }
           continue;
         }
-      // eslint-disable-next-line no-fallthrough
+      // Fall through
       case 'className':
         if (enableCustomElementPropertySupport) {
           // className is a special cased property on the server to render as an attribute.
-          extraAttributeNames.delete('class');
+          extraAttributes.delete('class');
           const serverValue = getValueForAttributeOnCustomComponent(
             domElement,
             'class',
-            nextProp,
+            value,
           );
-          if (nextProp !== serverValue) {
-            warnForPropDifference('className', serverValue, nextProp);
-          }
+          warnForPropDifference('className', serverValue, value);
           continue;
         }
-      // eslint-disable-next-line no-fallthrough
+      // Fall through
       default: {
         let ownNamespaceDev = parentNamespaceDev;
         if (ownNamespaceDev === HTML_NAMESPACE) {
           ownNamespaceDev = getIntrinsicNamespace(tag);
         }
         if (ownNamespaceDev === HTML_NAMESPACE) {
-          extraAttributeNames.delete(propKey.toLowerCase());
+          extraAttributes.delete(propKey.toLowerCase());
         } else {
-          extraAttributeNames.delete(propKey);
+          extraAttributes.delete(propKey);
         }
         const serverValue = getValueForAttributeOnCustomComponent(
           domElement,
           propKey,
-          nextProp,
+          value,
         );
-        if (nextProp !== serverValue) {
-          warnForPropDifference(propKey, serverValue, nextProp);
-        }
+        warnForPropDifference(propKey, serverValue, value);
       }
     }
   }
@@ -1107,19 +1828,19 @@ function diffHydratedGenericElement(
   tag: string,
   props: Object,
   parentNamespaceDev: string,
-  extraAttributeNames: Set<string>,
+  extraAttributes: Set<string>,
 ) {
   for (const propKey in props) {
     if (!props.hasOwnProperty(propKey)) {
       continue;
     }
-    const nextProp = props[propKey];
-    if (nextProp == null) {
+    const value = props[propKey];
+    if (value == null) {
       continue;
     }
     if (registrationNameDependencies.hasOwnProperty(propKey)) {
-      if (typeof nextProp !== 'function') {
-        warnForInvalidEventListener(propKey, nextProp);
+      if (typeof value !== 'function') {
+        warnForInvalidEventListener(propKey, value);
       }
       continue;
     }
@@ -1142,35 +1863,311 @@ function diffHydratedGenericElement(
         continue;
       case 'dangerouslySetInnerHTML':
         const serverHTML = domElement.innerHTML;
-        const nextHtml = nextProp ? nextProp.__html : undefined;
+        const nextHtml = value ? value.__html : undefined;
         if (nextHtml != null) {
           const expectedHTML = normalizeHTML(domElement, nextHtml);
-          if (expectedHTML !== serverHTML) {
-            warnForPropDifference(propKey, serverHTML, expectedHTML);
-          }
+          warnForPropDifference(propKey, serverHTML, expectedHTML);
         }
+        continue;
+      case 'className':
+        hydrateAttribute(domElement, propKey, 'class', value, extraAttributes);
+        continue;
+      case 'tabIndex':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'tabindex',
+          value,
+          extraAttributes,
+        );
         continue;
       case 'style':
-        extraAttributeNames.delete(propKey);
-        diffHydratedStyles(domElement, nextProp);
+        extraAttributes.delete(propKey);
+        diffHydratedStyles(domElement, value);
         continue;
       case 'multiple': {
-        extraAttributeNames.delete(propKey);
+        extraAttributes.delete(propKey);
         const serverValue = (domElement: any).multiple;
-        if (nextProp !== serverValue) {
-          warnForPropDifference('multiple', serverValue, nextProp);
-        }
+        warnForPropDifference(propKey, serverValue, value);
         continue;
       }
       case 'muted': {
-        extraAttributeNames.delete(propKey);
+        extraAttributes.delete(propKey);
         const serverValue = (domElement: any).muted;
-        if (nextProp !== serverValue) {
-          warnForPropDifference('muted', serverValue, nextProp);
-        }
+        warnForPropDifference(propKey, serverValue, value);
         continue;
       }
-      default:
+      case 'autoFocus': {
+        extraAttributes.delete('autofocus');
+        const serverValue = (domElement: any).autofocus;
+        warnForPropDifference(propKey, serverValue, value);
+        continue;
+      }
+      case 'src':
+      case 'href':
+      case 'action':
+        if (enableFilterEmptyStringAttributesDOM) {
+          if (value === '') {
+            if (__DEV__) {
+              if (propKey === 'src') {
+                console.error(
+                  'An empty string ("") was passed to the %s attribute. ' +
+                    'This may cause the browser to download the whole page again over the network. ' +
+                    'To fix this, either do not render the element at all ' +
+                    'or pass null to %s instead of an empty string.',
+                  propKey,
+                  propKey,
+                );
+              } else {
+                console.error(
+                  'An empty string ("") was passed to the %s attribute. ' +
+                    'To fix this, either do not render the element at all ' +
+                    'or pass null to %s instead of an empty string.',
+                  propKey,
+                  propKey,
+                );
+              }
+            }
+            hydrateSanitizedAttribute(
+              domElement,
+              propKey,
+              propKey,
+              null,
+              extraAttributes,
+            );
+            continue;
+          }
+        }
+        hydrateSanitizedAttribute(
+          domElement,
+          propKey,
+          propKey,
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'formAction':
+        hydrateSanitizedAttribute(
+          domElement,
+          propKey,
+          'formaction',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkHref':
+        hydrateSanitizedAttribute(
+          domElement,
+          propKey,
+          'xlink:href',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'contentEditable': {
+        // Lower-case Booleanish String
+        hydrateBooleanishAttribute(
+          domElement,
+          propKey,
+          'contenteditable',
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'spellCheck': {
+        // Lower-case Booleanish String
+        hydrateBooleanishAttribute(
+          domElement,
+          propKey,
+          'spellcheck',
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'draggable':
+      case 'autoReverse':
+      case 'externalResourcesRequired':
+      case 'focusable':
+      case 'preserveAlpha': {
+        // Case-sensitive Booleanish String
+        hydrateBooleanishAttribute(
+          domElement,
+          propKey,
+          propKey,
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'allowFullScreen':
+      case 'async':
+      case 'autoPlay':
+      case 'controls':
+      case 'default':
+      case 'defer':
+      case 'disabled':
+      case 'disablePictureInPicture':
+      case 'disableRemotePlayback':
+      case 'formNoValidate':
+      case 'hidden':
+      case 'loop':
+      case 'noModule':
+      case 'noValidate':
+      case 'open':
+      case 'playsInline':
+      case 'readOnly':
+      case 'required':
+      case 'reversed':
+      case 'scoped':
+      case 'seamless':
+      case 'itemScope': {
+        // Some of these need to be lower case to remove them from the extraAttributes list.
+        hydrateBooleanAttribute(
+          domElement,
+          propKey,
+          propKey.toLowerCase(),
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'capture':
+      case 'download': {
+        hydrateOverloadedBooleanAttribute(
+          domElement,
+          propKey,
+          propKey,
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'cols':
+      case 'rows':
+      case 'size':
+      case 'span': {
+        hydratePositiveNumericAttribute(
+          domElement,
+          propKey,
+          propKey,
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'rowSpan': {
+        hydrateNumericAttribute(
+          domElement,
+          propKey,
+          'rowspan',
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'start': {
+        hydrateNumericAttribute(
+          domElement,
+          propKey,
+          propKey,
+          value,
+          extraAttributes,
+        );
+        continue;
+      }
+      case 'xHeight':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'x-height',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkActuate':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:actuate',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkArcrole':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:arcrole',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkRole':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:role',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkShow':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:show',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkTitle':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:title',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xlinkType':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xlink:type',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xmlBase':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xml:base',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xmlLang':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xml:lang',
+          value,
+          extraAttributes,
+        );
+        continue;
+      case 'xmlSpace':
+        hydrateAttribute(
+          domElement,
+          propKey,
+          'xml:space',
+          value,
+          extraAttributes,
+        );
+        continue;
+      default: {
         if (
           // shouldIgnoreAttribute
           // We have already filtered out null/undefined and reserved words.
@@ -1180,43 +2177,36 @@ function diffHydratedGenericElement(
         ) {
           continue;
         }
-        const propertyInfo = getPropertyInfo(propKey);
+        const attributeName = getAttributeAlias(propKey);
         let isMismatchDueToBadCasing = false;
-        let serverValue;
-        if (propertyInfo !== null) {
-          extraAttributeNames.delete(propertyInfo.attributeName);
-          serverValue = getValueForProperty(
-            domElement,
-            propKey,
-            nextProp,
-            propertyInfo,
-          );
+        let ownNamespaceDev = parentNamespaceDev;
+        if (ownNamespaceDev === HTML_NAMESPACE) {
+          ownNamespaceDev = getIntrinsicNamespace(tag);
+        }
+        if (ownNamespaceDev === HTML_NAMESPACE) {
+          extraAttributes.delete(attributeName.toLowerCase());
         } else {
-          let ownNamespaceDev = parentNamespaceDev;
-          if (ownNamespaceDev === HTML_NAMESPACE) {
-            ownNamespaceDev = getIntrinsicNamespace(tag);
+          const standardName = getPossibleStandardName(propKey);
+          if (standardName !== null && standardName !== propKey) {
+            // If an SVG prop is supplied with bad casing, it will
+            // be successfully parsed from HTML, but will produce a mismatch
+            // (and would be incorrectly rendered on the client).
+            // However, we already warn about bad casing elsewhere.
+            // So we'll skip the misleading extra mismatch warning in this case.
+            isMismatchDueToBadCasing = true;
+            extraAttributes.delete(standardName);
           }
-          if (ownNamespaceDev === HTML_NAMESPACE) {
-            extraAttributeNames.delete(propKey.toLowerCase());
-          } else {
-            const standardName = getPossibleStandardName(propKey);
-            if (standardName !== null && standardName !== propKey) {
-              // If an SVG prop is supplied with bad casing, it will
-              // be successfully parsed from HTML, but will produce a mismatch
-              // (and would be incorrectly rendered on the client).
-              // However, we already warn about bad casing elsewhere.
-              // So we'll skip the misleading extra mismatch warning in this case.
-              isMismatchDueToBadCasing = true;
-              extraAttributeNames.delete(standardName);
-            }
-            extraAttributeNames.delete(propKey);
-          }
-          serverValue = getValueForAttribute(domElement, propKey, nextProp);
+          extraAttributes.delete(attributeName);
         }
-
-        if (nextProp !== serverValue && !isMismatchDueToBadCasing) {
-          warnForPropDifference(propKey, serverValue, nextProp);
+        const serverValue = getValueForAttribute(
+          domElement,
+          attributeName,
+          value,
+        );
+        if (!isMismatchDueToBadCasing) {
+          warnForPropDifference(propKey, serverValue, value);
         }
+      }
     }
   }
 }
@@ -1346,7 +2336,7 @@ export function diffHydratedProperties(
   }
 
   if (__DEV__ && shouldWarnDev) {
-    const extraAttributeNames: Set<string> = new Set();
+    const extraAttributes: Set<string> = new Set();
     const attributes = domElement.attributes;
     for (let i = 0; i < attributes.length; i++) {
       const name = attributes[i].name.toLowerCase();
@@ -1362,7 +2352,7 @@ export function diffHydratedProperties(
         default:
           // Intentionally use the original name.
           // See discussion in https://github.com/facebook/react/pull/10676.
-          extraAttributeNames.add(attributes[i].name);
+          extraAttributes.add(attributes[i].name);
       }
     }
     if (isCustomElement(tag, props)) {
@@ -1371,7 +2361,7 @@ export function diffHydratedProperties(
         tag,
         props,
         parentNamespaceDev,
-        extraAttributeNames,
+        extraAttributes,
       );
     } else {
       diffHydratedGenericElement(
@@ -1379,14 +2369,11 @@ export function diffHydratedProperties(
         tag,
         props,
         parentNamespaceDev,
-        extraAttributeNames,
+        extraAttributes,
       );
     }
-    if (
-      extraAttributeNames.size > 0 &&
-      props.suppressHydrationWarning !== true
-    ) {
-      warnForExtraAttributes(extraAttributeNames);
+    if (extraAttributes.size > 0 && props.suppressHydrationWarning !== true) {
+      warnForExtraAttributes(extraAttributes);
     }
   }
 
