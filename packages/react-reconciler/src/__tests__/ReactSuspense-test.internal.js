@@ -125,13 +125,9 @@ describe('ReactSuspense', () => {
 
     // Navigate the shell to now render the child content.
     // This should suspend.
-    if (gate(flags => flags.enableSyncDefaultUpdates)) {
-      React.startTransition(() => {
-        root.update(<Foo renderBar={true} />);
-      });
-    } else {
+    React.startTransition(() => {
       root.update(<Foo renderBar={true} />);
-    }
+    });
 
     await waitForAll([
       'Foo',
@@ -176,14 +172,14 @@ describe('ReactSuspense', () => {
 
     // Resolve first Suspense's promise and switch back to the normal view. The
     // second Suspense should still show the placeholder
-    await resolveText('A');
-    await waitForAll(['A']);
+    await act(() => resolveText('A'));
+    assertLog(['A']);
     expect(root).toMatchRenderedOutput('ALoading B...');
 
     // Resolve the second Suspense's promise resolves and switche back to the
     // normal view
-    await resolveText('B');
-    await waitForAll(['B']);
+    await act(() => resolveText('B'));
+    assertLog(['B']);
     expect(root).toMatchRenderedOutput('AB');
   });
 
@@ -298,13 +294,10 @@ describe('ReactSuspense', () => {
     // showing the inner fallback hoping that B will resolve soon enough.
     expect(root).toMatchRenderedOutput('Loading...');
 
+    await act(() => resolveText('B'));
     // By this point, B has resolved.
-    // We're still showing the outer fallback.
-    await resolveText('B');
-    expect(root).toMatchRenderedOutput('Loading...');
-    await waitForAll(['A', 'B']);
-
-    // Then contents of both should pop in together.
+    // The contents of both should pop in together.
+    assertLog(['A', 'B']);
     expect(root).toMatchRenderedOutput('AB');
   });
 
@@ -341,8 +334,8 @@ describe('ReactSuspense', () => {
     jest.advanceTimersByTime(500);
     expect(root).toMatchRenderedOutput('ALoading more...');
 
-    await resolveText('B');
-    await waitForAll(['B']);
+    await act(() => resolveText('B'));
+    assertLog(['B']);
     expect(root).toMatchRenderedOutput('AB');
   });
 
@@ -479,15 +472,15 @@ describe('ReactSuspense', () => {
     });
     await waitForAll(['Suspend! [default]', 'Loading...']);
 
-    await resolveText('default');
-    await waitForAll(['default']);
+    await act(() => resolveText('default'));
+    assertLog(['default']);
     expect(root).toMatchRenderedOutput('default');
 
     await act(() => setValue('new value'));
     assertLog(['Suspend! [new value]', 'Loading...']);
 
-    await resolveText('new value');
-    await waitForAll(['new value']);
+    await act(() => resolveText('new value'));
+    assertLog(['new value']);
     expect(root).toMatchRenderedOutput('new value');
   });
 
@@ -525,15 +518,15 @@ describe('ReactSuspense', () => {
     });
     await waitForAll(['Suspend! [default]', 'Loading...']);
 
-    await resolveText('default');
-    await waitForAll(['default']);
+    await act(() => resolveText('default'));
+    assertLog(['default']);
     expect(root).toMatchRenderedOutput('default');
 
     await act(() => setValue('new value'));
     assertLog(['Suspend! [new value]', 'Loading...']);
 
-    await resolveText('new value');
-    await waitForAll(['new value']);
+    await act(() => resolveText('new value'));
+    assertLog(['new value']);
     expect(root).toMatchRenderedOutput('new value');
   });
 
@@ -569,15 +562,15 @@ describe('ReactSuspense', () => {
     );
     await waitForAll(['Suspend! [default]', 'Loading...']);
 
-    await resolveText('default');
-    await waitForAll(['default']);
+    await act(() => resolveText('default'));
+    assertLog(['default']);
     expect(root).toMatchRenderedOutput('default');
 
     await act(() => setValue('new value'));
     assertLog(['Suspend! [new value]', 'Loading...']);
 
-    await resolveText('new value');
-    await waitForAll(['new value']);
+    await act(() => resolveText('new value'));
+    assertLog(['new value']);
     expect(root).toMatchRenderedOutput('new value');
   });
 
@@ -613,15 +606,15 @@ describe('ReactSuspense', () => {
     );
     await waitForAll(['Suspend! [default]', 'Loading...']);
 
-    await resolveText('default');
-    await waitForAll(['default']);
+    await act(() => resolveText('default'));
+    assertLog(['default']);
     expect(root).toMatchRenderedOutput('default');
 
     await act(() => setValue('new value'));
     assertLog(['Suspend! [new value]', 'Loading...']);
 
-    await resolveText('new value');
-    await waitForAll(['new value']);
+    await act(() => resolveText('new value'));
+    assertLog(['new value']);
     expect(root).toMatchRenderedOutput('new value');
   });
 
@@ -666,8 +659,8 @@ describe('ReactSuspense', () => {
       'destroy layout',
     ]);
 
-    await resolveText('Child 2');
-    await waitForAll(['Child 1', 'Child 2', 'create layout']);
+    await act(() => resolveText('Child 2'));
+    assertLog(['Child 1', 'Child 2', 'create layout']);
     expect(root).toMatchRenderedOutput(['Child 1', 'Child 2'].join(''));
   });
 
@@ -924,8 +917,8 @@ describe('ReactSuspense', () => {
       // Initial render
       await waitForAll(['Suspend! [Step: 1]', 'Loading...']);
 
-      await resolveText('Step: 1');
-      await waitForAll(['Step: 1']);
+      await act(() => resolveText('Step: 1'));
+      assertLog(['Step: 1']);
       expect(root).toMatchRenderedOutput('Step: 1');
 
       // Update that suspends
@@ -940,9 +933,11 @@ describe('ReactSuspense', () => {
       await waitForAll(['Suspend! [Step: 3]']);
       expect(root).toMatchRenderedOutput('Loading...');
 
-      await resolveText('Step: 2');
-      await resolveText('Step: 3');
-      await waitForAll(['Step: 3']);
+      await act(() => {
+        resolveText('Step: 2');
+        resolveText('Step: 3');
+      });
+      assertLog(['Step: 3']);
       expect(root).toMatchRenderedOutput('Step: 3');
     });
 
@@ -1000,8 +995,8 @@ describe('ReactSuspense', () => {
       function App(props) {
         return (
           <Suspense fallback={<Text text="Loading..." />}>
-            <AsyncText ms={1000} text="Child 1" />
-            <AsyncText ms={7000} text="Child 2" />
+            <AsyncText text="Child 1" />
+            <AsyncText text="Child 2" />
           </Suspense>
         );
       }
@@ -1016,8 +1011,8 @@ describe('ReactSuspense', () => {
 
       jest.advanceTimersByTime(6000);
 
-      await resolveText('Child 2');
-      await waitForAll(['Child 1', 'Child 2']);
+      await act(() => resolveText('Child 2'));
+      assertLog(['Child 1', 'Child 2']);
       expect(root).toMatchRenderedOutput(['Child 1', 'Child 2'].join(''));
     });
 

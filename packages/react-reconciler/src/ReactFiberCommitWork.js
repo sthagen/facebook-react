@@ -15,10 +15,10 @@ import type {
   ChildSet,
   UpdatePayload,
   HoistableRoot,
-} from './ReactFiberHostConfig';
+} from './ReactFiberConfig';
 import type {Fiber, FiberRoot} from './ReactInternalTypes';
 import type {Lanes} from './ReactFiberLane';
-import {NoTimestamp, SyncLane} from './ReactFiberLane';
+import {SyncLane} from './ReactFiberLane';
 import type {SuspenseState, RetryQueue} from './ReactFiberSuspenseComponent';
 import type {UpdateQueue} from './ReactFiberClassUpdateQueue';
 import type {FunctionComponentUpdateQueue} from './ReactFiberHooks';
@@ -54,6 +54,7 @@ import {
   enableFloat,
   enableLegacyHidden,
   enableHostSingletons,
+  diffInCommitPhase,
 } from 'shared/ReactFeatureFlags';
 import {
   FunctionComponent,
@@ -162,7 +163,7 @@ import {
   prepareToCommitHoistables,
   suspendInstance,
   suspendResource,
-} from './ReactFiberHostConfig';
+} from './ReactFiberConfig';
 import {
   captureCommitPhaseError,
   resolveRetryWakeable,
@@ -2414,7 +2415,7 @@ export function detachOffscreenInstance(instance: OffscreenInstance): void {
   const root = enqueueConcurrentRenderForLane(fiber, SyncLane);
   if (root !== null) {
     instance._pendingVisibility |= OffscreenDetached;
-    scheduleUpdateOnFiber(root, fiber, SyncLane, NoTimestamp);
+    scheduleUpdateOnFiber(root, fiber, SyncLane);
   }
 }
 
@@ -2434,7 +2435,7 @@ export function attachOffscreenInstance(instance: OffscreenInstance): void {
   const root = enqueueConcurrentRenderForLane(fiber, SyncLane);
   if (root !== null) {
     instance._pendingVisibility &= ~OffscreenDetached;
-    scheduleUpdateOnFiber(root, fiber, SyncLane, NoTimestamp);
+    scheduleUpdateOnFiber(root, fiber, SyncLane);
   }
 }
 
@@ -2774,7 +2775,7 @@ function commitMutationEffectsOnFiber(
             const updatePayload: null | UpdatePayload =
               (finishedWork.updateQueue: any);
             finishedWork.updateQueue = null;
-            if (updatePayload !== null) {
+            if (updatePayload !== null || diffInCommitPhase) {
               try {
                 commitUpdate(
                   instance,

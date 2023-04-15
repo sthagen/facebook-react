@@ -9,7 +9,10 @@
 
 import type {Thenable} from 'shared/ReactTypes';
 
-import {knownServerReferences} from './ReactFlightServerReferenceRegistry';
+import {
+  knownServerReferences,
+  createServerReference,
+} from './ReactFlightServerReferenceRegistry';
 
 import {
   REACT_ELEMENT_TYPE,
@@ -69,6 +72,24 @@ function serializeServerReferenceID(id: number): string {
 
 function serializeSymbolReference(name: string): string {
   return '$S' + name;
+}
+
+function serializeNumber(number: number): string | number {
+  if (Number.isFinite(number)) {
+    if (number === 0 && 1 / number === -Infinity) {
+      return '$-0';
+    } else {
+      return number;
+    }
+  } else {
+    if (number === Infinity) {
+      return '$Infinity';
+    } else if (number === -Infinity) {
+      return '$-Infinity';
+    } else {
+      return '$NaN';
+    }
+  }
 }
 
 function serializeUndefined(): string {
@@ -224,8 +245,12 @@ export function processReply(
       return escapeStringValue(value);
     }
 
-    if (typeof value === 'boolean' || typeof value === 'number') {
+    if (typeof value === 'boolean') {
       return value;
+    }
+
+    if (typeof value === 'number') {
+      return serializeNumber(value);
     }
 
     if (typeof value === 'undefined') {
@@ -290,3 +315,5 @@ export function processReply(
     }
   }
 }
+
+export {createServerReference};
