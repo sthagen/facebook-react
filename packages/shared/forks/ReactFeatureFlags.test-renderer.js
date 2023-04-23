@@ -23,6 +23,7 @@ export const enableCache = true;
 export const enableLegacyCache = __EXPERIMENTAL__;
 export const enableCacheElement = __EXPERIMENTAL__;
 export const enableFetchInstrumentation = true;
+export const enableFormActions = true; // Doesn't affect Test Renderer
 export const disableJavaScriptURLs = false;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
@@ -72,6 +73,9 @@ export const enableFizzExternalRuntime = false;
 export const enableDeferRootSchedulingToMicrotask = true;
 
 export const diffInCommitPhase = true;
+export const enableAsyncActions = false;
+
+export const alwaysThrottleRetries = true;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

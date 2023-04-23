@@ -85,6 +85,8 @@ export const enableLegacyCache = __EXPERIMENTAL__;
 export const enableCacheElement = __EXPERIMENTAL__;
 export const enableFetchInstrumentation = true;
 
+export const enableFormActions = __EXPERIMENTAL__;
+
 export const enableTransitionTracing = false;
 
 // No known bugs, but needs performance testing
@@ -119,6 +121,10 @@ export const enableFizzExternalRuntime = true;
 
 // Performance related test
 export const diffInCommitPhase = __EXPERIMENTAL__;
+
+export const enableAsyncActions = __EXPERIMENTAL__;
+
+export const alwaysThrottleRetries = true;
 
 // -----------------------------------------------------------------------------
 // Chopping Block
