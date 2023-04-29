@@ -39,6 +39,7 @@ describe('ReactDOMForm', () => {
   let Suspense;
   let startTransition;
   let textCache;
+  let useFormStatus;
 
   beforeEach(() => {
     jest.resetModules();
@@ -51,6 +52,7 @@ describe('ReactDOMForm', () => {
     useState = React.useState;
     Suspense = React.Suspense;
     startTransition = React.startTransition;
+    useFormStatus = ReactDOM.experimental_useFormStatus;
     container = document.createElement('div');
     document.body.appendChild(container);
 
@@ -475,7 +477,8 @@ describe('ReactDOMForm', () => {
 
   // @gate enableFormActions
   it('can read the clicked button in the formdata event', async () => {
-    const ref = React.createRef();
+    const inputRef = React.createRef();
+    const buttonRef = React.createRef();
     let button;
     let title;
 
@@ -487,11 +490,13 @@ describe('ReactDOMForm', () => {
     const root = ReactDOMClient.createRoot(container);
     await act(async () => {
       root.render(
-        // TODO: Test button element too.
         <form action={action}>
           <input type="text" name="title" defaultValue="hello" />
           <input type="submit" name="button" value="save" />
-          <input type="submit" name="button" value="delete" ref={ref} />
+          <input type="submit" name="button" value="delete" ref={inputRef} />
+          <button name="button" value="edit" ref={buttonRef}>
+            Edit
+          </button>
         </form>,
       );
     });
@@ -503,10 +508,70 @@ describe('ReactDOMForm', () => {
       }
     });
 
-    await submit(ref.current);
+    await submit(inputRef.current);
 
     expect(button).toBe('delete');
     expect(title).toBe(null);
+
+    await submit(buttonRef.current);
+
+    expect(button).toBe('edit');
+    expect(title).toBe('hello');
+
+    // Ensure that the type field got correctly restored
+    expect(inputRef.current.getAttribute('type')).toBe('submit');
+    expect(buttonRef.current.getAttribute('type')).toBe(null);
+  });
+
+  // @gate enableFormActions
+  it('excludes the submitter name when the submitter is a function action', async () => {
+    const inputRef = React.createRef();
+    const buttonRef = React.createRef();
+    let button;
+
+    function action(formData) {
+      // A function action cannot control the name since it might be controlled by the server
+      // so we need to make sure it doesn't get into the FormData.
+      button = formData.get('button');
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await expect(async () => {
+      await act(async () => {
+        root.render(
+          <form>
+            <input
+              type="submit"
+              name="button"
+              value="delete"
+              ref={inputRef}
+              formAction={action}
+            />
+            <button
+              name="button"
+              value="edit"
+              ref={buttonRef}
+              formAction={action}>
+              Edit
+            </button>
+          </form>,
+        );
+      });
+    }).toErrorDev([
+      'Cannot specify a "name" prop for a button that specifies a function as a formAction.',
+    ]);
+
+    await submit(inputRef.current);
+
+    expect(button).toBe(null);
+
+    await submit(buttonRef.current);
+
+    expect(button).toBe(null);
+
+    // Ensure that the type field got correctly restored
+    expect(inputRef.current.getAttribute('type')).toBe('submit');
+    expect(buttonRef.current.getAttribute('type')).toBe(null);
   });
 
   // @gate enableFormActions || !__DEV__
@@ -582,10 +647,16 @@ describe('ReactDOMForm', () => {
   it('form actions are transitions', async () => {
     const formRef = React.createRef();
 
+    function Status() {
+      const {pending} = useFormStatus();
+      return pending ? <Text text="Pending..." /> : null;
+    }
+
     function App() {
       const [state, setState] = useState('Initial');
       return (
         <form action={() => setState('Updated')} ref={formRef}>
+          <Status />
           <Suspense fallback={<Text text="Loading..." />}>
             <AsyncText text={state} />
           </Suspense>
@@ -602,8 +673,8 @@ describe('ReactDOMForm', () => {
     // This should suspend because form actions are implicitly wrapped
     // in startTransition.
     await submit(formRef.current);
-    assertLog(['Suspend! [Updated]', 'Loading...']);
-    expect(container.textContent).toBe('Initial');
+    assertLog(['Pending...', 'Suspend! [Updated]', 'Loading...']);
+    expect(container.textContent).toBe('Pending...Initial');
 
     await act(() => resolveText('Updated'));
     assertLog(['Updated']);
@@ -615,10 +686,16 @@ describe('ReactDOMForm', () => {
   it('multiple form actions', async () => {
     const formRef = React.createRef();
 
+    function Status() {
+      const {pending} = useFormStatus();
+      return pending ? <Text text="Pending..." /> : null;
+    }
+
     function App() {
       const [state, setState] = useState(0);
       return (
         <form action={() => setState(n => n + 1)} ref={formRef}>
+          <Status />
           <Suspense fallback={<Text text="Loading..." />}>
             <AsyncText text={'Count: ' + state} />
           </Suspense>
@@ -634,8 +711,8 @@ describe('ReactDOMForm', () => {
 
     // Update
     await submit(formRef.current);
-    assertLog(['Suspend! [Count: 1]', 'Loading...']);
-    expect(container.textContent).toBe('Count: 0');
+    assertLog(['Pending...', 'Suspend! [Count: 1]', 'Loading...']);
+    expect(container.textContent).toBe('Pending...Count: 0');
 
     await act(() => resolveText('Count: 1'));
     assertLog(['Count: 1']);
@@ -643,8 +720,8 @@ describe('ReactDOMForm', () => {
 
     // Update again
     await submit(formRef.current);
-    assertLog(['Suspend! [Count: 2]', 'Loading...']);
-    expect(container.textContent).toBe('Count: 1');
+    assertLog(['Pending...', 'Suspend! [Count: 2]', 'Loading...']);
+    expect(container.textContent).toBe('Pending...Count: 1');
 
     await act(() => resolveText('Count: 2'));
     assertLog(['Count: 2']);
@@ -654,6 +731,11 @@ describe('ReactDOMForm', () => {
   // @gate enableFormActions
   it('form actions can be asynchronous', async () => {
     const formRef = React.createRef();
+
+    function Status() {
+      const {pending} = useFormStatus();
+      return pending ? <Text text="Pending..." /> : null;
+    }
 
     function App() {
       const [state, setState] = useState('Initial');
@@ -665,6 +747,7 @@ describe('ReactDOMForm', () => {
             startTransition(() => setState('Updated'));
           }}
           ref={formRef}>
+          <Status />
           <Suspense fallback={<Text text="Loading..." />}>
             <AsyncText text={state} />
           </Suspense>
@@ -679,11 +762,15 @@ describe('ReactDOMForm', () => {
     expect(container.textContent).toBe('Initial');
 
     await submit(formRef.current);
-    assertLog(['Async action started']);
+    assertLog(['Async action started', 'Pending...']);
 
     await act(() => resolveText('Wait'));
     assertLog(['Suspend! [Updated]', 'Loading...']);
-    expect(container.textContent).toBe('Initial');
+    expect(container.textContent).toBe('Pending...Initial');
+
+    await act(() => resolveText('Updated'));
+    assertLog(['Updated']);
+    expect(container.textContent).toBe('Updated');
   });
 
   it('sync errors in form actions can be captured by an error boundary', async () => {
@@ -782,5 +869,57 @@ describe('ReactDOMForm', () => {
     await act(() => resolveText('Wait'));
     assertLog(['Oh no!', 'Oh no!']);
     expect(container.textContent).toBe('Oh no!');
+  });
+
+  // @gate enableFormActions
+  // @gate enableAsyncActions
+  it('useFormStatus reads the status of a pending form action', async () => {
+    const formRef = React.createRef();
+
+    function Status() {
+      const {pending, data, action, method} = useFormStatus();
+      if (!pending) {
+        return <Text text="No pending action" />;
+      } else {
+        const foo = data.get('foo');
+        return (
+          <Text
+            text={`Pending action ${action.name}: foo is ${foo}, method is ${method}`}
+          />
+        );
+      }
+    }
+
+    async function myAction() {
+      Scheduler.log('Async action started');
+      await getText('Wait');
+      Scheduler.log('Async action finished');
+    }
+
+    function App() {
+      return (
+        <form action={myAction} ref={formRef}>
+          <input type="text" name="foo" defaultValue="bar" />
+          <Status />
+        </form>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<App />));
+    assertLog(['No pending action']);
+    expect(container.textContent).toBe('No pending action');
+
+    await submit(formRef.current);
+    assertLog([
+      'Async action started',
+      'Pending action myAction: foo is bar, method is get',
+    ]);
+    expect(container.textContent).toBe(
+      'Pending action myAction: foo is bar, method is get',
+    );
+
+    await act(() => resolveText('Wait'));
+    assertLog(['Async action finished', 'No pending action']);
   });
 });

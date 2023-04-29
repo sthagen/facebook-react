@@ -279,7 +279,7 @@ import {
   requestTransitionLane,
 } from './ReactFiberRootScheduler';
 import {getMaskedContext, getUnmaskedContext} from './ReactFiberContext';
-import {peekAsyncActionContext} from './ReactFiberAsyncAction';
+import {peekEntangledActionLane} from './ReactFiberAsyncAction';
 
 const PossiblyWeakMap = typeof WeakMap === 'function' ? WeakMap : Map;
 
@@ -632,10 +632,10 @@ export function requestUpdateLane(fiber: Fiber): Lane {
       transition._updatedFibers.add(fiber);
     }
 
-    const asyncAction = peekAsyncActionContext();
-    return asyncAction !== null
+    const actionScopeLane = peekEntangledActionLane();
+    return actionScopeLane !== NoLane
       ? // We're inside an async action scope. Reuse the same lane.
-        asyncAction.lane
+        actionScopeLane
       : // We may or may not be inside an async action scope. If we are, this
         // is the first update in that scope. Either way, we need to get a
         // fresh transition lane.
@@ -1504,7 +1504,7 @@ function resetWorkInProgressStack() {
   } else {
     // Work-in-progress is in suspended state. Reset the work loop and unwind
     // both the suspended fiber and all its parents.
-    resetSuspendedWorkLoopOnUnwind();
+    resetSuspendedWorkLoopOnUnwind(workInProgress);
     interruptedWork = workInProgress;
   }
   while (interruptedWork !== null) {
@@ -1563,10 +1563,10 @@ function prepareFreshStack(root: FiberRoot, lanes: Lanes): Fiber {
   return rootWorkInProgress;
 }
 
-function resetSuspendedWorkLoopOnUnwind() {
+function resetSuspendedWorkLoopOnUnwind(fiber: Fiber) {
   // Reset module-level state that was set during the render phase.
   resetContextDependencies();
-  resetHooksOnUnwind();
+  resetHooksOnUnwind(fiber);
   resetChildReconcilerOnUnwind();
 }
 
@@ -2337,7 +2337,7 @@ function replaySuspendedUnitOfWork(unitOfWork: Fiber): void {
       // is to reuse uncached promises, but we happen to know that the only
       // promises that a host component might suspend on are definitely cached
       // because they are controlled by us. So don't bother.
-      resetHooksOnUnwind();
+      resetHooksOnUnwind(unitOfWork);
       // Fallthrough to the next branch.
     }
     default: {
@@ -2383,7 +2383,7 @@ function throwAndUnwindWorkLoop(unitOfWork: Fiber, thrownValue: mixed) {
   //
   // Return to the normal work loop. This will unwind the stack, and potentially
   // result in showing a fallback.
-  resetSuspendedWorkLoopOnUnwind();
+  resetSuspendedWorkLoopOnUnwind(unitOfWork);
 
   const returnFiber = unitOfWork.return;
   if (returnFiber === null || workInProgressRoot === null) {
@@ -3744,7 +3744,7 @@ if (__DEV__ && replayFailedUnitOfWorkWithInvokeGuardedCallback) {
       // same fiber again.
 
       // Unwind the failed stack frame
-      resetSuspendedWorkLoopOnUnwind();
+      resetSuspendedWorkLoopOnUnwind(unitOfWork);
       unwindInterruptedWork(current, unitOfWork, workInProgressRootRenderLanes);
 
       // Restore the original properties of the fiber.

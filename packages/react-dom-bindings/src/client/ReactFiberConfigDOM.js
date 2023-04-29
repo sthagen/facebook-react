@@ -18,7 +18,9 @@ import type {
 } from 'react-reconciler/src/ReactTestSelectors';
 import type {ReactScopeInstance} from 'shared/ReactTypes';
 import type {AncestorInfoDev} from './validateDOMNesting';
+import type {FormStatus} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
 
+import {NotPending} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
 import {getCurrentRootHostContainer} from 'react-reconciler/src/ReactFiberHostContext';
 import {DefaultEventPriority} from 'react-reconciler/src/ReactEventPriorities';
 // TODO: Remove this deep import when we delete the legacy root API
@@ -102,6 +104,7 @@ import {
   getValueDescriptorExpectingObjectForWarning,
   getValueDescriptorExpectingEnumForWarning,
 } from '../shared/ReactDOMResourceValidation';
+import escapeSelectorAttributeValueInsideDoubleQuotes from './escapeSelectorAttributeValueInsideDoubleQuotes';
 
 export type Type = string;
 export type Props = {
@@ -162,6 +165,8 @@ export type ChildSet = void; // Unused
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
 export type RendererInspectionConfig = $ReadOnly<{}>;
+
+export type TransitionStatus = FormStatus;
 
 type SelectionInformation = {
   focusedElem: null | HTMLElement,
@@ -2137,8 +2142,12 @@ function preload(href: string, options: PreloadOptions) {
     const as = options.as;
     const limitedEscapedHref =
       escapeSelectorAttributeValueInsideDoubleQuotes(href);
-    const preloadKey = `link[rel="preload"][as="${as}"][href="${limitedEscapedHref}"]`;
-    let key = preloadKey;
+    const preloadSelector = `link[rel="preload"][as="${as}"][href="${limitedEscapedHref}"]`;
+
+    // Some preloads are keyed under their selector. This happens when the preload is for
+    // an arbitrary type. Other preloads are keyed under the resource key they represent a preload for.
+    // Here we figure out which key to use to determine if we have a preload already.
+    let key = preloadSelector;
     switch (as) {
       case 'style':
         key = getStyleKey(href);
@@ -2151,7 +2160,20 @@ function preload(href: string, options: PreloadOptions) {
       const preloadProps = preloadPropsFromPreloadOptions(href, as, options);
       preloadPropsMap.set(key, preloadProps);
 
-      if (null === ownerDocument.querySelector(preloadKey)) {
+      if (null === ownerDocument.querySelector(preloadSelector)) {
+        if (
+          as === 'style' &&
+          ownerDocument.querySelector(getStylesheetSelectorFromKey(key))
+        ) {
+          // We already have a stylesheet for this key. We don't need to preload it.
+          return;
+        } else if (
+          as === 'script' &&
+          ownerDocument.querySelector(getScriptSelectorFromKey(key))
+        ) {
+          // We already have a stylesheet for this key. We don't need to preload it.
+          return;
+        }
         const instance = ownerDocument.createElement('link');
         setInitialProperties(instance, 'link', preloadProps);
         markNodeAsHoistable(instance);
@@ -2181,6 +2203,7 @@ type PreinitOptions = {
   precedence?: string,
   crossOrigin?: string,
   integrity?: string,
+  nonce?: string,
 };
 function preinit(href: string, options: PreinitOptions) {
   if (!enableFloat) {
@@ -2333,6 +2356,7 @@ function scriptPropsFromPreinitOptions(
     async: true,
     crossOrigin: options.crossOrigin,
     integrity: options.integrity,
+    nonce: options.nonce,
   };
 }
 
@@ -2478,11 +2502,13 @@ function styleTagPropsFromRawProps(
 function getStyleKey(href: string) {
   const limitedEscapedHref =
     escapeSelectorAttributeValueInsideDoubleQuotes(href);
-  return `href~="${limitedEscapedHref}"`;
+  return `href="${limitedEscapedHref}"`;
 }
 
-function getStyleTagSelectorFromKey(key: string) {
-  return `style[data-${key}]`;
+function getStyleTagSelector(href: string) {
+  const limitedEscapedHref =
+    escapeSelectorAttributeValueInsideDoubleQuotes(href);
+  return `style[data-href~="${limitedEscapedHref}"]`;
 }
 
 function getStylesheetSelectorFromKey(key: string) {
@@ -2567,11 +2593,10 @@ export function acquireResource(
     switch (resource.type) {
       case 'style': {
         const qualifiedProps: StyleTagQualifyingProps = props;
-        const key = getStyleKey(qualifiedProps.href);
 
         // Attempt to hydrate instance from DOM
         let instance: null | Instance = hoistableRoot.querySelector(
-          getStyleTagSelectorFromKey(key),
+          getStyleTagSelector(qualifiedProps.href),
         );
         if (instance) {
           resource.instance = instance;
@@ -2950,19 +2975,6 @@ export function mountHoistable(
 
 export function unmountHoistable(instance: Instance): void {
   (instance.parentNode: any).removeChild(instance);
-}
-
-// When passing user input into querySelector(All) the embedded string must not alter
-// the semantics of the query. This escape function is safe to use when we know the
-// provided value is going to be wrapped in double quotes as part of an attribute selector
-// Do not use it anywhere else
-// we escape double quotes and backslashes
-const escapeSelectorAttributeValueInsideDoubleQuotesRegex = /[\n\"\\]/g;
-function escapeSelectorAttributeValueInsideDoubleQuotes(value: string): string {
-  return value.replace(
-    escapeSelectorAttributeValueInsideDoubleQuotesRegex,
-    ch => '\\' + ch.charCodeAt(0).toString(16),
-  );
 }
 
 export function isHostHoistableType(
@@ -3442,3 +3454,5 @@ function insertStylesheetIntoRoot(
   }
   resource.state.loading |= Inserted;
 }
+
+export const NotPendingTransition: TransitionStatus = NotPending;

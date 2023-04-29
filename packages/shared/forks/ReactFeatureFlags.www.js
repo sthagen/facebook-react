@@ -51,7 +51,6 @@ export const enableSuspenseAvoidThisFallbackFizz = false;
 export const disableSchedulerTimeoutInWorkLoop = false;
 export const enableCPUSuspense = true;
 export const enableFloat = true;
-export const enableUseHook = true;
 export const enableUseMemoCacheHook = true;
 export const enableUseEffectEventHook = true;
 export const enableHostSingletons = true;
@@ -74,7 +73,7 @@ export const enableLegacyCache = true;
 export const enableCacheElement = true;
 export const enableFetchInstrumentation = false;
 
-export const enableFormActions = true;
+export const enableFormActions = false;
 
 export const disableJavaScriptURLs = true;
 

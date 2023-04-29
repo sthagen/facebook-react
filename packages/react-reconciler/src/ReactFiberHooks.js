@@ -27,7 +27,9 @@ import type {
 import type {Lanes, Lane} from './ReactFiberLane';
 import type {HookFlags} from './ReactHookEffectTags';
 import type {Flags} from './ReactFiberFlags';
+import type {TransitionStatus} from './ReactFiberConfig';
 
+import {NotPendingTransition as NoPendingHostTransition} from './ReactFiberConfig';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
   enableDebugTracing,
@@ -37,7 +39,6 @@ import {
   enableLazyContextPropagation,
   enableUseMutableSource,
   enableTransitionTracing,
-  enableUseHook,
   enableUseMemoCacheHook,
   enableUseEffectEventHook,
   enableLegacyCache,
@@ -147,6 +148,7 @@ import {
 import type {ThenableState} from './ReactFiberThenable';
 import type {BatchConfigTransition} from './ReactFiberTracingMarkerComponent';
 import {requestAsyncActionContext} from './ReactFiberAsyncAction';
+import {HostTransitionContext} from './ReactFiberHostContext';
 
 const {ReactCurrentDispatcher, ReactCurrentBatchConfig} = ReactSharedInternals;
 
@@ -709,6 +711,9 @@ function renderWithHooksAgain<Props, SecondArg>(
   //
   // Keep rendering in a loop for as long as render phase updates continue to
   // be scheduled. Use a counter to prevent infinite loops.
+
+  currentlyRenderingFiber = workInProgress;
+
   let numberOfReRenders: number = 0;
   let children;
   do {
@@ -758,9 +763,9 @@ export function renderTransitionAwareHostComponentWithHooks(
   current: Fiber | null,
   workInProgress: Fiber,
   lanes: Lanes,
-): boolean {
+): TransitionStatus {
   if (!(enableFormActions && enableAsyncActions)) {
-    return false;
+    throw new Error('Not implemented.');
   }
   return renderWithHooks(
     current,
@@ -772,13 +777,19 @@ export function renderTransitionAwareHostComponentWithHooks(
   );
 }
 
-export function TransitionAwareHostComponent(): boolean {
+export function TransitionAwareHostComponent(): TransitionStatus {
   if (!(enableFormActions && enableAsyncActions)) {
-    return false;
+    throw new Error('Not implemented.');
   }
   const dispatcher = ReactCurrentDispatcher.current;
-  const [isPending] = dispatcher.useTransition();
-  return isPending;
+  const [maybeThenable] = dispatcher.useState();
+  if (typeof maybeThenable.then === 'function') {
+    const thenable: Thenable<TransitionStatus> = (maybeThenable: any);
+    return useThenable(thenable);
+  } else {
+    const status: TransitionStatus = maybeThenable;
+    return status;
+  }
 }
 
 export function checkDidRenderIdHook(): boolean {
@@ -818,13 +829,14 @@ export function resetHooksAfterThrow(): void {
   //
   // It should only reset things like the current dispatcher, to prevent hooks
   // from being called outside of a component.
+  currentlyRenderingFiber = (null: any);
 
   // We can assume the previous dispatcher is always this one, since we set it
   // at the beginning of the render phase and there's no re-entrance.
   ReactCurrentDispatcher.current = ContextOnlyDispatcher;
 }
 
-export function resetHooksOnUnwind(): void {
+export function resetHooksOnUnwind(workInProgress: Fiber): void {
   if (didScheduleRenderPhaseUpdate) {
     // There were render phase updates. These are only valid for this render
     // phase, which we are now aborting. Remove the updates from the queues so
@@ -834,7 +846,7 @@ export function resetHooksOnUnwind(): void {
     // Only reset the updates from the queue if it has a clone. If it does
     // not have a clone, that means it wasn't processed, and the updates were
     // scheduled before we entered the render phase.
-    let hook: Hook | null = currentlyRenderingFiber.memoizedState;
+    let hook: Hook | null = workInProgress.memoizedState;
     while (hook !== null) {
       const queue = hook.queue;
       if (queue !== null) {
@@ -2432,8 +2444,10 @@ function updateDeferredValueImpl<T>(hook: Hook, prevValue: T, value: T): T {
   }
 }
 
-function startTransition(
-  setPending: (Thenable<boolean> | boolean) => void,
+function startTransition<S>(
+  pendingState: S,
+  finishedState: S,
+  setPending: (Thenable<S> | S) => void,
   callback: () => mixed,
   options?: StartTransitionOptions,
 ): void {
@@ -2444,7 +2458,7 @@ function startTransition(
 
   const prevTransition = ReactCurrentBatchConfig.transition;
   ReactCurrentBatchConfig.transition = null;
-  setPending(true);
+  setPending(pendingState);
   const currentTransition = (ReactCurrentBatchConfig.transition =
     ({}: BatchConfigTransition));
 
@@ -2463,15 +2477,18 @@ function startTransition(
     if (enableAsyncActions) {
       const returnValue = callback();
 
-      // `isPending` is either `false` or a thenable that resolves to `false`,
-      // depending on whether the action scope is an async function. In the
-      // async case, the resulting render will suspend until the async action
-      // scope has finished.
-      const isPending = requestAsyncActionContext(returnValue);
-      setPending(isPending);
+      // This is either `finishedState` or a thenable that resolves to
+      // `finishedState`, depending on whether the action scope is an async
+      // function. In the async case, the resulting render will suspend until
+      // the async action scope has finished.
+      const maybeThenable = requestAsyncActionContext(
+        returnValue,
+        finishedState,
+      );
+      setPending(maybeThenable);
     } else {
       // Async actions are not enabled.
-      setPending(false);
+      setPending(finishedState);
       callback();
     }
   } catch (error) {
@@ -2479,7 +2496,7 @@ function startTransition(
       // This is a trick to get the `useTransition` hook to rethrow the error.
       // When it unwraps the thenable with the `use` algorithm, the error
       // will be thrown.
-      const rejectedThenable: RejectedThenable<boolean> = {
+      const rejectedThenable: RejectedThenable<S> = {
         then() {},
         status: 'rejected',
         reason: error,
@@ -2513,6 +2530,7 @@ function startTransition(
 
 export function startHostTransition<F>(
   formFiber: Fiber,
+  pendingState: TransitionStatus,
   callback: F => mixed,
   formData: F,
 ): void {
@@ -2541,46 +2559,32 @@ export function startHostTransition<F>(
     // it was stateful all along so we can reuse most of the implementation
     // for function components and useTransition.
     //
-    // Create the initial hooks used by useTransition. This is essentially an
-    // inlined version of mountTransition.
+    // Create the state hook used by TransitionAwareHostComponent. This is
+    // essentially an inlined version of mountState.
     const queue: UpdateQueue<
-      Thenable<boolean> | boolean,
-      Thenable<boolean> | boolean,
+      Thenable<TransitionStatus> | TransitionStatus,
+      Thenable<TransitionStatus> | TransitionStatus,
     > = {
       pending: null,
       lanes: NoLanes,
       dispatch: null,
       lastRenderedReducer: basicStateReducer,
-      lastRenderedState: false,
+      lastRenderedState: NoPendingHostTransition,
     };
     const stateHook: Hook = {
-      memoizedState: false,
-      baseState: false,
+      memoizedState: NoPendingHostTransition,
+      baseState: NoPendingHostTransition,
       baseQueue: null,
       queue: queue,
       next: null,
     };
 
-    const dispatch: (Thenable<boolean> | boolean) => void =
+    const dispatch: (Thenable<TransitionStatus> | TransitionStatus) => void =
       (dispatchSetState.bind(null, formFiber, queue): any);
     setPending = queue.dispatch = dispatch;
 
-    // TODO: The only reason this second hook exists is to save a reference to
-    // the `dispatch` function. But we already store this on the state hook. So
-    // we can cheat and read it from there. Need to make this change to the
-    // regular `useTransition` implementation, too.
-    const transitionHook: Hook = {
-      memoizedState: dispatch,
-      baseState: null,
-      baseQueue: null,
-      queue: null,
-      next: null,
-    };
-
-    stateHook.next = transitionHook;
-
-    // Add the initial list of hooks to both fiber alternates. The idea is that
-    // the fiber had these hooks all along.
+    // Add the state hook to both fiber alternates. The idea is that the fiber
+    // had this hook all along.
     formFiber.memoizedState = stateHook;
     const alternate = formFiber.alternate;
     if (alternate !== null) {
@@ -2588,13 +2592,15 @@ export function startHostTransition<F>(
     }
   } else {
     // This fiber was already upgraded to be stateful.
-    const transitionHook: Hook = formFiber.memoizedState.next;
-    const dispatch: (Thenable<boolean> | boolean) => void =
-      transitionHook.memoizedState;
+    const stateHook: Hook = formFiber.memoizedState;
+    const dispatch: (Thenable<TransitionStatus> | TransitionStatus) => void =
+      stateHook.queue.dispatch;
     setPending = dispatch;
   }
 
   startTransition(
+    pendingState,
+    NoPendingHostTransition,
     setPending,
     // TODO: We can avoid this extra wrapper, somehow. Figure out layering
     // once more of this function is implemented.
@@ -2608,7 +2614,7 @@ function mountTransition(): [
 ] {
   const [, setPending] = mountState((false: Thenable<boolean> | boolean));
   // The `start` method never changes.
-  const start = startTransition.bind(null, setPending);
+  const start = startTransition.bind(null, true, false, setPending);
   const hook = mountWorkInProgressHook();
   hook.memoizedState = start;
   return [false, start];
@@ -2642,6 +2648,14 @@ function rerenderTransition(): [
       : // This will suspend until the async action scope has finished.
         useThenable(booleanOrThenable);
   return [isPending, start];
+}
+
+function useHostTransitionStatus(): TransitionStatus {
+  if (!(enableFormActions && enableAsyncActions)) {
+    throw new Error('Not implemented.');
+  }
+  const status: TransitionStatus | null = readContext(HostTransitionContext);
+  return status !== null ? status : NoPendingHostTransition;
 }
 
 function mountId(): string {
@@ -2944,6 +2958,7 @@ function markUpdateInDevTools<A>(fiber: Fiber, lane: Lane, action: A): void {
 export const ContextOnlyDispatcher: Dispatcher = {
   readContext,
 
+  use,
   useCallback: throwInvalidHookError,
   useContext: throwInvalidHookError,
   useEffect: throwInvalidHookError,
@@ -2964,19 +2979,21 @@ export const ContextOnlyDispatcher: Dispatcher = {
 if (enableCache) {
   (ContextOnlyDispatcher: Dispatcher).useCacheRefresh = throwInvalidHookError;
 }
-if (enableUseHook) {
-  (ContextOnlyDispatcher: Dispatcher).use = throwInvalidHookError;
-}
 if (enableUseMemoCacheHook) {
   (ContextOnlyDispatcher: Dispatcher).useMemoCache = throwInvalidHookError;
 }
 if (enableUseEffectEventHook) {
   (ContextOnlyDispatcher: Dispatcher).useEffectEvent = throwInvalidHookError;
 }
+if (enableFormActions && enableAsyncActions) {
+  (ContextOnlyDispatcher: Dispatcher).useHostTransitionStatus =
+    throwInvalidHookError;
+}
 
 const HooksDispatcherOnMount: Dispatcher = {
   readContext,
 
+  use,
   useCallback: mountCallback,
   useContext: readContext,
   useEffect: mountEffect,
@@ -2997,18 +3014,20 @@ const HooksDispatcherOnMount: Dispatcher = {
 if (enableCache) {
   (HooksDispatcherOnMount: Dispatcher).useCacheRefresh = mountRefresh;
 }
-if (enableUseHook) {
-  (HooksDispatcherOnMount: Dispatcher).use = use;
-}
 if (enableUseMemoCacheHook) {
   (HooksDispatcherOnMount: Dispatcher).useMemoCache = useMemoCache;
 }
 if (enableUseEffectEventHook) {
   (HooksDispatcherOnMount: Dispatcher).useEffectEvent = mountEvent;
 }
+if (enableFormActions && enableAsyncActions) {
+  (HooksDispatcherOnMount: Dispatcher).useHostTransitionStatus =
+    useHostTransitionStatus;
+}
 const HooksDispatcherOnUpdate: Dispatcher = {
   readContext,
 
+  use,
   useCallback: updateCallback,
   useContext: readContext,
   useEffect: updateEffect,
@@ -3032,16 +3051,18 @@ if (enableCache) {
 if (enableUseMemoCacheHook) {
   (HooksDispatcherOnUpdate: Dispatcher).useMemoCache = useMemoCache;
 }
-if (enableUseHook) {
-  (HooksDispatcherOnUpdate: Dispatcher).use = use;
-}
 if (enableUseEffectEventHook) {
   (HooksDispatcherOnUpdate: Dispatcher).useEffectEvent = updateEvent;
+}
+if (enableFormActions && enableAsyncActions) {
+  (HooksDispatcherOnUpdate: Dispatcher).useHostTransitionStatus =
+    useHostTransitionStatus;
 }
 
 const HooksDispatcherOnRerender: Dispatcher = {
   readContext,
 
+  use,
   useCallback: updateCallback,
   useContext: readContext,
   useEffect: updateEffect,
@@ -3062,14 +3083,15 @@ const HooksDispatcherOnRerender: Dispatcher = {
 if (enableCache) {
   (HooksDispatcherOnRerender: Dispatcher).useCacheRefresh = updateRefresh;
 }
-if (enableUseHook) {
-  (HooksDispatcherOnRerender: Dispatcher).use = use;
-}
 if (enableUseMemoCacheHook) {
   (HooksDispatcherOnRerender: Dispatcher).useMemoCache = useMemoCache;
 }
 if (enableUseEffectEventHook) {
   (HooksDispatcherOnRerender: Dispatcher).useEffectEvent = updateEvent;
+}
+if (enableFormActions && enableAsyncActions) {
+  (HooksDispatcherOnRerender: Dispatcher).useHostTransitionStatus =
+    useHostTransitionStatus;
 }
 
 let HooksDispatcherOnMountInDEV: Dispatcher | null = null;
@@ -3103,6 +3125,7 @@ if (__DEV__) {
     readContext<T>(context: ReactContext<T>): T {
       return readContext(context);
     },
+    use,
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
       mountHookTypesDev();
@@ -3243,9 +3266,6 @@ if (__DEV__) {
         return mountRefresh();
       };
   }
-  if (enableUseHook) {
-    (HooksDispatcherOnMountInDEV: Dispatcher).use = use;
-  }
   if (enableUseMemoCacheHook) {
     (HooksDispatcherOnMountInDEV: Dispatcher).useMemoCache = useMemoCache;
   }
@@ -3259,11 +3279,16 @@ if (__DEV__) {
         return mountEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (HooksDispatcherOnMountInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   HooksDispatcherOnMountWithHookTypesInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       return readContext(context);
     },
+    use,
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
       updateHookTypesDev();
@@ -3398,9 +3423,6 @@ if (__DEV__) {
         return mountRefresh();
       };
   }
-  if (enableUseHook) {
-    (HooksDispatcherOnMountWithHookTypesInDEV: Dispatcher).use = use;
-  }
   if (enableUseMemoCacheHook) {
     (HooksDispatcherOnMountWithHookTypesInDEV: Dispatcher).useMemoCache =
       useMemoCache;
@@ -3415,11 +3437,16 @@ if (__DEV__) {
         return mountEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (HooksDispatcherOnMountWithHookTypesInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   HooksDispatcherOnUpdateInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       return readContext(context);
     },
+    use,
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
       updateHookTypesDev();
@@ -3557,9 +3584,6 @@ if (__DEV__) {
         return updateRefresh();
       };
   }
-  if (enableUseHook) {
-    (HooksDispatcherOnUpdateInDEV: Dispatcher).use = use;
-  }
   if (enableUseMemoCacheHook) {
     (HooksDispatcherOnUpdateInDEV: Dispatcher).useMemoCache = useMemoCache;
   }
@@ -3573,12 +3597,16 @@ if (__DEV__) {
         return updateEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (HooksDispatcherOnUpdateInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   HooksDispatcherOnRerenderInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       return readContext(context);
     },
-
+    use,
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
       updateHookTypesDev();
@@ -3716,9 +3744,6 @@ if (__DEV__) {
         return updateRefresh();
       };
   }
-  if (enableUseHook) {
-    (HooksDispatcherOnRerenderInDEV: Dispatcher).use = use;
-  }
   if (enableUseMemoCacheHook) {
     (HooksDispatcherOnRerenderInDEV: Dispatcher).useMemoCache = useMemoCache;
   }
@@ -3732,11 +3757,19 @@ if (__DEV__) {
         return updateEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (HooksDispatcherOnRerenderInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   InvalidNestedHooksDispatcherOnMountInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       warnInvalidContextAccess();
       return readContext(context);
+    },
+    use<T>(usable: Usable<T>): T {
+      warnInvalidHookAccess();
+      return use(usable);
     },
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
@@ -3888,14 +3921,6 @@ if (__DEV__) {
         return mountRefresh();
       };
   }
-  if (enableUseHook) {
-    (InvalidNestedHooksDispatcherOnMountInDEV: Dispatcher).use = function <T>(
-      usable: Usable<T>,
-    ): T {
-      warnInvalidHookAccess();
-      return use(usable);
-    };
-  }
   if (enableUseMemoCacheHook) {
     (InvalidNestedHooksDispatcherOnMountInDEV: Dispatcher).useMemoCache =
       function (size: number): Array<any> {
@@ -3914,11 +3939,19 @@ if (__DEV__) {
         return mountEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (InvalidNestedHooksDispatcherOnMountInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   InvalidNestedHooksDispatcherOnUpdateInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       warnInvalidContextAccess();
       return readContext(context);
+    },
+    use<T>(usable: Usable<T>): T {
+      warnInvalidHookAccess();
+      return use(usable);
     },
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
@@ -4073,14 +4106,6 @@ if (__DEV__) {
         return updateRefresh();
       };
   }
-  if (enableUseHook) {
-    (InvalidNestedHooksDispatcherOnUpdateInDEV: Dispatcher).use = function <T>(
-      usable: Usable<T>,
-    ): T {
-      warnInvalidHookAccess();
-      return use(usable);
-    };
-  }
   if (enableUseMemoCacheHook) {
     (InvalidNestedHooksDispatcherOnUpdateInDEV: Dispatcher).useMemoCache =
       function (size: number): Array<any> {
@@ -4099,13 +4124,20 @@ if (__DEV__) {
         return updateEvent(callback);
       };
   }
+  if (enableFormActions && enableAsyncActions) {
+    (InvalidNestedHooksDispatcherOnUpdateInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
+  }
 
   InvalidNestedHooksDispatcherOnRerenderInDEV = {
     readContext<T>(context: ReactContext<T>): T {
       warnInvalidContextAccess();
       return readContext(context);
     },
-
+    use<T>(usable: Usable<T>): T {
+      warnInvalidHookAccess();
+      return use(usable);
+    },
     useCallback<T>(callback: T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useCallback';
       warnInvalidHookAccess();
@@ -4259,14 +4291,6 @@ if (__DEV__) {
         return updateRefresh();
       };
   }
-  if (enableUseHook) {
-    (InvalidNestedHooksDispatcherOnRerenderInDEV: Dispatcher).use = function <
-      T,
-    >(usable: Usable<T>): T {
-      warnInvalidHookAccess();
-      return use(usable);
-    };
-  }
   if (enableUseMemoCacheHook) {
     (InvalidNestedHooksDispatcherOnRerenderInDEV: Dispatcher).useMemoCache =
       function (size: number): Array<any> {
@@ -4284,5 +4308,9 @@ if (__DEV__) {
         updateHookTypesDev();
         return updateEvent(callback);
       };
+  }
+  if (enableFormActions && enableAsyncActions) {
+    (InvalidNestedHooksDispatcherOnRerenderInDEV: Dispatcher).useHostTransitionStatus =
+      useHostTransitionStatus;
   }
 }

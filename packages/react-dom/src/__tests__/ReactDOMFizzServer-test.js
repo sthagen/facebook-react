@@ -64,7 +64,11 @@ describe('ReactDOMFizzServer', () => {
     });
     streamingContainer = null;
     global.window = jsdom.window;
-    global.document = jsdom.window.document;
+    global.document = global.window.document;
+    global.navigator = global.window.navigator;
+    global.Node = global.window.Node;
+    global.addEventListener = global.window.addEventListener;
+    global.MutationObserver = global.window.MutationObserver;
     container = document.getElementById('container');
 
     Scheduler = require('scheduler');
@@ -5212,7 +5216,6 @@ describe('ReactDOMFizzServer', () => {
     });
   });
 
-  // @gate enableUseHook
   it('basic use(promise)', async () => {
     const promiseA = Promise.resolve('A');
     const promiseB = Promise.resolve('B');
@@ -5258,7 +5261,6 @@ describe('ReactDOMFizzServer', () => {
     expect(getVisibleChildren(container)).toEqual('ABC');
   });
 
-  // @gate enableUseHook
   it('basic use(context)', async () => {
     const ContextA = React.createContext('default');
     const ContextB = React.createContext('B');
@@ -5303,7 +5305,6 @@ describe('ReactDOMFizzServer', () => {
     expect(getVisibleChildren(container)).toEqual(['AB', 'C']);
   });
 
-  // @gate enableUseHook
   it('use(promise) in multiple components', async () => {
     const promiseA = Promise.resolve('A');
     const promiseB = Promise.resolve('B');
@@ -5357,7 +5358,6 @@ describe('ReactDOMFizzServer', () => {
     expect(getVisibleChildren(container)).toEqual('ABCD');
   });
 
-  // @gate enableUseHook
   it('using a rejected promise will throw', async () => {
     const promiseA = Promise.resolve('A');
     const promiseB = Promise.reject(new Error('Oops!'));
@@ -5443,7 +5443,6 @@ describe('ReactDOMFizzServer', () => {
     }
   });
 
-  // @gate enableUseHook
   it("use a promise that's already been instrumented and resolved", async () => {
     const thenable = {
       status: 'fulfilled',
@@ -5467,7 +5466,6 @@ describe('ReactDOMFizzServer', () => {
     expect(getVisibleChildren(container)).toEqual('Hi');
   });
 
-  // @gate enableUseHook
   it('unwraps thenable that fulfills synchronously without suspending', async () => {
     function App() {
       const thenable = {

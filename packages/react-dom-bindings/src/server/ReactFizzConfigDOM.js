@@ -31,6 +31,8 @@ import type {
   PrecomputedChunk,
 } from 'react-server/src/ReactServerStreamConfig';
 
+import type {FormStatus} from '../shared/ReactDOMFormActions';
+
 import {
   writeChunk,
   writeChunkAndReturn,
@@ -65,6 +67,7 @@ import {
   completeBoundary as completeBoundaryFunction,
   completeBoundaryWithStyles as styleInsertionFunction,
   completeSegment as completeSegmentFunction,
+  formReplaying as formReplayingRuntime,
 } from './fizz-instruction-set/ReactDOMFizzInstructionSetInlineCodeStrings';
 
 import {
@@ -80,6 +83,8 @@ import {
   describeDifferencesForPreloads,
   describeDifferencesForPreloadOverImplicitPreload,
 } from '../shared/ReactDOMResourceValidation';
+
+import {NotPending} from '../shared/ReactDOMFormActions';
 
 import ReactDOMSharedInternals from 'shared/ReactDOMSharedInternals';
 const ReactDOMCurrentDispatcher = ReactDOMSharedInternals.Dispatcher;
@@ -104,11 +109,12 @@ const ScriptStreamingFormat: StreamingFormat = 0;
 const DataStreamingFormat: StreamingFormat = 1;
 
 export type InstructionState = number;
-const NothingSent /*                      */ = 0b0000;
-const SentCompleteSegmentFunction /*      */ = 0b0001;
-const SentCompleteBoundaryFunction /*     */ = 0b0010;
-const SentClientRenderFunction /*         */ = 0b0100;
-const SentStyleInsertionFunction /*       */ = 0b1000;
+const NothingSent /*                      */ = 0b00000;
+const SentCompleteSegmentFunction /*      */ = 0b00001;
+const SentCompleteBoundaryFunction /*     */ = 0b00010;
+const SentClientRenderFunction /*         */ = 0b00100;
+const SentStyleInsertionFunction /*       */ = 0b01000;
+const SentFormReplayingRuntime /*         */ = 0b10000;
 
 // Per response, global state that is not contextual to the rendering subtree.
 export type ResponseState = {
@@ -637,6 +643,7 @@ const actionJavaScriptURL = stringToPrecomputedChunk(
 
 function pushFormActionAttribute(
   target: Array<Chunk | PrecomputedChunk>,
+  responseState: ResponseState,
   formAction: any,
   formEncType: any,
   formMethod: any,
@@ -683,6 +690,7 @@ function pushFormActionAttribute(
       actionJavaScriptURL,
       attributeEnd,
     );
+    injectFormReplayingRuntime(responseState);
   } else {
     // Plain form actions support all the properties, so we have to emit them.
     if (name !== null) {
@@ -1256,9 +1264,30 @@ function pushStartOption(
   return children;
 }
 
+const formReplayingRuntimeScript =
+  stringToPrecomputedChunk(formReplayingRuntime);
+
+function injectFormReplayingRuntime(responseState: ResponseState): void {
+  // If we haven't sent it yet, inject the runtime that tracks submitted JS actions
+  // for later replaying by Fiber. If we use an external runtime, we don't need
+  // to emit anything. It's always used.
+  if (
+    (responseState.instructions & SentFormReplayingRuntime) === NothingSent &&
+    (!enableFizzExternalRuntime || !responseState.externalRuntimeConfig)
+  ) {
+    responseState.instructions |= SentFormReplayingRuntime;
+    responseState.bootstrapChunks.unshift(
+      responseState.startInlineScript,
+      formReplayingRuntimeScript,
+      endInlineScript,
+    );
+  }
+}
+
 function pushStartForm(
   target: Array<Chunk | PrecomputedChunk>,
   props: Object,
+  responseState: ResponseState,
 ): ReactNodeList {
   target.push(startChunkForTag('form'));
 
@@ -1335,6 +1364,7 @@ function pushStartForm(
       actionJavaScriptURL,
       attributeEnd,
     );
+    injectFormReplayingRuntime(responseState);
   } else {
     // Plain form actions support all the properties, so we have to emit them.
     if (formAction !== null) {
@@ -1365,6 +1395,7 @@ function pushStartForm(
 function pushInput(
   target: Array<Chunk | PrecomputedChunk>,
   props: Object,
+  responseState: ResponseState,
 ): ReactNodeList {
   if (__DEV__) {
     checkControlledValueProps('input', props);
@@ -1445,6 +1476,7 @@ function pushInput(
 
   pushFormActionAttribute(
     target,
+    responseState,
     formAction,
     formEncType,
     formMethod,
@@ -1499,6 +1531,7 @@ function pushInput(
 function pushStartButton(
   target: Array<Chunk | PrecomputedChunk>,
   props: Object,
+  responseState: ResponseState,
 ): ReactNodeList {
   target.push(startChunkForTag('button'));
 
@@ -1561,6 +1594,7 @@ function pushStartButton(
 
   pushFormActionAttribute(
     target,
+    responseState,
     formAction,
     formEncType,
     formMethod,
@@ -1870,6 +1904,7 @@ function pushLink(
         if (!resource) {
           const resourceProps = stylesheetPropsFromRawProps(props);
           const preloadResource = resources.preloadsMap.get(key);
+          let state = NoState;
           if (preloadResource) {
             // If we already had a preload we don't want that resource to flush directly.
             // We let the newly created resource govern flushing.
@@ -1878,11 +1913,14 @@ function pushLink(
               resourceProps,
               preloadResource.props,
             );
+            if (preloadResource.state & Flushed) {
+              state = PreloadFlushed;
+            }
           }
           resource = {
             type: 'stylesheet',
             chunks: ([]: Array<Chunk | PrecomputedChunk>),
-            state: NoState,
+            state,
             props: resourceProps,
           };
           resources.stylesMap.set(key, resource);
@@ -2947,11 +2985,11 @@ export function pushStartInstance(
     case 'textarea':
       return pushStartTextArea(target, props);
     case 'input':
-      return pushInput(target, props);
+      return pushInput(target, props, responseState);
     case 'button':
-      return pushStartButton(target, props);
+      return pushStartButton(target, props, responseState);
     case 'form':
-      return pushStartForm(target, props);
+      return pushStartForm(target, props, responseState);
     case 'menuitem':
       return pushStartMenuItem(target, props);
     case 'title':
@@ -3127,7 +3165,7 @@ export function pushEndInstance(
   target.push(endTag1, stringToChunk(type), endTag2);
 }
 
-export function writeCompletedRoot(
+function writeBootstrap(
   destination: Destination,
   responseState: ResponseState,
 ): boolean {
@@ -3137,9 +3175,18 @@ export function writeCompletedRoot(
     writeChunk(destination, bootstrapChunks[i]);
   }
   if (i < bootstrapChunks.length) {
-    return writeChunkAndReturn(destination, bootstrapChunks[i]);
+    const lastChunk = bootstrapChunks[i];
+    bootstrapChunks.length = 0;
+    return writeChunkAndReturn(destination, lastChunk);
   }
   return true;
+}
+
+export function writeCompletedRoot(
+  destination: Destination,
+  responseState: ResponseState,
+): boolean {
+  return writeBootstrap(destination, responseState);
 }
 
 // Structural Nodes
@@ -3599,11 +3646,13 @@ export function writeCompletedBoundaryInstruction(
       writeChunk(destination, completeBoundaryScript3b);
     }
   }
+  let writeMore;
   if (scriptFormat) {
-    return writeChunkAndReturn(destination, completeBoundaryScriptEnd);
+    writeMore = writeChunkAndReturn(destination, completeBoundaryScriptEnd);
   } else {
-    return writeChunkAndReturn(destination, completeBoundaryDataEnd);
+    writeMore = writeChunkAndReturn(destination, completeBoundaryDataEnd);
   }
+  return writeBootstrap(destination, responseState) && writeMore;
 }
 
 const clientRenderScript1Full = stringToPrecomputedChunk(
@@ -3963,12 +4012,9 @@ function flushAllStylesInPreamble(
 }
 
 function preloadLateStyle(this: Destination, resource: StyleResource) {
-  if (__DEV__) {
-    if (resource.state & PreloadFlushed) {
-      console.error(
-        'React encountered a Stylesheet Resource that already flushed a Preload when it was not expected to. This is a bug in React.',
-      );
-    }
+  if (resource.state & PreloadFlushed) {
+    // This resource has already had a preload flushed
+    return;
   }
 
   if (resource.type === 'style') {
@@ -5064,6 +5110,7 @@ type PreinitOptions = {
   precedence?: string,
   crossOrigin?: string,
   integrity?: string,
+  nonce?: string,
 };
 function preinit(href: string, options: PreinitOptions): void {
   if (!enableFloat) {
@@ -5168,10 +5215,15 @@ function preinit(href: string, options: PreinitOptions): void {
           }
         }
         if (!resource) {
+          let state = NoState;
+          const preloadResource = resources.preloadsMap.get(key);
+          if (preloadResource && preloadResource.state & Flushed) {
+            state = PreloadFlushed;
+          }
           resource = {
             type: 'stylesheet',
             chunks: ([]: Array<Chunk | PrecomputedChunk>),
-            state: NoState,
+            state,
             props: stylesheetPropsFromPreinitOptions(href, precedence, options),
           };
           resources.stylesMap.set(key, resource);
@@ -5398,6 +5450,7 @@ function scriptPropsFromPreinitOptions(
     async: true,
     crossOrigin: options.crossOrigin,
     integrity: options.integrity,
+    nonce: options.nonce,
   };
 }
 
@@ -5515,3 +5568,6 @@ function getAsResourceDEV(
     );
   }
 }
+
+export type TransitionStatus = FormStatus;
+export const NotPendingTransition: TransitionStatus = NotPending;

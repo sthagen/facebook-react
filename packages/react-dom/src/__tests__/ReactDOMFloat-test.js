@@ -59,7 +59,11 @@ describe('ReactDOMFloat', () => {
     });
     streamingContainer = null;
     global.window = jsdom.window;
-    global.document = jsdom.window.document;
+    global.document = global.window.document;
+    global.navigator = global.window.navigator;
+    global.Node = global.window.Node;
+    global.addEventListener = global.window.addEventListener;
+    global.MutationObserver = global.window.MutationObserver;
     container = document.getElementById('container');
 
     React = require('react');
@@ -95,7 +99,7 @@ describe('ReactDOMFloat', () => {
     renderOptions = {};
     if (gate(flags => flags.enableFizzExternalRuntime)) {
       renderOptions.unstable_externalRuntimeSrc =
-        'react-dom-bindings/src/server/ReactDOMServerExternalRuntime.js';
+        'react-dom/unstable_server-external-runtime';
     }
   });
 
@@ -3387,6 +3391,166 @@ body {
     );
   });
 
+  it('will not flush a preload for a new rendered Stylesheet Resource if one was already flushed', async () => {
+    function Component() {
+      ReactDOM.preload('foo', {as: 'style'});
+      return (
+        <div>
+          <Suspense fallback="loading...">
+            <BlockedOn value="blocked">
+              <link rel="stylesheet" href="foo" precedence="default" />
+              hello
+            </BlockedOn>
+          </Suspense>
+        </div>
+      );
+    }
+    await act(() => {
+      renderToPipeableStream(
+        <html>
+          <body>
+            <Component />
+          </body>
+        </html>,
+      ).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" as="style" href="foo" />
+        </head>
+        <body>
+          <div>loading...</div>
+        </body>
+      </html>,
+    );
+    await act(() => {
+      resolveText('blocked');
+    });
+    await act(loadStylesheets);
+    assertLog(['load stylesheet: foo']);
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="stylesheet" href="foo" data-precedence="default" />
+          <link rel="preload" as="style" href="foo" />
+        </head>
+        <body>
+          <div>hello</div>
+        </body>
+      </html>,
+    );
+  });
+
+  it('will not flush a preload for a new preinitialized Stylesheet Resource if one was already flushed', async () => {
+    function Component() {
+      ReactDOM.preload('foo', {as: 'style'});
+      return (
+        <div>
+          <Suspense fallback="loading...">
+            <BlockedOn value="blocked">
+              <Preinit />
+              hello
+            </BlockedOn>
+          </Suspense>
+        </div>
+      );
+    }
+
+    function Preinit() {
+      ReactDOM.preinit('foo', {as: 'style'});
+    }
+    await act(() => {
+      renderToPipeableStream(
+        <html>
+          <body>
+            <Component />
+          </body>
+        </html>,
+      ).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" as="style" href="foo" />
+        </head>
+        <body>
+          <div>loading...</div>
+        </body>
+      </html>,
+    );
+    await act(() => {
+      resolveText('blocked');
+    });
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" as="style" href="foo" />
+        </head>
+        <body>
+          <div>hello</div>
+        </body>
+      </html>,
+    );
+  });
+
+  it('will not insert a preload if the underlying resource already exists in the Document', async () => {
+    await act(() => {
+      renderToPipeableStream(
+        <html>
+          <head>
+            <link rel="stylesheet" href="foo" precedence="default" />
+            <script async={true} src="bar" />
+            <link rel="preload" href="baz" as="font" />
+          </head>
+          <body>
+            <div id="container" />
+          </body>
+        </html>,
+      ).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="stylesheet" href="foo" data-precedence="default" />
+          <script async="" src="bar" />
+          <link rel="preload" href="baz" as="font" />
+        </head>
+        <body>
+          <div id="container" />
+        </body>
+      </html>,
+    );
+
+    container = document.getElementById('container');
+
+    function ClientApp() {
+      ReactDOM.preload('foo', {as: 'style'});
+      ReactDOM.preload('bar', {as: 'script'});
+      ReactDOM.preload('baz', {as: 'font'});
+      return 'foo';
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+
+    await clientAct(() => root.render(<ClientApp />));
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="stylesheet" href="foo" data-precedence="default" />
+          <script async="" src="bar" />
+          <link rel="preload" href="baz" as="font" />
+        </head>
+        <body>
+          <div id="container">foo</div>
+        </body>
+      </html>,
+    );
+  });
+
   describe('ReactDOM.prefetchDNS(href)', () => {
     it('creates a dns-prefetch resource when called', async () => {
       function App({url}) {
@@ -4144,6 +4308,106 @@ body {
       }).toErrorDev([
         'ReactDOM.preinit(): For `href` "foo", the options provided conflict with another call to `ReactDOM.preinit("foo", { as: "script", ... })`. React will always use the options it first encounters when preinitializing a hoistable script for a given `href` and any later options will be ignored if different. Try updating all calls to `ReactDOM.preinit()` for a given `href` to use the same options, or only call `ReactDOM.preinit()` once per `href`.\n  "integrity" option value: "some hash", missing from original options\n  "crossOrigin" option value: "anonymous", original option value: "use-credentials"',
       ]);
+    });
+
+    it('accepts a `nonce` option for `as: "script"`', async () => {
+      function Component({src}) {
+        ReactDOM.preinit(src, {as: 'script', nonce: 'R4nD0m'});
+        return 'hello';
+      }
+
+      await act(() => {
+        renderToPipeableStream(
+          <html>
+            <body>
+              <Component src="foo" />
+            </body>
+          </html>,
+          {
+            nonce: 'R4nD0m',
+          },
+        ).pipe(writable);
+      });
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <script async="" src="foo" nonce="R4nD0m" />
+          </head>
+          <body>hello</body>
+        </html>,
+      );
+
+      await clientAct(() => {
+        ReactDOMClient.hydrateRoot(
+          document,
+          <html>
+            <body>
+              <Component src="bar" />
+            </body>
+          </html>,
+        );
+      });
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <script async="" src="foo" nonce="R4nD0m" />
+            <script async="" src="bar" nonce="R4nD0m" />
+          </head>
+          <body>hello</body>
+        </html>,
+      );
+    });
+
+    it('accepts an `integrity` option for `as: "script"`', async () => {
+      function Component({src, hash}) {
+        ReactDOM.preinit(src, {as: 'script', integrity: hash});
+        return 'hello';
+      }
+
+      await act(() => {
+        renderToPipeableStream(
+          <html>
+            <body>
+              <Component src="foo" hash="foo hash" />
+            </body>
+          </html>,
+          {
+            nonce: 'R4nD0m',
+          },
+        ).pipe(writable);
+      });
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <script async="" src="foo" integrity="foo hash" />
+          </head>
+          <body>hello</body>
+        </html>,
+      );
+
+      await clientAct(() => {
+        ReactDOMClient.hydrateRoot(
+          document,
+          <html>
+            <body>
+              <Component src="bar" hash="bar hash" />
+            </body>
+          </html>,
+        );
+      });
+
+      expect(getMeaningfulChildren(document)).toEqual(
+        <html>
+          <head>
+            <script async="" src="foo" integrity="foo hash" />
+            <script async="" src="bar" integrity="bar hash" />
+          </head>
+          <body>hello</body>
+        </html>,
+      );
     });
   });
 

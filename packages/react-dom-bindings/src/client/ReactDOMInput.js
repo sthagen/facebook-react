@@ -18,6 +18,7 @@ import {disableInputAttributeSyncing} from 'shared/ReactFeatureFlags';
 import {checkAttributeStringCoercion} from 'shared/CheckStringCoercion';
 
 import type {ToStringValue} from './ToStringValue';
+import escapeSelectorAttributeValueInsideDoubleQuotes from './escapeSelectorAttributeValueInsideDoubleQuotes';
 
 let didWarnValueDefaultValue = false;
 let didWarnCheckedDefaultChecked = false;
@@ -131,7 +132,6 @@ export function updateInput(
     // Submit/reset inputs need the attribute removed completely to avoid
     // blank-text buttons.
     node.removeAttribute('value');
-    return;
   }
 
   if (disableInputAttributeSyncing) {
@@ -188,7 +188,7 @@ export function updateInput(
     if (__DEV__) {
       checkAttributeStringCoercion(name, 'name');
     }
-    node.name = name;
+    node.name = toString(getToStringValue(name));
   } else {
     node.removeAttribute('name');
   }
@@ -365,7 +365,9 @@ export function restoreControlledInputState(element: Element, props: Object) {
       checkAttributeStringCoercion(name, 'name');
     }
     const group = queryRoot.querySelectorAll(
-      'input[name=' + JSON.stringify('' + name) + '][type="radio"]',
+      'input[name="' +
+        escapeSelectorAttributeValueInsideDoubleQuotes('' + name) +
+        '"][type="radio"]',
     );
 
     for (let i = 0; i < group.length; i++) {

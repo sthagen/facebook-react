@@ -12,6 +12,7 @@ import type {DOMEventName} from '../DOMEventNames';
 import type {DispatchQueue} from '../DOMPluginEventSystem';
 import type {EventSystemFlags} from '../EventSystemFlags';
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
+import type {FormStatus} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
 
 import {getFiberCurrentPropsFromNode} from '../../client/ReactDOMComponentTree';
 import {startHostTransition} from 'react-reconciler/src/ReactFiberReconciler';
@@ -42,7 +43,7 @@ function extractEvents(
   const formInst = maybeTargetInst;
   const form: HTMLFormElement = (nativeEventTarget: any);
   let action = (getFiberCurrentPropsFromNode(form): any).action;
-  const submitter: null | HTMLInputElement | HTMLButtonElement =
+  let submitter: null | HTMLInputElement | HTMLButtonElement =
     (nativeEvent: any).submitter;
   let submitterAction;
   if (submitter) {
@@ -53,6 +54,9 @@ function extractEvents(
     if (submitterAction != null) {
       // The submitter overrides the form action.
       action = submitterAction;
+      // If the action is a function, we don't want to pass its name
+      // value to the FormData since it's controlled by the server.
+      submitter = null;
     }
   }
 
@@ -81,23 +85,30 @@ function extractEvents(
       // It should be in the document order in the form.
       // Since the FormData constructor invokes the formdata event it also
       // needs to be available before that happens so after construction it's too
-      // late. The easiest way to do this is to switch the form field to hidden,
-      // which is always included, and then back again. This does means that this
-      // is observable from the formdata event though.
-      // TODO: This tricky doesn't work on button elements. Consider inserting
-      // a fake node instead for that case.
+      // late. We use a temporary fake node for the duration of this event.
       // TODO: FormData takes a second argument that it's the submitter but this
       // is fairly new so not all browsers support it yet. Switch to that technique
       // when available.
-      const type = submitter.type;
-      submitter.type = 'hidden';
+      const temp = submitter.ownerDocument.createElement('input');
+      temp.name = submitter.name;
+      temp.value = submitter.value;
+      (submitter.parentNode: any).insertBefore(temp, submitter);
       formData = new FormData(form);
-      submitter.type = type;
+      (temp.parentNode: any).removeChild(temp);
     } else {
       formData = new FormData(form);
     }
 
-    startHostTransition(formInst, action, formData);
+    const pendingState: FormStatus = {
+      pending: true,
+      data: formData,
+      method: form.method,
+      action: action,
+    };
+    if (__DEV__) {
+      Object.freeze(pendingState);
+    }
+    startHostTransition(formInst, pendingState, action, formData);
   }
 
   dispatchQueue.push({
@@ -113,3 +124,21 @@ function extractEvents(
 }
 
 export {extractEvents};
+
+export function dispatchReplayedFormAction(
+  formInst: Fiber,
+  form: HTMLFormElement,
+  action: FormData => void | Promise<void>,
+  formData: FormData,
+): void {
+  const pendingState: FormStatus = {
+    pending: true,
+    data: formData,
+    method: form.method,
+    action: action,
+  };
+  if (__DEV__) {
+    Object.freeze(pendingState);
+  }
+  startHostTransition(formInst, pendingState, action, formData);
+}
