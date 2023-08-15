@@ -3771,6 +3771,234 @@ body {
     );
   });
 
+  it('can emit preloads for non-lazy images that are rendered', async () => {
+    function App() {
+      ReactDOM.preload('script', {as: 'script'});
+      ReactDOM.preload('a', {as: 'image'});
+      ReactDOM.preload('b', {as: 'image'});
+      return (
+        <html>
+          <body>
+            <img src="a" />
+            <img src="b" loading="lazy" />
+            <img src="b2" loading="lazy" />
+            <img src="c" srcSet="srcsetc" />
+            <img src="d" srcSet="srcsetd" sizes="sizesd" />
+            <img src="d" srcSet="srcsetd" sizes="sizesd2" />
+          </body>
+        </html>
+      );
+    }
+
+    await act(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    // non-lazy images are first, then arbitrary preloads like for the script and lazy images
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" href="a" as="image" />
+          <link rel="preload" as="image" imagesrcset="srcsetc" />
+          <link
+            rel="preload"
+            as="image"
+            imagesrcset="srcsetd"
+            imagesizes="sizesd"
+          />
+          <link
+            rel="preload"
+            as="image"
+            imagesrcset="srcsetd"
+            imagesizes="sizesd2"
+          />
+          <link rel="preload" href="script" as="script" />
+          <link rel="preload" href="b" as="image" />
+        </head>
+        <body>
+          <img src="a" />
+          <img src="b" loading="lazy" />
+          <img src="b2" loading="lazy" />
+          <img src="c" srcset="srcsetc" />
+          <img src="d" srcset="srcsetd" sizes="sizesd" />
+          <img src="d" srcset="srcsetd" sizes="sizesd2" />
+        </body>
+      </html>,
+    );
+  });
+
+  it('Does not preload lazy images', async () => {
+    function App() {
+      ReactDOM.preload('a', {as: 'image'});
+      return (
+        <html>
+          <body>
+            <img src="a" fetchPriority="low" />
+            <img src="b" fetchPriority="low" />
+          </body>
+        </html>
+      );
+    }
+    await act(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" as="image" href="a" />
+        </head>
+        <body>
+          <img src="a" fetchpriority="low" />
+          <img src="b" fetchpriority="low" />
+        </body>
+      </html>,
+    );
+  });
+
+  it('preloads up to 10 suspensey images as high priority when fetchPriority is not specified', async () => {
+    function App() {
+      ReactDOM.preload('1', {as: 'image', fetchPriority: 'high'});
+      ReactDOM.preload('auto', {as: 'image'});
+      ReactDOM.preload('low', {as: 'image', fetchPriority: 'low'});
+      ReactDOM.preload('9', {as: 'image', fetchPriority: 'high'});
+      ReactDOM.preload('10', {as: 'image', fetchPriority: 'high'});
+      return (
+        <html>
+          <body>
+            {/* skipping 1 */}
+            <img src="2" />
+            <img src="3" fetchPriority="auto" />
+            <img src="4" fetchPriority="high" />
+            <img src="5" />
+            <img src="5low" fetchPriority="low" />
+            <img src="6" />
+            <img src="7" />
+            <img src="8" />
+            <img src="9" />
+            {/* skipping 10 */}
+            <img src="11" />
+            <img src="12" fetchPriority="high" />
+          </body>
+        </html>
+      );
+    }
+    await act(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          {/* First we see the preloads calls that made it to the high priority image queue */}
+          <link rel="preload" as="image" href="1" fetchpriority="high" />
+          <link rel="preload" as="image" href="9" fetchpriority="high" />
+          <link rel="preload" as="image" href="10" fetchpriority="high" />
+          {/* Next we see up to 7 more images qualify for high priority image queue */}
+          <link rel="preload" as="image" href="2" />
+          <link rel="preload" as="image" href="3" fetchpriority="auto" />
+          <link rel="preload" as="image" href="4" fetchpriority="high" />
+          <link rel="preload" as="image" href="5" />
+          <link rel="preload" as="image" href="6" />
+          <link rel="preload" as="image" href="7" />
+          <link rel="preload" as="image" href="8" />
+          {/* Next we see images that are explicitly high priority and thus make it to the high priority image queue */}
+          <link rel="preload" as="image" href="12" fetchpriority="high" />
+          {/* Next we see the remaining preloads that did not make it to the high priority image queue */}
+          <link rel="preload" as="image" href="auto" />
+          <link rel="preload" as="image" href="low" fetchpriority="low" />
+          <link rel="preload" as="image" href="11" />
+        </head>
+        <body>
+          {/* skipping 1 */}
+          <img src="2" />
+          <img src="3" fetchpriority="auto" />
+          <img src="4" fetchpriority="high" />
+          <img src="5" />
+          <img src="5low" fetchpriority="low" />
+          <img src="6" />
+          <img src="7" />
+          <img src="8" />
+          <img src="9" />
+          {/* skipping 10 */}
+          <img src="11" />
+          <img src="12" fetchpriority="high" />
+        </body>
+      </html>,
+    );
+  });
+
+  it('preloads from rendered images properly use srcSet and sizes', async () => {
+    function App() {
+      ReactDOM.preload('1', {as: 'image', imageSrcSet: 'ss1'});
+      ReactDOM.preload('2', {
+        as: 'image',
+        imageSrcSet: 'ss2',
+        imageSizes: 's2',
+      });
+      return (
+        <html>
+          <body>
+            <img src="1" srcSet="ss1" />
+            <img src="2" srcSet="ss2" sizes="s2" />
+            <img src="3" srcSet="ss3" />
+            <img src="4" srcSet="ss4" sizes="s4" />
+          </body>
+        </html>
+      );
+    }
+    await act(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head>
+          <link rel="preload" as="image" imagesrcset="ss1" />
+          <link rel="preload" as="image" imagesrcset="ss2" imagesizes="s2" />
+          <link rel="preload" as="image" imagesrcset="ss3" />
+          <link rel="preload" as="image" imagesrcset="ss4" imagesizes="s4" />
+        </head>
+        <body>
+          <img src="1" srcset="ss1" />
+          <img src="2" srcset="ss2" sizes="s2" />
+          <img src="3" srcset="ss3" />
+          <img src="4" srcset="ss4" sizes="s4" />
+        </body>
+      </html>,
+    );
+  });
+
+  it('should not preload images that have a data URIs for src or srcSet', async () => {
+    function App() {
+      return (
+        <html>
+          <body>
+            <img src="data:1" />
+            <img src="data:2" srcSet="ss2" />
+            <img srcSet="data:3a, data:3b 2x" />
+            <img src="4" srcSet="data:4a, data4b 2x" />
+          </body>
+        </html>
+      );
+    }
+    await act(() => {
+      renderToPipeableStream(<App />).pipe(writable);
+    });
+
+    expect(getMeaningfulChildren(document)).toEqual(
+      <html>
+        <head />
+        <body>
+          <img src="data:1" />
+          <img src="data:2" srcset="ss2" />
+          <img srcset="data:3a, data:3b 2x" />
+          <img src="4" srcset="data:4a, data4b 2x" />
+        </body>
+      </html>,
+    );
+  });
+
   describe('ReactDOM.prefetchDNS(href)', () => {
     it('creates a dns-prefetch resource when called', async () => {
       function App({url}) {
@@ -4067,40 +4295,6 @@ body {
       ]);
     });
 
-    // @gate enableFloat
-    it('warns if you pass incompatible options to two `ReactDOM.preload(...)` with the same href', async () => {
-      function Component() {
-        ReactDOM.preload('foo', {
-          as: 'font',
-          crossOrigin: 'use-credentials',
-        });
-        ReactDOM.preload('foo', {
-          as: 'font',
-          integrity: 'some hash',
-          crossOrigin: 'anonymous',
-        });
-        ReactDOM.preload('foo', {
-          as: 'font',
-          extra: 'ignored',
-        });
-      }
-
-      await expect(async () => {
-        await act(() => {
-          renderToPipeableStream(
-            <html>
-              <body>
-                <Component />
-              </body>
-            </html>,
-          );
-        });
-      }).toErrorDev([
-        'Warning: ReactDOM.preload(): The options provided conflict with another call to `ReactDOM.preload("foo", { as: "font", ...})`. React will always use the options it first encounters when preloading a resource for a given `href` and `as` type, and any later options will be ignored if different. Try updating all calls to `ReactDOM.preload()` with the same `href` and `as` type to use the same options, or eliminate one of the calls.\n  "integrity" option value: "some hash", missing from original options\n  "crossOrigin" option value: "anonymous", original option value: "use-credentials"',
-        'Warning: ReactDOM.preload(): The options provided conflict with another call to `ReactDOM.preload("foo", { as: "font", ...})`. React will always use the options it first encounters when preloading a resource for a given `href` and `as` type, and any later options will be ignored if different. Try updating all calls to `ReactDOM.preload()` with the same `href` and `as` type to use the same options, or eliminate one of the calls.\n  "crossOrigin" missing from options, original option value: "use-credentials"',
-      ]);
-    });
-
     it('supports fetchPriority', async () => {
       function Component({isServer}) {
         ReactDOM.preload(isServer ? 'highserver' : 'highclient', {
@@ -4133,6 +4327,12 @@ body {
           <head>
             <link
               rel="preload"
+              as="script"
+              href="highserver"
+              fetchpriority="high"
+            />
+            <link
+              rel="preload"
               as="style"
               href="lowserver"
               fetchpriority="low"
@@ -4142,12 +4342,6 @@ body {
               as="style"
               href="autoserver"
               fetchpriority="auto"
-            />
-            <link
-              rel="preload"
-              as="script"
-              href="highserver"
-              fetchpriority="high"
             />
           </head>
           <body>hello</body>
@@ -4168,6 +4362,12 @@ body {
           <head>
             <link
               rel="preload"
+              as="script"
+              href="highserver"
+              fetchpriority="high"
+            />
+            <link
+              rel="preload"
               as="style"
               href="lowserver"
               fetchpriority="low"
@@ -4177,12 +4377,6 @@ body {
               as="style"
               href="autoserver"
               fetchpriority="auto"
-            />
-            <link
-              rel="preload"
-              as="script"
-              href="highserver"
-              fetchpriority="high"
             />
             <link
               rel="preload"
@@ -4528,122 +4722,6 @@ body {
         'ReactDOM.preinit(): Expected the `options` argument (second) to be an object with an `as` property describing the type of resource to be preinitialized but encountered `null` instead',
         'ReactDOM.preinit(): Expected the `as` property in the `options` argument (second) to contain a valid value describing the type of resource to be preinitialized but encountered `undefined` instead. Valid values for `as` are "style" and "script".',
         'ReactDOM.preinit(): Expected the `as` property in the `options` argument (second) to contain a valid value describing the type of resource to be preinitialized but encountered "foo" instead. Valid values for `as` are "style" and "script".',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you pass options to `ReactDOM.preinit(..., { as: "style", ... })` incompatible with props from an existing <link rel="stylesheet" .../>', async () => {
-      function Component() {
-        ReactDOM.preinit('foo', {
-          as: 'style',
-          integrity: 'some hash',
-          crossOrigin: 'use-credentials',
-        });
-      }
-
-      await expect(async () => {
-        await act(() => {
-          renderToPipeableStream(
-            <html>
-              <body>
-                <link
-                  rel="stylesheet"
-                  href="foo"
-                  precedence="foo"
-                  crossOrigin="anonymous"
-                />
-                <Component />
-              </body>
-            </html>,
-          );
-        });
-      }).toErrorDev([
-        'ReactDOM.preinit(): For `href` "foo", the options provided conflict with props found on a <link rel="stylesheet" precedence="foo" href="foo" .../> that was already rendered. React will always use the props or options it first encounters for a hoistable stylesheet for a given `href` and any later props or options will be ignored if different. Generally, ReactDOM.preinit() is useful when you are not yet rendering a stylesheet but you anticipate it will be used soon. In this case the stylesheet was already rendered so preinitializing it does not provide any additional benefit. To resolve, try making the props and options agree between the <link rel="stylesheet" .../> and the `ReactDOM.preinit()` call or remove the `ReactDOM.preinit()` call.\n  "precedence" missing from options, prop value: "foo"\n  "integrity" option value: "some hash", missing from props\n  "crossOrigin" option value: "use-credentials", prop value: "anonymous"',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you pass incompatible options to two `ReactDOM.preinit(..., { as: "style", ... })` with the same href', async () => {
-      function Component() {
-        ReactDOM.preinit('foo', {
-          as: 'style',
-          precedence: 'foo',
-          crossOrigin: 'use-credentials',
-        });
-        ReactDOM.preinit('foo', {
-          as: 'style',
-          integrity: 'some hash',
-          crossOrigin: 'anonymous',
-        });
-      }
-
-      await expect(async () => {
-        await act(() => {
-          renderToPipeableStream(
-            <html>
-              <body>
-                <Component />
-              </body>
-            </html>,
-          );
-        });
-      }).toErrorDev([
-        'ReactDOM.preinit(): For `href` "foo", the options provided conflict with another call to `ReactDOM.preinit("foo", { as: "style", ... })`. React will always use the options it first encounters when preinitializing a hoistable stylesheet for a given `href` and any later options will be ignored if different. Try updating all calls to `ReactDOM.preinit()` for a given `href` to use the same options, or only call `ReactDOM.preinit()` once per `href`.\n  "precedence" missing from options, original option value: "foo"\n  "integrity" option value: "some hash", missing from original options\n  "crossOrigin" option value: "anonymous", original option value: "use-credentials"',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you pass options to `ReactDOM.preinit(..., { as: "script", ... })` incompatible with props from an existing <script async={true} .../>', async () => {
-      function Component() {
-        ReactDOM.preinit('foo', {
-          as: 'script',
-          integrity: 'some hash',
-          crossOrigin: 'use-credentials',
-        });
-      }
-
-      await expect(async () => {
-        await act(() => {
-          renderToPipeableStream(
-            <html>
-              <body>
-                <script async={true} src="foo" crossOrigin="anonymous" />
-                <Component />
-              </body>
-            </html>,
-          );
-        });
-      }).toErrorDev([
-        'ReactDOM.preinit(): For `href` "foo", the options provided conflict with props found on a <script async={true} src="foo" .../> that was already rendered. React will always use the props or options it first encounters for a hoistable script for a given `href` and any later props or options will be ignored if different. Generally, ReactDOM.preinit() is useful when you are not yet rendering a script but you anticipate it will be used soon and want to go beyond preloading it and have it execute early. In this case the script was already rendered so preinitializing it does not provide any additional benefit. To resolve, try making the props and options agree between the <script .../> and the `ReactDOM.preinit()` call or remove the `ReactDOM.preinit()` call.\n  "integrity" option value: "some hash", missing from props\n  "crossOrigin" option value: "use-credentials", prop value: "anonymous"',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you pass incompatible options to two `ReactDOM.preinit(..., { as: "script", ... })` with the same href', async () => {
-      function Component() {
-        ReactDOM.preinit('foo', {
-          as: 'script',
-          crossOrigin: 'use-credentials',
-        });
-        ReactDOM.preinit('foo', {
-          as: 'script',
-          integrity: 'some hash',
-          crossOrigin: 'anonymous',
-        });
-      }
-
-      await expect(async () => {
-        await act(() => {
-          renderToPipeableStream(
-            <html>
-              <body>
-                <Component />
-              </body>
-            </html>,
-          );
-        });
-      }).toErrorDev([
-        'ReactDOM.preinit(): For `href` "foo", the options provided conflict with another call to `ReactDOM.preinit("foo", { as: "script", ... })`. React will always use the options it first encounters when preinitializing a hoistable script for a given `href` and any later options will be ignored if different. Try updating all calls to `ReactDOM.preinit()` for a given `href` to use the same options, or only call `ReactDOM.preinit()` once per `href`.\n  "integrity" option value: "some hash", missing from original options\n  "crossOrigin" option value: "anonymous", original option value: "use-credentials"',
       ]);
     });
 
@@ -5665,57 +5743,6 @@ body {
     });
 
     // @gate enableFloat
-    it('warns if you provide different props between <link re="stylesheet" .../> and ReactDOM.preinit(..., {as: "style"}) for the same `href`', async () => {
-      function App() {
-        ReactDOM.preinit('foo', {as: 'style'});
-        return (
-          <html>
-            <body>
-              <link rel="stylesheet" href="foo" precedence="foo" media="all" />
-              hello
-            </body>
-          </html>
-        );
-      }
-      await expect(async () => {
-        await act(() => {
-          const {pipe} = renderToPipeableStream(<App />);
-          pipe(writable);
-        });
-      }).toErrorDev([
-        'Warning: React encountered a <link rel="stylesheet" precedence="foo" href="foo" .../> with props that conflict with the options provided to `ReactDOM.preinit("foo", { as: "style", ... })`. React will use the first props or preinitialization options encountered when rendering a hoistable stylesheet with a particular `href` and will ignore any newer props or options. The first instance of this stylesheet resource was created using the `ReactDOM.preinit()` function. Please note, `ReactDOM.preinit()` is modeled off of module import assertions capabilities and does not support arbitrary props. If you need to have props not included with the preinit options you will need to rely on rendering <link> tags only.\n  "media" prop value: "all", option not available with ReactDOM.preinit()\n  "precedence" prop value: "foo", missing from options',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you provide different props between two <link re="stylesheet" .../> that share the same `href`', async () => {
-      function App() {
-        return (
-          <html>
-            <body>
-              <link rel="stylesheet" href="foo" precedence="foo" media="all" />
-              <link
-                rel="stylesheet"
-                href="foo"
-                precedence="bar"
-                data-extra="foo"
-              />
-              hello
-            </body>
-          </html>
-        );
-      }
-      await expect(async () => {
-        await act(() => {
-          const {pipe} = renderToPipeableStream(<App />);
-          pipe(writable);
-        });
-      }).toErrorDev([
-        'Warning: React encountered a <link rel="stylesheet" href="foo" .../> with a `precedence` prop that has props that conflict with another hoistable stylesheet with the same `href`. When using `precedence` with <link rel="stylsheet" .../> the props from the first encountered instance will be used and props from later instances will be ignored. Update the props on either <link rel="stylesheet" .../> instance so they agree.\n  "media" missing for props, original value: "all"\n  "data-extra" prop value: "foo", missing from original props\n  "precedence" prop value: "bar", original value: "foo"',
-      ]);
-    });
-
-    // @gate enableFloat
     it('will not block displaying a Suspense boundary on a stylesheet with media that does not match', async () => {
       await act(() => {
         renderToPipeableStream(
@@ -6491,67 +6518,6 @@ background-color: green;
           <noscript />
         </div>,
       );
-    });
-
-    // @gate enableFloat
-    it('warns if you provide different props between <script async={true} .../> and ReactDOM.preinit(..., {as: "script"}) for the same `href`', async () => {
-      function App() {
-        ReactDOM.preinit('foo', {as: 'script', integrity: 'some hash'});
-        return (
-          <html>
-            <body>
-              <script
-                async={true}
-                src="foo"
-                integrity="different hash"
-                data-foo=""
-              />
-              hello
-            </body>
-          </html>
-        );
-      }
-      await expect(async () => {
-        await act(() => {
-          const {pipe} = renderToPipeableStream(<App />);
-          pipe(writable);
-        });
-      }).toErrorDev([
-        'Warning: React encountered a <script async={true} src="foo" .../> with props that conflict with the options provided to `ReactDOM.preinit("foo", { as: "script", ... })`. React will use the first props or preinitialization options encountered when rendering a hoistable script with a particular `src` and will ignore any newer props or options. The first instance of this script resource was created using the `ReactDOM.preinit()` function. Please note, `ReactDOM.preinit()` is modeled off of module import assertions capabilities and does not support arbitrary props. If you need to have props not included with the preinit options you will need to rely on rendering <script> tags only.\n  "data-foo" prop value: an empty string, option not available with ReactDOM.preinit()\n  "integrity" prop value: "different hash", option value: "some hash"',
-      ]);
-    });
-
-    // @gate enableFloat
-    it('warns if you provide different props between two <script async={true} .../> that share the same `src`', async () => {
-      function App() {
-        return (
-          <html>
-            <body>
-              <script
-                async={true}
-                src="foo"
-                integrity="some hash"
-                data-foo=""
-              />
-              <script
-                async={true}
-                src="foo"
-                integrity="different hash"
-                data-bar=""
-              />
-              hello
-            </body>
-          </html>
-        );
-      }
-      await expect(async () => {
-        await act(() => {
-          const {pipe} = renderToPipeableStream(<App />);
-          pipe(writable);
-        });
-      }).toErrorDev([
-        'React encountered a <script async={true} src="foo" .../> that has props that conflict with another hoistable script with the same `src`. When rendering hoistable scripts (async scripts without any loading handlers) the props from the first encountered instance will be used and props from later instances will be ignored. Update the props on both <script async={true} .../> instance so they agree.\n  "data-foo" missing for props, original value: an empty string\n  "data-bar" prop value: an empty string, missing from original props\n  "integrity" prop value: "different hash", original value: "some hash"',
-      ]);
     });
   });
 
