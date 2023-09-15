@@ -7,7 +7,7 @@
  * @flow
  */
 
-import type {ReactNodeList} from 'shared/ReactTypes';
+import type {ReactNodeList, ReactFormState} from 'shared/ReactTypes';
 import type {BootstrapScriptDescriptor} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
 import type {ImportMap} from '../shared/ReactDOMTypes';
 
@@ -15,7 +15,7 @@ import ReactVersion from 'shared/ReactVersion';
 
 import {
   createRequest,
-  startRender,
+  startWork,
   startFlowing,
   abort,
 } from 'react-server/src/ReactFizzServer';
@@ -39,6 +39,7 @@ type Options = {
   onPostpone?: (reason: string) => void,
   unstable_externalRuntimeSrc?: string | BootstrapScriptDescriptor,
   importMap?: ImportMap,
+  experimental_formState?: ReactFormState<any, any> | null,
 };
 
 // TODO: Move to sub-classing ReadableStream.
@@ -108,6 +109,7 @@ function renderToReadableStream(
       onShellError,
       onFatalError,
       options ? options.onPostpone : undefined,
+      options ? options.experimental_formState : undefined,
     );
     if (options && options.signal) {
       const signal = options.signal;
@@ -121,7 +123,7 @@ function renderToReadableStream(
         signal.addEventListener('abort', listener);
       }
     }
-    startRender(request);
+    startWork(request);
   });
 }
 

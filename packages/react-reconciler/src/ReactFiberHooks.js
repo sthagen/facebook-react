@@ -111,7 +111,10 @@ import {
   markWorkInProgressReceivedUpdate,
   checkIfWorkInProgressReceivedUpdate,
 } from './ReactFiberBeginWork';
-import {getIsHydrating} from './ReactFiberHydrationContext';
+import {
+  getIsHydrating,
+  tryToClaimNextHydratableFormMarkerInstance,
+} from './ReactFiberHydrationContext';
 import {logStateUpdateScheduled} from './DebugTracing';
 import {
   markStateUpdateScheduled,
@@ -2007,22 +2010,41 @@ function formStateReducer<S>(oldState: S, newState: S): S {
 
 function mountFormState<S, P>(
   action: (S, P) => Promise<S>,
-  initialState: S,
+  initialStateProp: S,
   permalink?: string,
 ): [S, (P) => void] {
+  let initialState = initialStateProp;
+  if (getIsHydrating()) {
+    const root: FiberRoot = (getWorkInProgressRoot(): any);
+    const ssrFormState = root.formState;
+    // If a formState option was passed to the root, there are form state
+    // markers that we need to hydrate. These indicate whether the form state
+    // matches this hook instance.
+    if (ssrFormState !== null) {
+      const isMatching = tryToClaimNextHydratableFormMarkerInstance(
+        currentlyRenderingFiber,
+      );
+      if (isMatching) {
+        initialState = ssrFormState[0];
+      }
+    }
+  }
+  const initialStateThenable: Thenable<S> = {
+    status: 'fulfilled',
+    value: initialState,
+    then() {},
+  };
+
   // State hook. The state is stored in a thenable which is then unwrapped by
   // the `use` algorithm during render.
   const stateHook = mountWorkInProgressHook();
-  stateHook.memoizedState = stateHook.baseState = {
-    status: 'fulfilled',
-    value: initialState,
-  };
+  stateHook.memoizedState = stateHook.baseState = initialStateThenable;
   const stateQueue: UpdateQueue<Thenable<S>, Thenable<S>> = {
     pending: null,
     lanes: NoLanes,
     dispatch: null,
     lastRenderedReducer: formStateReducer,
-    lastRenderedState: (initialState: any),
+    lastRenderedState: initialStateThenable,
   };
   stateHook.queue = stateQueue;
   const setState: Dispatch<Thenable<S>> = (dispatchSetState.bind(
@@ -2145,7 +2167,8 @@ function rerenderFormState<S, P>(
   }
 
   // This is a mount. No updates to process.
-  const state = stateHook.memoizedState;
+  const thenable: Thenable<S> = stateHook.memoizedState;
+  const state = useThenable(thenable);
 
   const actionQueueHook = updateWorkInProgressHook();
   const actionQueue = actionQueueHook.queue;

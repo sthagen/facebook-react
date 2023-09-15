@@ -8,7 +8,7 @@
  */
 
 import type {Request, PostponedState} from 'react-server/src/ReactFizzServer';
-import type {ReactNodeList} from 'shared/ReactTypes';
+import type {ReactNodeList, ReactFormState} from 'shared/ReactTypes';
 import type {Writable} from 'stream';
 import type {BootstrapScriptDescriptor} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
 import type {Destination} from 'react-server/src/ReactServerStreamConfigNode';
@@ -18,7 +18,8 @@ import ReactVersion from 'shared/ReactVersion';
 
 import {
   createRequest,
-  startRender,
+  resumeRequest,
+  startWork,
   startFlowing,
   abort,
 } from 'react-server/src/ReactFizzServer';
@@ -53,6 +54,7 @@ type Options = {
   onPostpone?: (reason: string) => void,
   unstable_externalRuntimeSrc?: string | BootstrapScriptDescriptor,
   importMap?: ImportMap,
+  experimental_formState?: ReactFormState<any, any> | null,
 };
 
 type ResumeOptions = {
@@ -96,6 +98,7 @@ function createRequestImpl(children: ReactNodeList, options: void | Options) {
     options ? options.onShellError : undefined,
     undefined,
     options ? options.onPostpone : undefined,
+    options ? options.experimental_formState : undefined,
   );
 }
 
@@ -105,7 +108,7 @@ function renderToPipeableStream(
 ): PipeableStream {
   const request = createRequestImpl(children, options);
   let hasStartedFlowing = false;
-  startRender(request);
+  startWork(request);
   return {
     pipe<T: Writable>(destination: T): T {
       if (hasStartedFlowing) {
@@ -140,16 +143,14 @@ function resumeRequestImpl(
   postponedState: PostponedState,
   options: void | ResumeOptions,
 ) {
-  return createRequest(
+  return resumeRequest(
     children,
-    postponedState.resumableState,
+    postponedState,
     createRenderState(
       postponedState.resumableState,
       options ? options.nonce : undefined,
       undefined, // importMap
     ),
-    postponedState.rootFormatContext,
-    postponedState.progressiveChunkSize,
     options ? options.onError : undefined,
     options ? options.onAllReady : undefined,
     options ? options.onShellReady : undefined,
@@ -166,7 +167,7 @@ function resumeToPipeableStream(
 ): PipeableStream {
   const request = resumeRequestImpl(children, postponedState, options);
   let hasStartedFlowing = false;
-  startRender(request);
+  startWork(request);
   return {
     pipe<T: Writable>(destination: T): T {
       if (hasStartedFlowing) {

@@ -8,7 +8,7 @@
  */
 
 import type {PostponedState} from 'react-server/src/ReactFizzServer';
-import type {ReactNodeList} from 'shared/ReactTypes';
+import type {ReactNodeList, ReactFormState} from 'shared/ReactTypes';
 import type {BootstrapScriptDescriptor} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
 import type {ImportMap} from '../shared/ReactDOMTypes';
 
@@ -16,7 +16,8 @@ import ReactVersion from 'shared/ReactVersion';
 
 import {
   createRequest,
-  startRender,
+  resumeRequest,
+  startWork,
   startFlowing,
   abort,
 } from 'react-server/src/ReactFizzServer';
@@ -40,6 +41,7 @@ type Options = {
   onPostpone?: (reason: string) => void,
   unstable_externalRuntimeSrc?: string | BootstrapScriptDescriptor,
   importMap?: ImportMap,
+  experimental_formState?: ReactFormState<any, any> | null,
 };
 
 type ResumeOptions = {
@@ -116,6 +118,7 @@ function renderToReadableStream(
       onShellError,
       onFatalError,
       options ? options.onPostpone : undefined,
+      options ? options.experimental_formState : undefined,
     );
     if (options && options.signal) {
       const signal = options.signal;
@@ -129,7 +132,7 @@ function renderToReadableStream(
         signal.addEventListener('abort', listener);
       }
     }
-    startRender(request);
+    startWork(request);
   });
 }
 
@@ -171,16 +174,14 @@ function resume(
       allReady.catch(() => {});
       reject(error);
     }
-    const request = createRequest(
+    const request = resumeRequest(
       children,
-      postponedState.resumableState,
+      postponedState,
       createRenderState(
         postponedState.resumableState,
         options ? options.nonce : undefined,
         undefined, // importMap
       ),
-      postponedState.rootFormatContext,
-      postponedState.progressiveChunkSize,
       options ? options.onError : undefined,
       onAllReady,
       onShellReady,
@@ -200,7 +201,7 @@ function resume(
         signal.addEventListener('abort', listener);
       }
     }
-    startRender(request);
+    startWork(request);
   });
 }
 

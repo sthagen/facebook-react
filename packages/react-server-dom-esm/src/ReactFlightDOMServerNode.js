@@ -20,7 +20,7 @@ import type {ServerContextJSONValue, Thenable} from 'shared/ReactTypes';
 
 import {
   createRequest,
-  startRender,
+  startWork,
   startFlowing,
   abort,
 } from 'react-server/src/ReactFlightServer';
@@ -36,7 +36,10 @@ import {
   getRoot,
 } from 'react-server/src/ReactFlightReplyServer';
 
-import {decodeAction} from 'react-server/src/ReactFlightActionServer';
+import {
+  decodeAction,
+  decodeFormState,
+} from 'react-server/src/ReactFlightActionServer';
 
 export {
   registerServerReference,
@@ -73,7 +76,7 @@ function renderToPipeableStream(
     options ? options.onPostpone : undefined,
   );
   let hasStartedFlowing = false;
-  startRender(request);
+  startWork(request);
   return {
     pipe<T: Writable>(destination: T): T {
       if (hasStartedFlowing) {
@@ -166,4 +169,5 @@ export {
   decodeReplyFromBusboy,
   decodeReply,
   decodeAction,
+  decodeFormState,
 };
