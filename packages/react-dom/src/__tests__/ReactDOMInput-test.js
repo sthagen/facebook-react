@@ -17,7 +17,11 @@ function emptyFunction() {}
 describe('ReactDOMInput', () => {
   let React;
   let ReactDOM;
+  let ReactDOMClient;
   let ReactDOMServer;
+  let Scheduler;
+  let act;
+  let assertLog;
   let setUntrackedValue;
   let setUntrackedChecked;
   let container;
@@ -87,7 +91,11 @@ describe('ReactDOMInput', () => {
 
     React = require('react');
     ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
     ReactDOMServer = require('react-dom/server');
+    Scheduler = require('scheduler');
+    act = require('internal-test-utils').act;
+    assertLog = require('internal-test-utils').assertLog;
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -1235,6 +1243,175 @@ describe('ReactDOMInput', () => {
     assertInputTrackingIsCurrent(container);
   });
 
+  it('should hydrate controlled radio buttons', async () => {
+    function App() {
+      const [current, setCurrent] = React.useState('a');
+      return (
+        <>
+          <input
+            type="radio"
+            name="fruit"
+            checked={current === 'a'}
+            onChange={() => {
+              Scheduler.log('click a');
+              setCurrent('a');
+            }}
+          />
+          <input
+            type="radio"
+            name="fruit"
+            checked={current === 'b'}
+            onChange={() => {
+              Scheduler.log('click b');
+              setCurrent('b');
+            }}
+          />
+          <input
+            type="radio"
+            name="fruit"
+            checked={current === 'c'}
+            onChange={() => {
+              Scheduler.log('click c');
+              // Let's say the user can't pick C
+            }}
+          />
+        </>
+      );
+    }
+    const html = ReactDOMServer.renderToString(<App />);
+    container.innerHTML = html;
+    const [a, b, c] = container.querySelectorAll('input');
+    expect(a.checked).toBe(true);
+    expect(b.checked).toBe(false);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(false);
+    expect(isCheckedDirty(b)).toBe(false);
+    expect(isCheckedDirty(c)).toBe(false);
+
+    // Click on B before hydrating
+    b.checked = true;
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(false);
+
+    await act(async () => {
+      ReactDOMClient.hydrateRoot(container, <App />);
+    });
+
+    // Currently, we don't fire onChange when hydrating
+    assertLog([]);
+    // Strangely, we leave `b` checked even though we rendered A with
+    // checked={true} and B with checked={false}. Arguably this is a bug.
+    expect(a.checked).toBe(false);
+    expect(b.checked).toBe(true);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // If we click on C now though...
+    await act(async () => {
+      setUntrackedChecked.call(c, true);
+      dispatchEventOnNode(c, 'click');
+    });
+
+    // then since C's onClick doesn't set state, A becomes rechecked.
+    assertLog(['click c']);
+    expect(a.checked).toBe(true);
+    expect(b.checked).toBe(false);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // And we can also change to B properly after hydration.
+    await act(async () => {
+      setUntrackedChecked.call(b, true);
+      dispatchEventOnNode(b, 'click');
+    });
+    assertLog(['click b']);
+    expect(a.checked).toBe(false);
+    expect(b.checked).toBe(true);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+  });
+
+  it('should hydrate uncontrolled radio buttons', async () => {
+    function App() {
+      return (
+        <>
+          <input
+            type="radio"
+            name="fruit"
+            defaultChecked={true}
+            onChange={() => Scheduler.log('click a')}
+          />
+          <input
+            type="radio"
+            name="fruit"
+            defaultChecked={false}
+            onChange={() => Scheduler.log('click b')}
+          />
+          <input
+            type="radio"
+            name="fruit"
+            defaultChecked={false}
+            onChange={() => Scheduler.log('click c')}
+          />
+        </>
+      );
+    }
+    const html = ReactDOMServer.renderToString(<App />);
+    container.innerHTML = html;
+    const [a, b, c] = container.querySelectorAll('input');
+    expect(a.checked).toBe(true);
+    expect(b.checked).toBe(false);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(false);
+    expect(isCheckedDirty(b)).toBe(false);
+    expect(isCheckedDirty(c)).toBe(false);
+
+    // Click on B before hydrating
+    b.checked = true;
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(false);
+
+    await act(async () => {
+      ReactDOMClient.hydrateRoot(container, <App />);
+    });
+
+    // Currently, we don't fire onChange when hydrating
+    assertLog([]);
+    expect(a.checked).toBe(false);
+    expect(b.checked).toBe(true);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // Click back to A
+    await act(async () => {
+      setUntrackedChecked.call(a, true);
+      dispatchEventOnNode(a, 'click');
+    });
+
+    assertLog(['click a']);
+    expect(a.checked).toBe(true);
+    expect(b.checked).toBe(false);
+    expect(c.checked).toBe(false);
+    expect(isCheckedDirty(a)).toBe(true);
+    expect(isCheckedDirty(b)).toBe(true);
+    expect(isCheckedDirty(c)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+  });
+
   it('should check the correct radio when the selected name moves', () => {
     class App extends React.Component {
       state = {
@@ -1411,6 +1588,83 @@ describe('ReactDOMInput', () => {
     expect(bNode.checked).toBe(true);
     expect(isCheckedDirty(aNode)).toBe(true);
     expect(isCheckedDirty(bNode)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+  });
+
+  it('should control radio buttons if the tree updates during render (case 2; #26876)', () => {
+    let thunk = null;
+    function App() {
+      const [disabled, setDisabled] = React.useState(false);
+      const [value, setValue] = React.useState('one');
+      function handleChange(e) {
+        setDisabled(true);
+        // Pretend this is in a setTimeout or something
+        thunk = () => {
+          setDisabled(false);
+          setValue(e.target.value);
+        };
+      }
+      return (
+        <>
+          <input
+            type="radio"
+            name="fruit"
+            value="one"
+            checked={value === 'one'}
+            onChange={handleChange}
+            disabled={disabled}
+          />
+          <input
+            type="radio"
+            name="fruit"
+            value="two"
+            checked={value === 'two'}
+            onChange={handleChange}
+            disabled={disabled}
+          />
+        </>
+      );
+    }
+    ReactDOM.render(<App />, container);
+    const [one, two] = container.querySelectorAll('input');
+    expect(one.checked).toBe(true);
+    expect(two.checked).toBe(false);
+    expect(isCheckedDirty(one)).toBe(true);
+    expect(isCheckedDirty(two)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // Click two
+    setUntrackedChecked.call(two, true);
+    dispatchEventOnNode(two, 'click');
+    expect(one.checked).toBe(true);
+    expect(two.checked).toBe(false);
+    expect(isCheckedDirty(one)).toBe(true);
+    expect(isCheckedDirty(two)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // After a delay...
+    ReactDOM.unstable_batchedUpdates(thunk);
+    expect(one.checked).toBe(false);
+    expect(two.checked).toBe(true);
+    expect(isCheckedDirty(one)).toBe(true);
+    expect(isCheckedDirty(two)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // Click back to one
+    setUntrackedChecked.call(one, true);
+    dispatchEventOnNode(one, 'click');
+    expect(one.checked).toBe(false);
+    expect(two.checked).toBe(true);
+    expect(isCheckedDirty(one)).toBe(true);
+    expect(isCheckedDirty(two)).toBe(true);
+    assertInputTrackingIsCurrent(container);
+
+    // After a delay...
+    ReactDOM.unstable_batchedUpdates(thunk);
+    expect(one.checked).toBe(true);
+    expect(two.checked).toBe(false);
+    expect(isCheckedDirty(one)).toBe(true);
+    expect(isCheckedDirty(two)).toBe(true);
     assertInputTrackingIsCurrent(container);
   });
 

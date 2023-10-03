@@ -175,8 +175,13 @@ export function updateInput(
     }
   }
 
-  if (checked != null && node.checked !== !!checked) {
-    node.checked = checked;
+  if (checked != null) {
+    // Important to set this even if it's not a change in order to update input
+    // value tracking with radio buttons
+    // TODO: Should really update input value tracking for the whole radio
+    // button group in an effect or something (similar to #27024)
+    node.checked =
+      checked && typeof checked !== 'function' && typeof checked !== 'symbol';
   }
 
   if (
@@ -292,12 +297,10 @@ export function initInput(
     typeof checkedOrDefault !== 'symbol' &&
     !!checkedOrDefault;
 
-  // The checked property never gets assigned. It must be manually set.
-  // We don't want to do this when hydrating so that existing user input isn't
-  // modified
-  // TODO: I'm pretty sure this is a bug because initialValueTracking won't be
-  // correct for the hydration case then.
-  if (!isHydrating) {
+  if (isHydrating) {
+    // Detach .checked from .defaultChecked but leave user input alone
+    node.checked = node.checked;
+  } else {
     node.checked = !!initialChecked;
   }
 
