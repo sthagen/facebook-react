@@ -31,6 +31,7 @@ export const {
   alwaysThrottleRetries,
   enableDO_NOT_USE_disableStrictPassiveEffect,
   disableSchedulerTimeoutInWorkLoop,
+  enableUseDeferredValueInitialArg,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
@@ -102,7 +103,7 @@ export const disableTextareaChildren = __EXPERIMENTAL__;
 export const allowConcurrentByDefault = true;
 
 export const consoleManagedByDevToolsDuringStrictMode = true;
-export const enableServerContext = true;
+export const enableServerContext = false;
 
 export const useModernStrictMode = false;
 export const enableFizzExternalRuntime = true;
