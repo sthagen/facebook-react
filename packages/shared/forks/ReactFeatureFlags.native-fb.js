@@ -80,7 +80,6 @@ export const allowConcurrentByDefault = true;
 export const enableCustomElementPropertySupport = false;
 
 export const consoleManagedByDevToolsDuringStrictMode = false;
-export const enableServerContext = false;
 
 export const enableTransitionTracing = false;
 
@@ -92,6 +91,8 @@ export const enableFizzExternalRuntime = false;
 
 export const enableAsyncActions = false;
 export const enableUseDeferredValueInitialArg = true;
+
+export const enableServerComponentKeys = true;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);
