@@ -1154,6 +1154,11 @@ function mountReducer<S, I, A>(
   let initialState;
   if (init !== undefined) {
     initialState = init(initialArg);
+    if (shouldDoubleInvokeUserFnsInHooksDEV) {
+      setIsStrictModeForDevtools(true);
+      init(initialArg);
+      setIsStrictModeForDevtools(false);
+    }
   } else {
     initialState = ((initialArg: any): S);
   }
@@ -1745,8 +1750,15 @@ function forceStoreRerender(fiber: Fiber) {
 function mountStateImpl<S>(initialState: (() => S) | S): Hook {
   const hook = mountWorkInProgressHook();
   if (typeof initialState === 'function') {
+    const initialStateInitializer = initialState;
     // $FlowFixMe[incompatible-use]: Flow doesn't like mixed types
-    initialState = initialState();
+    initialState = initialStateInitializer();
+    if (shouldDoubleInvokeUserFnsInHooksDEV) {
+      setIsStrictModeForDevtools(true);
+      // $FlowFixMe[incompatible-use]: Flow doesn't like mixed types
+      initialStateInitializer();
+      setIsStrictModeForDevtools(false);
+    }
   }
   hook.memoizedState = hook.baseState = initialState;
   const queue: UpdateQueue<S, BasicStateAction<S>> = {
@@ -2636,10 +2648,12 @@ function mountMemo<T>(
 ): T {
   const hook = mountWorkInProgressHook();
   const nextDeps = deps === undefined ? null : deps;
-  if (shouldDoubleInvokeUserFnsInHooksDEV) {
-    nextCreate();
-  }
   const nextValue = nextCreate();
+  if (shouldDoubleInvokeUserFnsInHooksDEV) {
+    setIsStrictModeForDevtools(true);
+    nextCreate();
+    setIsStrictModeForDevtools(false);
+  }
   hook.memoizedState = [nextValue, nextDeps];
   return nextValue;
 }
@@ -2658,10 +2672,12 @@ function updateMemo<T>(
       return prevState[0];
     }
   }
-  if (shouldDoubleInvokeUserFnsInHooksDEV) {
-    nextCreate();
-  }
   const nextValue = nextCreate();
+  if (shouldDoubleInvokeUserFnsInHooksDEV) {
+    setIsStrictModeForDevtools(true);
+    nextCreate();
+    setIsStrictModeForDevtools(false);
+  }
   hook.memoizedState = [nextValue, nextDeps];
   return nextValue;
 }
