@@ -50,6 +50,7 @@ export const enableUseMemoCacheHook = true;
 export const enableUseEffectEventHook = false;
 export const enableClientRenderFallbackOnTextMismatch = true;
 export const enableUseRefAccessWarning = false;
+export const enableInfiniteRenderLoopDetection = false;
 
 export const enableRetryLaneExpiration = false;
 export const retryLaneExpirationMs = 5000;
@@ -71,7 +72,7 @@ export const enableFloat = true;
 
 export const useModernStrictMode = false;
 export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
-export const enableDeferRootSchedulingToMicrotask = true;
+export const enableDeferRootSchedulingToMicrotask = false;
 
 export const enableAsyncActions = true;
 
