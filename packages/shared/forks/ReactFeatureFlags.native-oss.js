@@ -22,13 +22,13 @@ export const enableProfilerNestedUpdateScheduledHook = false;
 export const enableUpdaterTracking = __PROFILE__;
 export const enableCache = false;
 export const enableLegacyCache = false;
-export const enableCacheElement = false;
+export const enableCacheElement = true;
 export const enableFetchInstrumentation = false;
 export const enableFormActions = true; // Doesn't affect Native
 export const enableBinaryFlight = true;
 export const enableTaint = true;
 export const enablePostpone = false;
-export const disableJavaScriptURLs = false;
+export const disableJavaScriptURLs = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
 export const disableIEWorkarounds = true;
@@ -74,7 +74,7 @@ export const enableFloat = true;
 
 export const useModernStrictMode = false;
 export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
-export const enableFizzExternalRuntime = false;
+export const enableFizzExternalRuntime = true;
 export const enableDeferRootSchedulingToMicrotask = false;
 export const enableInfiniteRenderLoopDetection = false;
 

@@ -44,7 +44,7 @@ export const enableBinaryFlight = true;
 export const enableTaint = true;
 export const enablePostpone = false;
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
-export const disableJavaScriptURLs = false;
+export const disableJavaScriptURLs = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
 export const disableIEWorkarounds = true;
@@ -88,7 +88,7 @@ export const enableFloat = true;
 
 export const useModernStrictMode = false;
 export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
-export const enableFizzExternalRuntime = false;
+export const enableFizzExternalRuntime = true;
 
 export const enableAsyncActions = false;
 export const enableUseDeferredValueInitialArg = true;
