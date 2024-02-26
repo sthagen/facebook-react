@@ -49,7 +49,7 @@ export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = true;
 export const enableGetInspectorDataForInstanceInProduction = false;
-export const enableRenderableContext = false;
+export const enableRenderableContext = true;
 
 export const enableRetryLaneExpiration = false;
 export const retryLaneExpirationMs = 5000;
@@ -93,6 +93,8 @@ export const enableInfiniteRenderLoopDetection = false;
 export const enableRefAsProp = false;
 
 export const enableReactTestRendererWarning = false;
+
+export const enableBigIntSupport = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

@@ -35,7 +35,6 @@ export const {
   syncLaneExpirationMs,
   transitionLaneExpirationMs,
   enableInfiniteRenderLoopDetection,
-  enableRenderableContext,
   useModernStrictMode,
   enableRefAsProp,
   enableClientRenderFallbackOnTextMismatch,
@@ -54,7 +53,7 @@ export const enableUpdaterTracking = __PROFILE__;
 
 export const enableSuspenseAvoidThisFallback = true;
 export const enableSuspenseAvoidThisFallbackFizz = false;
-
+export const enableRenderableContext = true;
 export const enableCustomElementPropertySupport = true;
 export const enableCPUSuspense = true;
 export const enableFloat = true;
@@ -119,6 +118,8 @@ export const enableServerComponentKeys = true;
 export const enableServerComponentLogs = true;
 
 export const enableReactTestRendererWarning = false;
+
+export const enableBigIntSupport = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);
