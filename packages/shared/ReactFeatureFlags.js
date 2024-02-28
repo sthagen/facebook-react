@@ -145,7 +145,7 @@ export const disableLegacyContext = false;
 
 // Not ready to break experimental yet.
 // Disable javascript: URL strings in href for XSS protection.
-export const disableJavaScriptURLs = false;
+export const disableJavaScriptURLs = __NEXT_MAJOR__;
 
 // Not ready to break experimental yet.
 // Modern <StrictMode /> behaviour aligns more with what components
@@ -188,6 +188,7 @@ export const enableInfiniteRenderLoopDetection = true;
 // Passes `ref` as a normal prop instead of stripping it from the props object
 // during element creation.
 export const enableRefAsProp = __NEXT_MAJOR__;
+export const disableStringRefs = __NEXT_MAJOR__;
 
 // Not ready to break experimental yet.
 // Needs more internal cleanup

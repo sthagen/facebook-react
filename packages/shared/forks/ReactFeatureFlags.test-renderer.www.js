@@ -28,7 +28,7 @@ export const enableFormActions = true; // Doesn't affect Test Renderer
 export const enableBinaryFlight = true;
 export const enableTaint = true;
 export const enablePostpone = false;
-export const disableJavaScriptURLs = false;
+export const disableJavaScriptURLs = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
 export const disableIEWorkarounds = true;
@@ -49,7 +49,7 @@ export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = true;
 export const enableGetInspectorDataForInstanceInProduction = false;
-export const enableRenderableContext = true;
+export const enableRenderableContext = false;
 
 export const enableRetryLaneExpiration = false;
 export const retryLaneExpirationMs = 5000;
@@ -91,6 +91,7 @@ export const enableServerComponentLogs = true;
 export const enableInfiniteRenderLoopDetection = false;
 
 export const enableRefAsProp = false;
+export const disableStringRefs = false;
 
 export const enableReactTestRendererWarning = false;
 
