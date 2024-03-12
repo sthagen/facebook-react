@@ -251,10 +251,6 @@ export const enableSchedulingProfiler = __PROFILE__;
 // reducers by double invoking them in StrictLegacyMode.
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 
-// To preserve the "Pause on caught exceptions" behavior of the debugger, we
-// replay the begin phase of a failed component inside invokeGuardedCallback.
-export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
-
 // Gather advanced timing metrics for Profiler subtrees.
 export const enableProfilerTimer = __PROFILE__;
 
@@ -276,10 +272,6 @@ export const enableUpdaterTracking = __PROFILE__;
 
 // Internal only.
 export const enableGetInspectorDataForInstanceInProduction = false;
-
-// Profiler API accepts a function to be called when a nested update is scheduled.
-// This callback accepts the component type (class instance or function) the update is scheduled for.
-export const enableProfilerNestedUpdateScheduledHook = false;
 
 export const consoleManagedByDevToolsDuringStrictMode = true;
 

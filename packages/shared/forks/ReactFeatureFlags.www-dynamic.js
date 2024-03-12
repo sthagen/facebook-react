@@ -17,7 +17,6 @@ export const disableInputAttributeSyncing = __VARIANT__;
 export const disableIEWorkarounds = __VARIANT__;
 export const enableLegacyFBSupport = __VARIANT__;
 export const enableUseRefAccessWarning = __VARIANT__;
-export const enableProfilerNestedUpdateScheduledHook = __VARIANT__;
 export const disableSchedulerTimeoutInWorkLoop = __VARIANT__;
 export const enableLazyContextPropagation = __VARIANT__;
 export const forceConcurrentByDefaultForTesting = __VARIANT__;
@@ -30,7 +29,6 @@ export const enableUseDeferredValueInitialArg = __VARIANT__;
 export const enableRenderableContext = __VARIANT__;
 export const useModernStrictMode = __VARIANT__;
 export const enableRefAsProp = __VARIANT__;
-export const enableClientRenderFallbackOnTextMismatch = __VARIANT__;
 export const enableRetryLaneExpiration = __VARIANT__;
 export const retryLaneExpirationMs = 5000;
 export const syncLaneExpirationMs = 250;
@@ -45,10 +43,6 @@ export const enableDebugTracing = __EXPERIMENTAL__;
 export const enableSchedulingProfiler = __VARIANT__;
 
 export const enableInfiniteRenderLoopDetection = __VARIANT__;
-
-// These are already tested in both modes using the build type dimension,
-// so we don't need to use __VARIANT__ to get extra coverage.
-export const replayFailedUnitOfWorkWithInvokeGuardedCallback = __DEV__;
 
 // TODO: These flags are hard-coded to the default values used in open source.
 // Update the tests so that they pass in either mode, then set these
