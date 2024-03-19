@@ -1012,7 +1012,7 @@ describe('ReactHooksInspectionIntegration', () => {
       );
     }
     const renderer = await act(() => {
-      return ReactTestRenderer.create(<Foo />, {isConcurrent: true});
+      return ReactTestRenderer.create(<Foo />, {unstable_isConcurrent: true});
     });
     expect(renderer).toMatchRenderedOutput(null);
     let childFiber = renderer.root.findByType(Foo)._currentFiber();
@@ -1244,7 +1244,7 @@ describe('ReactHooksInspectionIntegration', () => {
         <Context.Provider value="provided">
           <Foo />
         </Context.Provider>,
-        {isConcurrent: true},
+        {unstable_isConcurrent: true},
       );
     });
     let childFiber = renderer.root.findByType(Foo)._currentFiber();
