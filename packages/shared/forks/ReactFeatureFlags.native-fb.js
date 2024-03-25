@@ -23,6 +23,7 @@ export const {
   alwaysThrottleRetries,
   consoleManagedByDevToolsDuringStrictMode,
   enableAsyncActions,
+  enableBigIntSupport,
   enableComponentStackLocations,
   enableDeferRootSchedulingToMicrotask,
   enableInfiniteRenderLoopDetection,
@@ -46,7 +47,6 @@ export const enableCache = true;
 export const enableLegacyCache = false;
 export const enableCacheElement = true;
 export const enableFetchInstrumentation = false;
-export const enableFormActions = true; // Doesn't affect Native
 export const enableBinaryFlight = true;
 export const enableTaint = true;
 export const enablePostpone = false;
@@ -102,8 +102,6 @@ export const disableStringRefs = false;
 
 export const enableReactTestRendererWarning = false;
 export const disableLegacyMode = false;
-
-export const enableBigIntSupport = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);
