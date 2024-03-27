@@ -50,7 +50,6 @@ export const enableBinaryFlight = true;
 export const enableTaint = true;
 export const enablePostpone = false;
 export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
-export const disableJavaScriptURLs = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableInputAttributeSyncing = false;
 export const disableIEWorkarounds = true;
@@ -65,7 +64,7 @@ export const enableSuspenseAvoidThisFallbackFizz = false;
 export const enableCPUSuspense = true;
 export const enableUseMemoCacheHook = true;
 export const enableUseEffectEventHook = false;
-export const enableClientRenderFallbackOnTextMismatch = true;
+export const favorSafetyOverHydrationPerf = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = true;
 export const enableGetInspectorDataForInstanceInProduction = true;
@@ -101,6 +100,7 @@ export const disableStringRefs = false;
 
 export const enableReactTestRendererWarning = false;
 export const disableLegacyMode = false;
+export const disableDOMTestUtils = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

@@ -47,6 +47,7 @@ describe('ReactDOMRoot', () => {
     expect(container.textContent).toEqual('Hi');
   });
 
+  // @gate !classic || !__DEV__
   it('warns if you import createRoot from react-dom', async () => {
     expect(() => ReactDOM.createRoot(container)).toErrorDev(
       'You are importing createRoot from "react-dom" which is not supported. ' +
@@ -57,6 +58,7 @@ describe('ReactDOMRoot', () => {
     );
   });
 
+  // @gate !classic || !__DEV__
   it('warns if you import hydrateRoot from react-dom', async () => {
     expect(() => ReactDOM.hydrateRoot(container, null)).toErrorDev(
       'You are importing hydrateRoot from "react-dom" which is not supported. ' +
@@ -171,7 +173,8 @@ describe('ReactDOMRoot', () => {
       </div>,
     );
     await expect(async () => await waitForAll([])).toErrorDev(
-      'Extra attributes',
+      "A tree hydrated but some attributes of the server rendered HTML didn't match the client properties.",
+      {withoutStack: true},
     );
   });
 
@@ -318,9 +321,11 @@ describe('ReactDOMRoot', () => {
     });
     container.innerHTML = '';
 
-    expect(() => {
-      root.unmount();
-    }).toThrow('The node to be removed is not a child of this node.');
+    await expect(async () => {
+      await act(() => {
+        root.unmount();
+      });
+    }).rejects.toThrow('The node to be removed is not a child of this node.');
   });
 
   it('opts-in to concurrent default updates', async () => {

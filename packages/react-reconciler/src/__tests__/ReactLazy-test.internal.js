@@ -230,7 +230,7 @@ describe('ReactLazy', () => {
     assertLog(['Loading...']);
     expect(root).not.toMatchRenderedOutput('Hi');
     if (__DEV__) {
-      expect(console.error).toHaveBeenCalledTimes(3);
+      expect(console.error).toHaveBeenCalledTimes(2);
       expect(console.error.mock.calls[0][0]).toContain(
         'Expected the result of a dynamic import() call',
       );
@@ -1451,6 +1451,7 @@ describe('ReactLazy', () => {
   });
 
   describe('legacy mode', () => {
+    // @gate !disableLegacyMode
     it('mount and reorder lazy elements (legacy mode)', async () => {
       class Child extends React.Component {
         componentDidMount() {
@@ -1520,6 +1521,7 @@ describe('ReactLazy', () => {
       expect(root).toMatchRenderedOutput('ba');
     });
 
+    // @gate !disableLegacyMode
     it('mount and reorder lazy types (legacy mode)', async () => {
       class Child extends React.Component {
         componentDidMount() {

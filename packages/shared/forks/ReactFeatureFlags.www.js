@@ -39,7 +39,6 @@ export const {
   useModernStrictMode,
   enableRefAsProp,
   enableNewBooleanProps,
-  enableClientRenderFallbackOnTextMismatch,
 } = dynamicFeatureFlags;
 
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
@@ -61,6 +60,8 @@ export const enableUseEffectEventHook = true;
 export const enableFilterEmptyStringAttributesDOM = true;
 export const enableAsyncActions = true;
 
+export const favorSafetyOverHydrationPerf = false;
+
 // Logs additional User Timing API marks for use with an experimental profiling tool.
 export const enableSchedulingProfiler: boolean =
   __PROFILE__ && dynamicFeatureFlags.enableSchedulingProfiler;
@@ -77,8 +78,6 @@ export const enableBinaryFlight = false;
 export const enableTaint = false;
 
 export const enablePostpone = false;
-
-export const disableJavaScriptURLs = true;
 
 // TODO: www currently relies on this feature. It's disabled in open source.
 // Need to remove it.
@@ -121,6 +120,8 @@ export const enableReactTestRendererWarning = false;
 export const disableStringRefs = false;
 
 export const disableLegacyMode = false;
+
+export const disableDOMTestUtils = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

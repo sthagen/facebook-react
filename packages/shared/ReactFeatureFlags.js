@@ -30,7 +30,7 @@ export const enableComponentStackLocations = true;
 // -----------------------------------------------------------------------------
 
 // TODO: Finish rolling out in www
-export const enableClientRenderFallbackOnTextMismatch = true;
+export const favorSafetyOverHydrationPerf = true;
 export const enableAsyncActions = true;
 
 // Need to remove didTimeout argument from Scheduler before landing
@@ -116,8 +116,6 @@ export const passChildrenWhenCloningPersistedNodes = false;
 
 export const enableUseDeferredValueInitialArg = __EXPERIMENTAL__;
 
-export const enableRenderableContext = false;
-
 export const enableServerComponentLogs = __EXPERIMENTAL__;
 
 /**
@@ -137,10 +135,6 @@ const __NEXT_MAJOR__ = __EXPERIMENTAL__;
 
 // Removes legacy style context
 export const disableLegacyContext = __NEXT_MAJOR__;
-
-// Not ready to break experimental yet.
-// Disable javascript: URL strings in href for XSS protection.
-export const disableJavaScriptURLs = __NEXT_MAJOR__;
 
 // Not ready to break experimental yet.
 // Modern <StrictMode /> behaviour aligns more with what components
@@ -185,15 +179,15 @@ export const enableInfiniteRenderLoopDetection = true;
 export const enableRefAsProp = __NEXT_MAJOR__;
 export const disableStringRefs = __NEXT_MAJOR__;
 
-// Not ready to break experimental yet.
-// Needs more internal cleanup
 // Warn on any usage of ReactTestRenderer
-export const enableReactTestRendererWarning = false;
+export const enableReactTestRendererWarning = __NEXT_MAJOR__;
 
 // Disables legacy mode
 // This allows us to land breaking changes to remove legacy mode APIs in experimental builds
 // before removing them in stable in the next Major
 export const disableLegacyMode = __NEXT_MAJOR__;
+
+export const disableDOMTestUtils = __NEXT_MAJOR__;
 
 // HTML boolean attributes need a special PropertyInfoRecord.
 // Between support of these attributes in browsers and React supporting them as
@@ -201,6 +195,9 @@ export const disableLegacyMode = __NEXT_MAJOR__;
 // However, once React considers them as boolean props an empty string will
 // result in false property i.e. break existing usage.
 export const enableNewBooleanProps = __NEXT_MAJOR__;
+
+// Make <Context> equivalent to <Context.Provider> instead of <Context.Consumer>
+export const enableRenderableContext = __NEXT_MAJOR__;
 
 // -----------------------------------------------------------------------------
 // Chopping Block

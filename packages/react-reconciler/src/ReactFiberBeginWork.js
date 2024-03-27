@@ -141,7 +141,6 @@ import {
 import {
   NoLane,
   NoLanes,
-  SyncLane,
   OffscreenLane,
   DefaultHydrationLane,
   SomeRetryLane,
@@ -267,7 +266,10 @@ import {
   createCapturedValueAtFiber,
   type CapturedValue,
 } from './ReactCapturedValue';
-import {createClassErrorUpdate} from './ReactFiberThrow';
+import {
+  createClassErrorUpdate,
+  initializeClassErrorUpdate,
+} from './ReactFiberThrow';
 import is from 'shared/objectIs';
 import {
   getForksAtLevel,
@@ -1180,10 +1182,18 @@ function updateClassComponent(
         const lane = pickArbitraryLane(renderLanes);
         workInProgress.lanes = mergeLanes(workInProgress.lanes, lane);
         // Schedule the error boundary to re-render using updated state
-        const update = createClassErrorUpdate(
+        const root: FiberRoot | null = getWorkInProgressRoot();
+        if (root === null) {
+          throw new Error(
+            'Expected a work-in-progress root. This is a bug in React. Please file an issue.',
+          );
+        }
+        const update = createClassErrorUpdate(lane);
+        initializeClassErrorUpdate(
+          update,
+          root,
           workInProgress,
           createCapturedValueAtFiber(error, workInProgress),
-          lane,
         );
         enqueueCapturedUpdate(workInProgress, update);
         break;
@@ -1975,7 +1985,7 @@ function mountIndeterminateComponent(
     if (__DEV__) {
       if (disableLegacyContext && Component.contextTypes) {
         console.error(
-          '%s uses the legacy contextTypes API which is no longer supported. ' +
+          '%s uses the legacy contextTypes API which was removed in React 19. ' +
             'Use React.createContext() with React.useContext() instead.',
           getComponentNameFromType(Component) || 'Unknown',
         );
@@ -2743,18 +2753,7 @@ function mountDehydratedSuspenseComponent(
 ): null | Fiber {
   // During the first pass, we'll bail out and not drill into the children.
   // Instead, we'll leave the content in place and try to hydrate it later.
-  if ((workInProgress.mode & ConcurrentMode) === NoMode) {
-    if (__DEV__) {
-      console.error(
-        'Cannot hydrate Suspense in legacy mode. Switch from ' +
-          'ReactDOM.hydrate(element, container) to ' +
-          'ReactDOMClient.hydrateRoot(container, <App />)' +
-          '.render(element) or remove the Suspense components from ' +
-          'the server rendered components.',
-      );
-    }
-    workInProgress.lanes = laneToLanes(SyncLane);
-  } else if (isSuspenseInstanceFallback(suspenseInstance)) {
+  if (isSuspenseInstanceFallback(suspenseInstance)) {
     // This is a client-only boundary. Since we won't get any content from the server
     // for this, we need to schedule that at a higher priority based on when it would
     // have timed out. In theory we could render it in this pass but it would have the
@@ -2793,15 +2792,6 @@ function updateDehydratedSuspenseComponent(
     // We should never be hydrating at this point because it is the first pass,
     // but after we've already committed once.
     warnIfHydrating();
-
-    if ((workInProgress.mode & ConcurrentMode) === NoMode) {
-      return retrySuspenseComponentWithoutHydrating(
-        current,
-        workInProgress,
-        renderLanes,
-        null,
-      );
-    }
 
     if (isSuspenseInstanceFallback(suspenseInstance)) {
       // This boundary is in a permanent fallback state. In this case, we'll never

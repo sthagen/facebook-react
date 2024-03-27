@@ -70,15 +70,18 @@ import {
   noTimeout,
   afterActiveInstanceBlur,
   getCurrentEventPriority,
-  errorHydratingContainer,
   startSuspendingCommit,
   waitForCommitToBeReady,
   preloadInstance,
+  supportsHydration,
 } from './ReactFiberConfig';
 
 import {createWorkInProgress, resetWorkInProgress} from './ReactFiber';
 import {isRootDehydrated} from './ReactFiberShellHydration';
-import {getIsHydrating} from './ReactFiberHydrationContext';
+import {
+  getIsHydrating,
+  errorHydratingContainer,
+} from './ReactFiberHydrationContext';
 import {
   NoMode,
   ProfileMode,
@@ -174,6 +177,7 @@ import {
   throwException,
   createRootErrorUpdate,
   createClassErrorUpdate,
+  initializeClassErrorUpdate,
 } from './ReactFiberThrow';
 import {
   commitBeforeMutationEffects,
@@ -274,6 +278,7 @@ import {
 } from './ReactFiberRootScheduler';
 import {getMaskedContext, getUnmaskedContext} from './ReactFiberContext';
 import {peekEntangledActionLane} from './ReactFiberAsyncAction';
+import {logUncaughtError} from './ReactFiberErrorLogger';
 
 const PossiblyWeakMap = typeof WeakMap === 'function' ? WeakMap : Map;
 
@@ -345,8 +350,6 @@ export let entangledRenderLanes: Lanes = NoLanes;
 
 // Whether to root completed, errored, suspended, etc.
 let workInProgressRootExitStatus: RootExitStatus = RootInProgress;
-// A fatal error, if one is thrown
-let workInProgressRootFatalError: mixed = null;
 // The work left over by components that were visited during this render. Only
 // includes unprocessed updates, not work in bailed out children.
 let workInProgressRootSkippedLanes: Lanes = NoLanes;
@@ -561,8 +564,6 @@ export function getRenderTargetTime(): number {
   return workInProgressRootRenderTargetTime;
 }
 
-let hasUncaughtError = false;
-let firstUncaughtError = null;
 let legacyErrorBoundariesThatAlreadyFailed: Set<mixed> | null = null;
 
 let rootDoesHavePassiveEffects: boolean = false;
@@ -971,11 +972,9 @@ export function performConcurrentWorkOnRoot(
           }
         }
         if (exitStatus === RootFatalErrored) {
-          const fatalError = workInProgressRootFatalError;
           prepareFreshStack(root, NoLanes);
           markRootSuspended(root, lanes, NoLane);
-          ensureRootIsScheduled(root);
-          throw fatalError;
+          break;
         }
 
         // We now have a consistent tree. The next step is either to commit it,
@@ -1003,7 +1002,7 @@ function recoverFromConcurrentError(
   // Before rendering again, save the errors from the previous attempt.
   const errorsFromFirstAttempt = workInProgressRootConcurrentErrors;
 
-  const wasRootDehydrated = isRootDehydrated(root);
+  const wasRootDehydrated = supportsHydration && isRootDehydrated(root);
   if (wasRootDehydrated) {
     // The shell failed to hydrate. Set a flag to force a client rendering
     // during the next attempt. To do this, we call prepareFreshStack now
@@ -1388,11 +1387,10 @@ export function performSyncWorkOnRoot(root: FiberRoot, lanes: Lanes): null {
   }
 
   if (exitStatus === RootFatalErrored) {
-    const fatalError = workInProgressRootFatalError;
     prepareFreshStack(root, NoLanes);
     markRootSuspended(root, lanes, NoLane);
     ensureRootIsScheduled(root);
-    throw fatalError;
+    return null;
   }
 
   if (exitStatus === RootDidNotComplete) {
@@ -1622,7 +1620,6 @@ function prepareFreshStack(root: FiberRoot, lanes: Lanes): Fiber {
   workInProgressThrownValue = null;
   workInProgressRootDidAttachPingListener = false;
   workInProgressRootExitStatus = RootInProgress;
-  workInProgressRootFatalError = null;
   workInProgressRootSkippedLanes = NoLanes;
   workInProgressRootInterleavedUpdatedLanes = NoLanes;
   workInProgressRootRenderPhaseUpdatedLanes = NoLanes;
@@ -1735,7 +1732,10 @@ function handleThrow(root: FiberRoot, thrownValue: any): void {
   if (erroredWork === null) {
     // This is a fatal error
     workInProgressRootExitStatus = RootFatalErrored;
-    workInProgressRootFatalError = thrownValue;
+    logUncaughtError(
+      root,
+      createCapturedValueAtFiber(thrownValue, root.current),
+    );
     return;
   }
 
@@ -2513,7 +2513,7 @@ function throwAndUnwindWorkLoop(
       workInProgressRootRenderLanes,
     );
     if (didFatal) {
-      panicOnRootError(thrownValue);
+      panicOnRootError(root, thrownValue);
       return;
     }
   } catch (error) {
@@ -2525,7 +2525,7 @@ function throwAndUnwindWorkLoop(
       workInProgress = returnFiber;
       throw error;
     } else {
-      panicOnRootError(thrownValue);
+      panicOnRootError(root, thrownValue);
       return;
     }
   }
@@ -2547,13 +2547,13 @@ function throwAndUnwindWorkLoop(
   }
 }
 
-function panicOnRootError(error: mixed) {
+function panicOnRootError(root: FiberRoot, error: mixed) {
   // There's no ancestor that can handle this exception. This should never
   // happen because the root is supposed to capture all errors that weren't
   // caught by an error boundary. This is a fatal error, or panic condition,
   // because we've run out of ways to recover.
   workInProgressRootExitStatus = RootFatalErrored;
-  workInProgressRootFatalError = error;
+  logUncaughtError(root, createCapturedValueAtFiber(error, root.current));
   // Set `workInProgress` to null. This represents advancing to the next
   // sibling, or the parent if there are no siblings. But since the root
   // has no siblings nor a parent, we set it to null. Usually this is
@@ -3029,13 +3029,6 @@ function commitRootImpl(
     }
   }
 
-  if (hasUncaughtError) {
-    hasUncaughtError = false;
-    const error = firstUncaughtError;
-    firstUncaughtError = null;
-    throw error;
-  }
-
   // If the passive effects are the result of a discrete render, flush them
   // synchronously at the end of the current task so that the result is
   // immediately observable. Otherwise, we assume that they are not
@@ -3355,21 +3348,17 @@ export function markLegacyErrorBoundaryAsFailed(instance: mixed) {
   }
 }
 
-function prepareToThrowUncaughtError(error: mixed) {
-  if (!hasUncaughtError) {
-    hasUncaughtError = true;
-    firstUncaughtError = error;
-  }
-}
-export const onUncaughtError = prepareToThrowUncaughtError;
-
 function captureCommitPhaseErrorOnRoot(
   rootFiber: Fiber,
   sourceFiber: Fiber,
   error: mixed,
 ) {
   const errorInfo = createCapturedValueAtFiber(error, sourceFiber);
-  const update = createRootErrorUpdate(rootFiber, errorInfo, (SyncLane: Lane));
+  const update = createRootErrorUpdate(
+    rootFiber.stateNode,
+    errorInfo,
+    (SyncLane: Lane),
+  );
   const root = enqueueUpdate(rootFiber, update, (SyncLane: Lane));
   if (root !== null) {
     markRootUpdated(root, SyncLane);
@@ -3406,13 +3395,10 @@ export function captureCommitPhaseError(
           !isAlreadyFailedLegacyErrorBoundary(instance))
       ) {
         const errorInfo = createCapturedValueAtFiber(error, sourceFiber);
-        const update = createClassErrorUpdate(
-          fiber,
-          errorInfo,
-          (SyncLane: Lane),
-        );
+        const update = createClassErrorUpdate((SyncLane: Lane));
         const root = enqueueUpdate(fiber, update, (SyncLane: Lane));
         if (root !== null) {
+          initializeClassErrorUpdate(update, root, fiber, errorInfo);
           markRootUpdated(root, SyncLane);
           ensureRootIsScheduled(root);
         }

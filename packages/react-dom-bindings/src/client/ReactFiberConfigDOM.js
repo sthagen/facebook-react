@@ -30,8 +30,6 @@ import type {
 import {NotPending} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
 import {getCurrentRootHostContainer} from 'react-reconciler/src/ReactFiberHostContext';
 import {DefaultEventPriority} from 'react-reconciler/src/ReactEventPriorities';
-// TODO: Remove this deep import when we delete the legacy root API
-import {ConcurrentMode, NoMode} from 'react-reconciler/src/ReactTypeOfMode';
 
 import hasOwnProperty from 'shared/hasOwnProperty';
 import {checkAttributeStringCoercion} from 'shared/CheckStringCoercion';
@@ -54,14 +52,12 @@ import {hasRole} from './DOMAccessibilityRoles';
 import {
   setInitialProperties,
   updateProperties,
+  hydrateProperties,
+  hydrateText,
   diffHydratedProperties,
+  getPropsFromElement,
   diffHydratedText,
   trapClickOnNonInteractiveElement,
-  checkForUnmatchedText,
-  warnForDeletedHydratableElement,
-  warnForDeletedHydratableText,
-  warnForInsertedHydratedElement,
-  warnForInsertedHydratedText,
 } from './ReactDOMComponent';
 import {getSelectionInformation, restoreSelection} from './ReactInputSelection';
 import setTextContent from './setTextContent';
@@ -1344,6 +1340,26 @@ export function getFirstHydratableChildWithinSuspenseInstance(
   return getNextHydratable(parentInstance.nextSibling);
 }
 
+export function describeHydratableInstanceForDevWarnings(
+  instance: HydratableInstance,
+): string | {type: string, props: $ReadOnly<Props>} {
+  // Reverse engineer a pseudo react-element from hydratable instnace
+  if (instance.nodeType === ELEMENT_NODE) {
+    // Reverse engineer a set of props that can print for dev warnings
+    return {
+      type: instance.nodeName.toLowerCase(),
+      props: getPropsFromElement((instance: any)),
+    };
+  } else if (instance.nodeType === COMMENT_NODE) {
+    return {
+      type: 'Suspense',
+      props: {},
+    };
+  } else {
+    return instance.nodeValue;
+  }
+}
+
 export function validateHydratableInstance(
   type: string,
   props: Props,
@@ -1363,26 +1379,23 @@ export function hydrateInstance(
   props: Props,
   hostContext: HostContext,
   internalInstanceHandle: Object,
-  shouldWarnDev: boolean,
-): void {
+): boolean {
   precacheFiberNode(internalInstanceHandle, instance);
   // TODO: Possibly defer this until the commit phase where all the events
   // get attached.
   updateFiberProps(instance, props);
 
-  // TODO: Temporary hack to check if we're in a concurrent root. We can delete
-  // when the legacy root API is removed.
-  const isConcurrentMode =
-    ((internalInstanceHandle: Fiber).mode & ConcurrentMode) !== NoMode;
+  return hydrateProperties(instance, type, props, hostContext);
+}
 
-  diffHydratedProperties(
-    instance,
-    type,
-    props,
-    isConcurrentMode,
-    shouldWarnDev,
-    hostContext,
-  );
+// Returns a Map of properties that were different on the server.
+export function diffHydratedPropsForDevWarnings(
+  instance: Instance,
+  type: string,
+  props: Props,
+  hostContext: HostContext,
+): null | $ReadOnly<Props> {
+  return diffHydratedProperties(instance, type, props, hostContext);
 }
 
 export function validateHydratableTextInstance(
@@ -1403,16 +1416,26 @@ export function hydrateTextInstance(
   textInstance: TextInstance,
   text: string,
   internalInstanceHandle: Object,
-  shouldWarnDev: boolean,
+  parentInstanceProps: null | Props,
 ): boolean {
   precacheFiberNode(internalInstanceHandle, textInstance);
 
-  // TODO: Temporary hack to check if we're in a concurrent root. We can delete
-  // when the legacy root API is removed.
-  const isConcurrentMode =
-    ((internalInstanceHandle: Fiber).mode & ConcurrentMode) !== NoMode;
+  return hydrateText(textInstance, text, parentInstanceProps);
+}
 
-  return diffHydratedText(textInstance, text, isConcurrentMode);
+// Returns the server text if it differs from the client.
+export function diffHydratedTextForDevWarnings(
+  textInstance: TextInstance,
+  text: string,
+  parentProps: null | Props,
+): null | string {
+  if (
+    parentProps === null ||
+    parentProps[SUPPRESS_HYDRATION_WARNING] !== true
+  ) {
+    return diffHydratedText(textInstance, text);
+  }
+  return null;
 }
 
 export function hydrateSuspenseInstance(
@@ -1502,204 +1525,6 @@ export function shouldDeleteUnhydratedTailInstances(
   parentType: string,
 ): boolean {
   return parentType !== 'form' && parentType !== 'button';
-}
-
-export function didNotMatchHydratedContainerTextInstance(
-  parentContainer: Container,
-  textInstance: TextInstance,
-  text: string,
-  isConcurrentMode: boolean,
-  shouldWarnDev: boolean,
-) {
-  checkForUnmatchedText(
-    textInstance.nodeValue,
-    text,
-    isConcurrentMode,
-    shouldWarnDev,
-  );
-}
-
-export function didNotMatchHydratedTextInstance(
-  parentType: string,
-  parentProps: Props,
-  parentInstance: Instance,
-  textInstance: TextInstance,
-  text: string,
-  isConcurrentMode: boolean,
-  shouldWarnDev: boolean,
-) {
-  if (parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-    checkForUnmatchedText(
-      textInstance.nodeValue,
-      text,
-      isConcurrentMode,
-      shouldWarnDev,
-    );
-  }
-}
-
-export function didNotHydrateInstanceWithinContainer(
-  parentContainer: Container,
-  instance: HydratableInstance,
-) {
-  if (__DEV__) {
-    if (instance.nodeType === ELEMENT_NODE) {
-      warnForDeletedHydratableElement(parentContainer, (instance: any));
-    } else if (instance.nodeType === COMMENT_NODE) {
-      // TODO: warnForDeletedHydratableSuspenseBoundary
-    } else {
-      warnForDeletedHydratableText(parentContainer, (instance: any));
-    }
-  }
-}
-
-export function didNotHydrateInstanceWithinSuspenseInstance(
-  parentInstance: SuspenseInstance,
-  instance: HydratableInstance,
-) {
-  if (__DEV__) {
-    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
-    const parentNode: Element | Document | null = parentInstance.parentNode;
-    if (parentNode !== null) {
-      if (instance.nodeType === ELEMENT_NODE) {
-        warnForDeletedHydratableElement(parentNode, (instance: any));
-      } else if (instance.nodeType === COMMENT_NODE) {
-        // TODO: warnForDeletedHydratableSuspenseBoundary
-      } else {
-        warnForDeletedHydratableText(parentNode, (instance: any));
-      }
-    }
-  }
-}
-
-export function didNotHydrateInstance(
-  parentType: string,
-  parentProps: Props,
-  parentInstance: Instance,
-  instance: HydratableInstance,
-  isConcurrentMode: boolean,
-) {
-  if (__DEV__) {
-    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-      if (instance.nodeType === ELEMENT_NODE) {
-        warnForDeletedHydratableElement(parentInstance, (instance: any));
-      } else if (instance.nodeType === COMMENT_NODE) {
-        // TODO: warnForDeletedHydratableSuspenseBoundary
-      } else {
-        warnForDeletedHydratableText(parentInstance, (instance: any));
-      }
-    }
-  }
-}
-
-export function didNotFindHydratableInstanceWithinContainer(
-  parentContainer: Container,
-  type: string,
-  props: Props,
-) {
-  if (__DEV__) {
-    warnForInsertedHydratedElement(parentContainer, type, props);
-  }
-}
-
-export function didNotFindHydratableTextInstanceWithinContainer(
-  parentContainer: Container,
-  text: string,
-) {
-  if (__DEV__) {
-    warnForInsertedHydratedText(parentContainer, text);
-  }
-}
-
-export function didNotFindHydratableSuspenseInstanceWithinContainer(
-  parentContainer: Container,
-) {
-  if (__DEV__) {
-    // TODO: warnForInsertedHydratedSuspense(parentContainer);
-  }
-}
-
-export function didNotFindHydratableInstanceWithinSuspenseInstance(
-  parentInstance: SuspenseInstance,
-  type: string,
-  props: Props,
-) {
-  if (__DEV__) {
-    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
-    const parentNode: Element | Document | null = parentInstance.parentNode;
-    if (parentNode !== null)
-      warnForInsertedHydratedElement(parentNode, type, props);
-  }
-}
-
-export function didNotFindHydratableTextInstanceWithinSuspenseInstance(
-  parentInstance: SuspenseInstance,
-  text: string,
-) {
-  if (__DEV__) {
-    // $FlowFixMe[incompatible-type]: Only Element or Document can be parent nodes.
-    const parentNode: Element | Document | null = parentInstance.parentNode;
-    if (parentNode !== null) warnForInsertedHydratedText(parentNode, text);
-  }
-}
-
-export function didNotFindHydratableSuspenseInstanceWithinSuspenseInstance(
-  parentInstance: SuspenseInstance,
-) {
-  if (__DEV__) {
-    // const parentNode: Element | Document | null = parentInstance.parentNode;
-    // TODO: warnForInsertedHydratedSuspense(parentNode);
-  }
-}
-
-export function didNotFindHydratableInstance(
-  parentType: string,
-  parentProps: Props,
-  parentInstance: Instance,
-  type: string,
-  props: Props,
-  isConcurrentMode: boolean,
-) {
-  if (__DEV__) {
-    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-      warnForInsertedHydratedElement(parentInstance, type, props);
-    }
-  }
-}
-
-export function didNotFindHydratableTextInstance(
-  parentType: string,
-  parentProps: Props,
-  parentInstance: Instance,
-  text: string,
-  isConcurrentMode: boolean,
-) {
-  if (__DEV__) {
-    if (isConcurrentMode || parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
-      warnForInsertedHydratedText(parentInstance, text);
-    }
-  }
-}
-
-export function didNotFindHydratableSuspenseInstance(
-  parentType: string,
-  parentProps: Props,
-  parentInstance: Instance,
-) {
-  if (__DEV__) {
-    // TODO: warnForInsertedHydratedSuspense(parentInstance);
-  }
-}
-
-export function errorHydratingContainer(parentContainer: Container): void {
-  if (__DEV__) {
-    // TODO: This gets logged by onRecoverableError, too, so we should be
-    // able to remove it.
-    console.error(
-      'An error occurred during hydration. The server HTML was replaced with client content in <%s>.',
-      parentContainer.nodeName.toLowerCase(),
-    );
-  }
 }
 
 // -------------------
