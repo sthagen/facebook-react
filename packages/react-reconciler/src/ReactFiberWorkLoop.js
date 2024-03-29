@@ -39,6 +39,7 @@ import {
   disableLegacyContext,
   alwaysThrottleRetries,
   enableInfiniteRenderLoopDetection,
+  disableLegacyMode,
 } from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import is from 'shared/objectIs';
@@ -89,7 +90,6 @@ import {
 } from './ReactTypeOfMode';
 import {
   HostRoot,
-  IndeterminateComponent,
   ClassComponent,
   SuspenseComponent,
   SuspenseListComponent,
@@ -1099,7 +1099,14 @@ function finishConcurrentRender(
       // Commit the placeholder.
       break;
     }
-    case RootErrored:
+    case RootErrored: {
+      // This render errored. Ignore any recoverable errors because we weren't actually
+      // able to recover. Instead, whatever the final errors were is the ones we log.
+      // This ensures that we only log the actual client side error if it's just a plain
+      // error thrown from a component on the server and the client.
+      workInProgressRootRecoverableErrors = null;
+      break;
+    }
     case RootSuspended:
     case RootCompleted: {
       break;
@@ -1449,21 +1456,27 @@ export function deferredUpdates<A>(fn: () => A): A {
 }
 
 export function batchedUpdates<A, R>(fn: A => R, a: A): R {
-  const prevExecutionContext = executionContext;
-  executionContext |= BatchedContext;
-  try {
+  if (disableLegacyMode) {
+    // batchedUpdates is a no-op now, but there's still some internal react-dom
+    // code calling it, that we can't remove until we remove legacy mode.
     return fn(a);
-  } finally {
-    executionContext = prevExecutionContext;
-    // If there were legacy sync updates, flush them at the end of the outer
-    // most batchedUpdates-like method.
-    if (
-      executionContext === NoContext &&
-      // Treat `act` as if it's inside `batchedUpdates`, even in legacy mode.
-      !(__DEV__ && ReactCurrentActQueue.isBatchingLegacy)
-    ) {
-      resetRenderTimer();
-      flushSyncWorkOnLegacyRootsOnly();
+  } else {
+    const prevExecutionContext = executionContext;
+    executionContext |= BatchedContext;
+    try {
+      return fn(a);
+    } finally {
+      executionContext = prevExecutionContext;
+      // If there were legacy sync updates, flush them at the end of the outer
+      // most batchedUpdates-like method.
+      if (
+        executionContext === NoContext &&
+        // Treat `act` as if it's inside `batchedUpdates`, even in legacy mode.
+        !(__DEV__ && ReactCurrentActQueue.isBatchingLegacy)
+      ) {
+        resetRenderTimer();
+        flushSyncWorkOnLegacyRootsOnly();
+      }
     }
   }
 }
@@ -2381,12 +2394,6 @@ function replaySuspendedUnitOfWork(unitOfWork: Fiber): void {
     startProfilerTimer(unitOfWork);
   }
   switch (unitOfWork.tag) {
-    case IndeterminateComponent: {
-      // Because it suspended with `use`, we can assume it's a
-      // function component.
-      unitOfWork.tag = FunctionComponent;
-      // Fallthrough to the next branch.
-    }
     case SimpleMemoComponent:
     case FunctionComponent: {
       // Resolve `defaultProps`. This logic is copied from `beginWork`.
@@ -3015,10 +3022,7 @@ function commitRootImpl(
     const onRecoverableError = root.onRecoverableError;
     for (let i = 0; i < recoverableErrors.length; i++) {
       const recoverableError = recoverableErrors[i];
-      const errorInfo = makeErrorInfo(
-        recoverableError.digest,
-        recoverableError.stack,
-      );
+      const errorInfo = makeErrorInfo(recoverableError.stack);
       onRecoverableError(recoverableError.value, errorInfo);
     }
   }
@@ -3116,28 +3120,35 @@ function commitRootImpl(
   return null;
 }
 
-function makeErrorInfo(digest: ?string, componentStack: ?string) {
+function makeErrorInfo(componentStack: ?string) {
   if (__DEV__) {
     const errorInfo = {
       componentStack,
-      digest,
     };
-    Object.defineProperty(errorInfo, 'digest', {
-      configurable: false,
-      enumerable: true,
-      get() {
-        console.error(
-          'You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
-            ' This property is deprecated and will be removed in a future version of React.' +
-            ' To access the digest of an Error look for this property on the Error instance itself.',
-        );
-        return digest;
+    return new Proxy(errorInfo, {
+      get(target, prop, receiver) {
+        if (prop === 'digest') {
+          console.error(
+            'You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
+              ' This property is no longer provided as part of errorInfo but can be accessed as a property' +
+              ' of the Error instance itself.',
+          );
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+      has(target, prop) {
+        if (prop === 'digest') {
+          console.error(
+            'You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
+              ' This property is no longer provided as part of errorInfo but can be accessed as a property' +
+              ' of the Error instance itself.',
+          );
+        }
+        return Reflect.has(target, prop);
       },
     });
-    return errorInfo;
   } else {
     return {
-      digest,
       componentStack,
     };
   }
@@ -3805,7 +3816,6 @@ export function warnAboutUpdateOnNotYetMountedFiberInDEV(fiber: Fiber) {
 
     const tag = fiber.tag;
     if (
-      tag !== IndeterminateComponent &&
       tag !== HostRoot &&
       tag !== ClassComponent &&
       tag !== FunctionComponent &&

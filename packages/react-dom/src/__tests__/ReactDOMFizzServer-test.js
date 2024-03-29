@@ -3563,11 +3563,11 @@ describe('ReactDOMFizzServer', () => {
         onRecoverableError(error, errorInfo) {
           expect(() => {
             expect(error.digest).toBe('a digest');
-            expect(errorInfo.digest).toBe('a digest');
+            expect(errorInfo.digest).toBe(undefined);
           }).toErrorDev(
-            'Warning: You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
-              ' This property is deprecated and will be removed in a future version of React.' +
-              ' To access the digest of an Error look for this property on the Error instance itself.',
+            'You are accessing "digest" from the errorInfo object passed to onRecoverableError.' +
+              ' This property is no longer provided as part of errorInfo but can be accessed as a property' +
+              ' of the Error instance itself.',
             {withoutStack: true},
           );
         },
@@ -6004,23 +6004,23 @@ describe('ReactDOMFizzServer', () => {
     expect(reportedServerErrors.length).toBe(1);
     expect(reportedServerErrors[0].message).toBe('Oops!');
 
+    const reportedCaughtErrors = [];
     const reportedClientErrors = [];
     ReactDOMClient.hydrateRoot(container, <App />, {
+      onCaughtError(error) {
+        reportedCaughtErrors.push(error);
+      },
       onRecoverableError(error) {
         reportedClientErrors.push(error);
       },
     });
     await waitForAll([]);
     expect(getVisibleChildren(container)).toEqual('Oops!');
-    expect(reportedClientErrors.length).toBe(1);
-    if (__DEV__) {
-      expect(reportedClientErrors[0].message).toBe('Oops!');
-    } else {
-      expect(reportedClientErrors[0].message).toBe(
-        'The server could not finish this Suspense boundary, likely due to ' +
-          'an error during server rendering. Switched to client rendering.',
-      );
-    }
+    // Because this is rethrown on the client, it is not a recoverable error.
+    expect(reportedClientErrors.length).toBe(0);
+    // It is caught by the error boundary.
+    expect(reportedCaughtErrors.length).toBe(1);
+    expect(reportedCaughtErrors[0].message).toBe('Oops!');
   });
 
   it("use a promise that's already been instrumented and resolved", async () => {
@@ -6187,8 +6187,8 @@ describe('ReactDOMFizzServer', () => {
       // Because of the render phase update above, this component is evaluated
       // multiple times (even during SSR), but it should only emit a single
       // marker per useActionState instance.
-      const [formState] = useActionState(action, 0);
-      const text = `${readText('Child')}:${formState}:${localState}`;
+      const [actionState] = useActionState(action, 0);
+      const text = `${readText('Child')}:${actionState}:${localState}`;
       return (
         <div id="child" ref={childRef}>
           {text}
