@@ -18,7 +18,6 @@ import {
   REACT_LEGACY_HIDDEN_TYPE,
   REACT_OFFSCREEN_TYPE,
   REACT_SCOPE_TYPE,
-  REACT_CACHE_TYPE,
   REACT_TRACING_MARKER_TYPE,
 } from 'shared/ReactSymbols';
 
@@ -37,7 +36,6 @@ import {memo} from './ReactMemo';
 import {cache} from './ReactCacheClient';
 import {postpone} from './ReactPostpone';
 import {
-  getCacheSignal,
   getCacheForType,
   useCallback,
   useContext,
@@ -116,10 +114,8 @@ export {
   REACT_SUSPENSE_LIST_TYPE as unstable_SuspenseList,
   REACT_LEGACY_HIDDEN_TYPE as unstable_LegacyHidden,
   REACT_OFFSCREEN_TYPE as unstable_Activity,
-  getCacheSignal as unstable_getCacheSignal,
   getCacheForType as unstable_getCacheForType,
   useCacheRefresh as unstable_useCacheRefresh,
-  REACT_CACHE_TYPE as unstable_Cache,
   use,
   useMemoCache as unstable_useMemoCache,
   // enableScopeAPI

@@ -28,7 +28,6 @@ import {
   isHostSingletonType,
 } from './ReactFiberConfig';
 import {
-  enableCache,
   enableProfilerTimer,
   enableScopeAPI,
   enableLegacyHidden,
@@ -38,11 +37,11 @@ import {
   enableDebugTracing,
   enableDO_NOT_USE_disableStrictPassiveEffect,
   enableRenderableContext,
+  disableLegacyMode,
 } from 'shared/ReactFeatureFlags';
 import {NoFlags, Placement, StaticMask} from './ReactFiberFlags';
 import {ConcurrentRoot} from './ReactRootTags';
 import {
-  IndeterminateComponent,
   ClassComponent,
   HostRoot,
   HostComponent,
@@ -66,7 +65,6 @@ import {
   ScopeComponent,
   OffscreenComponent,
   LegacyHiddenComponent,
-  CacheComponent,
   TracingMarkerComponent,
 } from './ReactWorkTags';
 import {OffscreenVisible} from './ReactFiberActivityComponent';
@@ -104,7 +102,6 @@ import {
   REACT_SCOPE_TYPE,
   REACT_OFFSCREEN_TYPE,
   REACT_LEGACY_HIDDEN_TYPE,
-  REACT_CACHE_TYPE,
   REACT_TRACING_MARKER_TYPE,
 } from 'shared/ReactSymbols';
 import {TransitionTracingMarker} from './ReactFiberTracingMarkerComponent';
@@ -248,19 +245,10 @@ export function isSimpleFunctionComponent(type: any): boolean {
   );
 }
 
-export function resolveLazyComponentTag(Component: Function): WorkTag {
-  if (typeof Component === 'function') {
-    return shouldConstruct(Component) ? ClassComponent : FunctionComponent;
-  } else if (Component !== undefined && Component !== null) {
-    const $$typeof = Component.$$typeof;
-    if ($$typeof === REACT_FORWARD_REF_TYPE) {
-      return ForwardRef;
-    }
-    if ($$typeof === REACT_MEMO_TYPE) {
-      return MemoComponent;
-    }
-  }
-  return IndeterminateComponent;
+export function isFunctionClassComponent(
+  type: (...args: Array<any>) => mixed,
+): boolean {
+  return shouldConstruct(type);
 }
 
 // This is used to create an alternate fiber to do work on.
@@ -351,7 +339,6 @@ export function createWorkInProgress(current: Fiber, pendingProps: any): Fiber {
     workInProgress._debugInfo = current._debugInfo;
     workInProgress._debugNeedsRemount = current._debugNeedsRemount;
     switch (workInProgress.tag) {
-      case IndeterminateComponent:
       case FunctionComponent:
       case SimpleMemoComponent:
         workInProgress.type = resolveFunctionForHotReloading(current.type);
@@ -453,7 +440,7 @@ export function createHostRootFiber(
   concurrentUpdatesByDefaultOverride: null | boolean,
 ): Fiber {
   let mode;
-  if (tag === ConcurrentRoot) {
+  if (disableLegacyMode || tag === ConcurrentRoot) {
     mode = ConcurrentMode;
     if (isStrictMode === true) {
       mode |= StrictLegacyMode | StrictEffectsMode;
@@ -492,7 +479,7 @@ export function createFiberFromTypeAndProps(
   mode: TypeOfMode,
   lanes: Lanes,
 ): Fiber {
-  let fiberTag = IndeterminateComponent;
+  let fiberTag = FunctionComponent;
   // The resolved type is set if we know what the final type will be. I.e. it's not lazy.
   let resolvedType = type;
   if (typeof type === 'function') {
@@ -531,7 +518,7 @@ export function createFiberFromTypeAndProps(
       case REACT_STRICT_MODE_TYPE:
         fiberTag = Mode;
         mode |= StrictLegacyMode;
-        if ((mode & ConcurrentMode) !== NoMode) {
+        if (disableLegacyMode || (mode & ConcurrentMode) !== NoMode) {
           // Strict effects should never run on legacy roots
           mode |= StrictEffectsMode;
           if (
@@ -558,11 +545,6 @@ export function createFiberFromTypeAndProps(
       case REACT_SCOPE_TYPE:
         if (enableScopeAPI) {
           return createFiberFromScope(type, pendingProps, mode, lanes, key);
-        }
-      // Fall through
-      case REACT_CACHE_TYPE:
-        if (enableCache) {
-          return createFiberFromCache(pendingProps, mode, lanes, key);
         }
       // Fall through
       case REACT_TRACING_MARKER_TYPE:
@@ -804,18 +786,6 @@ export function createFiberFromLegacyHidden(
     attach: () => attachOffscreenInstance(instance),
   };
   fiber.stateNode = instance;
-  return fiber;
-}
-
-export function createFiberFromCache(
-  pendingProps: any,
-  mode: TypeOfMode,
-  lanes: Lanes,
-  key: null | string,
-): Fiber {
-  const fiber = createFiber(CacheComponent, pendingProps, key, mode);
-  fiber.elementType = REACT_CACHE_TYPE;
-  fiber.lanes = lanes;
   return fiber;
 }
 

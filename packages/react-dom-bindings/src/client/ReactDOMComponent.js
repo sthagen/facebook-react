@@ -681,7 +681,7 @@ function setProp(
         }
       }
     }
-    // fallthrough for new boolean props without the flag on
+    // Fallthrough for boolean props that don't have a warning for empty strings.
     case 'allowFullScreen':
     case 'async':
     case 'autoPlay':
@@ -1301,7 +1301,7 @@ export function setInitialProperties(
             continue;
           }
           const propValue = props[propKey];
-          if (propValue == null) {
+          if (propValue === undefined) {
             continue;
           }
           setPropOnCustomElement(
@@ -1310,7 +1310,7 @@ export function setInitialProperties(
             propKey,
             propValue,
             props,
-            null,
+            undefined,
           );
         }
         return;
@@ -1741,14 +1741,14 @@ export function updateProperties(
           const lastProp = lastProps[propKey];
           if (
             lastProps.hasOwnProperty(propKey) &&
-            lastProp != null &&
+            lastProp !== undefined &&
             !nextProps.hasOwnProperty(propKey)
           ) {
             setPropOnCustomElement(
               domElement,
               tag,
               propKey,
-              null,
+              undefined,
               nextProps,
               lastProp,
             );
@@ -1760,7 +1760,7 @@ export function updateProperties(
           if (
             nextProps.hasOwnProperty(propKey) &&
             nextProp !== lastProp &&
-            (nextProp != null || lastProp != null)
+            (nextProp !== undefined || lastProp !== undefined)
           ) {
             setPropOnCustomElement(
               domElement,
@@ -2783,7 +2783,6 @@ function diffHydratedGenericElement(
           serverDifferences,
         );
         continue;
-      // fallthrough for new boolean props without the flag on
       default: {
         if (
           // shouldIgnoreAttribute
