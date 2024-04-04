@@ -137,7 +137,6 @@ import {
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
   disableLegacyContext,
-  enableBigIntSupport,
   enableScopeAPI,
   enableSuspenseAvoidThisFallbackFizz,
   enableCache,
@@ -843,7 +842,7 @@ function encodeErrorForBoundary(
       ? 'Switched to client rendering because the server rendering aborted due to:\n\n'
       : 'Switched to client rendering because the server rendering errored:\n\n';
     boundary.errorMessage = prefix + message;
-    boundary.errorStack = stack;
+    boundary.errorStack = stack !== null ? prefix + stack : null;
     boundary.errorComponentStack = thrownInfo.componentStack;
   }
 }
@@ -1391,6 +1390,25 @@ function finishClassComponent(
   task.keyPath = prevKeyPath;
 }
 
+export function resolveClassComponentProps(
+  Component: any,
+  baseProps: Object,
+): Object {
+  let newProps = baseProps;
+
+  // TODO: This is where defaultProps should be resolved, too.
+
+  if (enableRefAsProp) {
+    // Remove ref from the props object, if it exists.
+    if ('ref' in newProps) {
+      newProps = assign({}, newProps);
+      delete newProps.ref;
+    }
+  }
+
+  return newProps;
+}
+
 function renderClassComponent(
   request: Request,
   task: Task,
@@ -1398,14 +1416,26 @@ function renderClassComponent(
   Component: any,
   props: any,
 ): void {
+  const resolvedProps = resolveClassComponentProps(Component, props);
   const previousComponentStack = task.componentStack;
   task.componentStack = createClassComponentStack(task, Component);
   const maskedContext = !disableLegacyContext
     ? getMaskedContext(Component, task.legacyContext)
     : undefined;
-  const instance = constructClassInstance(Component, props, maskedContext);
-  mountClassInstance(instance, Component, props, maskedContext);
-  finishClassComponent(request, task, keyPath, instance, Component, props);
+  const instance = constructClassInstance(
+    Component,
+    resolvedProps,
+    maskedContext,
+  );
+  mountClassInstance(instance, Component, resolvedProps, maskedContext);
+  finishClassComponent(
+    request,
+    task,
+    keyPath,
+    instance,
+    Component,
+    resolvedProps,
+  );
   task.componentStack = previousComponentStack;
 }
 
@@ -2323,10 +2353,7 @@ function renderNodeDestructive(
     return;
   }
 
-  if (
-    typeof node === 'number' ||
-    (enableBigIntSupport && typeof node === 'bigint')
-  ) {
+  if (typeof node === 'number' || typeof node === 'bigint') {
     const segment = task.blockedSegment;
     if (segment === null) {
       // We assume a text node doesn't have a representation in the replay set,

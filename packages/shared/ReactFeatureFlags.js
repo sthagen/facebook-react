@@ -161,8 +161,6 @@ export const disableClientCache = false;
 // Changes Server Components Reconciliation when they have keys
 export const enableServerComponentKeys = true;
 
-export const enableBigIntSupport = true;
-
 /**
  * Enables a new error detection for infinite render loops from updates caused
  * by setState or similar outside of the component owning the state.
@@ -196,8 +194,6 @@ export const enableRenderableContext = true;
 // Planned feature deprecations and breaking changes. Sorted roughly in order of
 // when we plan to enable them.
 // -----------------------------------------------------------------------------
-
-export const enableUseRefAccessWarning = false;
 
 // Enables time slicing for updates that aren't wrapped in startTransition.
 export const forceConcurrentByDefaultForTesting = false;

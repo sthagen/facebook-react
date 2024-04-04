@@ -48,8 +48,6 @@ export const retryLaneExpirationMs = 5000;
 export const syncLaneExpirationMs = 250;
 export const transitionLaneExpirationMs = 5000;
 
-export const enableUseRefAccessWarning = false;
-
 export const disableSchedulerTimeoutInWorkLoop = false;
 export const enableLazyContextPropagation = false;
 export const enableLegacyHidden = false;
@@ -87,7 +85,6 @@ export const enableInfiniteRenderLoopDetection = false;
 // const __NEXT_MAJOR__ = __EXPERIMENTAL__;
 export const enableRefAsProp = true;
 export const disableStringRefs = true;
-export const enableBigIntSupport = true;
 export const disableLegacyMode = true;
 export const disableLegacyContext = true;
 export const disableDOMTestUtils = true;

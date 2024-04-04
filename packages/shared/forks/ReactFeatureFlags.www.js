@@ -16,10 +16,8 @@ const dynamicFeatureFlags: DynamicFeatureFlags = require('ReactFeatureFlags');
 
 export const {
   disableIEWorkarounds,
-  enableBigIntSupport,
   enableTrustedTypesIntegration,
   enableDebugTracing,
-  enableUseRefAccessWarning,
   enableLazyContextPropagation,
   enableUnifiedSyncLane,
   enableRetryLaneExpiration,

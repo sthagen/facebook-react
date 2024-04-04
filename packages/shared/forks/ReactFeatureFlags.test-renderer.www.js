@@ -50,8 +50,6 @@ export const retryLaneExpirationMs = 5000;
 export const syncLaneExpirationMs = 250;
 export const transitionLaneExpirationMs = 5000;
 
-export const enableUseRefAccessWarning = false;
-
 export const disableSchedulerTimeoutInWorkLoop = false;
 export const enableLazyContextPropagation = false;
 export const enableLegacyHidden = false;
@@ -86,8 +84,6 @@ export const disableStringRefs = false;
 export const enableReactTestRendererWarning = false;
 export const disableLegacyMode = false;
 export const disableDOMTestUtils = false;
-
-export const enableBigIntSupport = true;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);
