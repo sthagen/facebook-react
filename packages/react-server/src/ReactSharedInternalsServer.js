@@ -9,11 +9,11 @@
 
 import * as React from 'react';
 
-const ReactSharedServerInternals =
+const ReactSharedInternalsServer =
   // $FlowFixMe: It's defined in the one we resolve to.
   React.__SECRET_SERVER_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
 
-if (!ReactSharedServerInternals) {
+if (!ReactSharedInternalsServer) {
   throw new Error(
     'The "react" package in this environment is not configured correctly. ' +
       'The "react-server" condition must be enabled in any environment that ' +
@@ -21,4 +21,4 @@ if (!ReactSharedServerInternals) {
   );
 }
 
-export default ReactSharedServerInternals;
+export default ReactSharedInternalsServer;

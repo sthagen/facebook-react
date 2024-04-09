@@ -27,7 +27,11 @@ import type {HookFlags} from './ReactHookEffectTags';
 import type {Flags} from './ReactFiberFlags';
 import type {TransitionStatus} from './ReactFiberConfig';
 
-import {NotPendingTransition as NoPendingHostTransition} from './ReactFiberConfig';
+import {
+  NotPendingTransition as NoPendingHostTransition,
+  setCurrentUpdatePriority,
+  getCurrentUpdatePriority,
+} from './ReactFiberConfig';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
   enableDebugTracing,
@@ -74,8 +78,6 @@ import {
 } from './ReactFiberLane';
 import {
   ContinuousEventPriority,
-  getCurrentUpdatePriority,
-  setCurrentUpdatePriority,
   higherEventPriority,
 } from './ReactEventPriorities';
 import {readContext, checkIfContextChanged} from './ReactFiberNewContext';
@@ -154,8 +156,6 @@ import {
   notifyTransitionCallbacks,
   requestCurrentTransition,
 } from './ReactFiberTransition';
-
-const {ReactCurrentDispatcher, ReactCurrentBatchConfig} = ReactSharedInternals;
 
 export type Update<S, A> = {
   lane: Lane,
@@ -535,19 +535,19 @@ export function renderWithHooks<Props, SecondArg>(
   // so memoizedState would be null during updates and mounts.
   if (__DEV__) {
     if (current !== null && current.memoizedState !== null) {
-      ReactCurrentDispatcher.current = HooksDispatcherOnUpdateInDEV;
+      ReactSharedInternals.H = HooksDispatcherOnUpdateInDEV;
     } else if (hookTypesDev !== null) {
       // This dispatcher handles an edge case where a component is updating,
       // but no stateful hooks have been used.
       // We want to match the production code behavior (which will use HooksDispatcherOnMount),
       // but with the extra DEV validation to ensure hooks ordering hasn't changed.
       // This dispatcher does that.
-      ReactCurrentDispatcher.current = HooksDispatcherOnMountWithHookTypesInDEV;
+      ReactSharedInternals.H = HooksDispatcherOnMountWithHookTypesInDEV;
     } else {
-      ReactCurrentDispatcher.current = HooksDispatcherOnMountInDEV;
+      ReactSharedInternals.H = HooksDispatcherOnMountInDEV;
     }
   } else {
-    ReactCurrentDispatcher.current =
+    ReactSharedInternals.H =
       current === null || current.memoizedState === null
         ? HooksDispatcherOnMount
         : HooksDispatcherOnUpdate;
@@ -631,7 +631,7 @@ function finishRenderingHooks<Props, SecondArg>(
 
   // We can assume the previous dispatcher is always this one, since we set it
   // at the beginning of the render phase and there's no re-entrance.
-  ReactCurrentDispatcher.current = ContextOnlyDispatcher;
+  ReactSharedInternals.H = ContextOnlyDispatcher;
 
   // This check uses currentHook so that it works the same in DEV and prod bundles.
   // hookTypesDev could catch more cases (e.g. context) but only in DEV bundles.
@@ -813,7 +813,7 @@ function renderWithHooksAgain<Props, SecondArg>(
       hookTypesUpdateIndexDev = -1;
     }
 
-    ReactCurrentDispatcher.current = __DEV__
+    ReactSharedInternals.H = __DEV__
       ? HooksDispatcherOnRerenderInDEV
       : HooksDispatcherOnRerender;
 
@@ -844,7 +844,7 @@ export function TransitionAwareHostComponent(): TransitionStatus {
   if (!enableAsyncActions) {
     throw new Error('Not implemented.');
   }
-  const dispatcher = ReactCurrentDispatcher.current;
+  const dispatcher: any = ReactSharedInternals.H;
   const [maybeThenable] = dispatcher.useState();
   if (typeof maybeThenable.then === 'function') {
     const thenable: Thenable<TransitionStatus> = (maybeThenable: any);
@@ -896,7 +896,7 @@ export function resetHooksAfterThrow(): void {
 
   // We can assume the previous dispatcher is always this one, since we set it
   // at the beginning of the render phase and there's no re-entrance.
-  ReactCurrentDispatcher.current = ContextOnlyDispatcher;
+  ReactSharedInternals.H = ContextOnlyDispatcher;
 }
 
 export function resetHooksOnUnwind(workInProgress: Fiber): void {
@@ -1072,9 +1072,9 @@ function useThenable<T>(thenable: Thenable<T>): T {
     // time (perhaps because it threw). Subsequent Hook calls should use the
     // mount dispatcher.
     if (__DEV__) {
-      ReactCurrentDispatcher.current = HooksDispatcherOnMountInDEV;
+      ReactSharedInternals.H = HooksDispatcherOnMountInDEV;
     } else {
-      ReactCurrentDispatcher.current = HooksDispatcherOnMount;
+      ReactSharedInternals.H = HooksDispatcherOnMount;
     }
   }
   return result;
@@ -1975,13 +1975,13 @@ function runActionStateAction<S, P>(
   const prevState = actionQueue.state;
 
   // This is a fork of startTransition
-  const prevTransition = ReactCurrentBatchConfig.transition;
+  const prevTransition = ReactSharedInternals.T;
   const currentTransition: BatchConfigTransition = {
     _callbacks: new Set<(BatchConfigTransition, mixed) => mixed>(),
   };
-  ReactCurrentBatchConfig.transition = currentTransition;
+  ReactSharedInternals.T = currentTransition;
   if (__DEV__) {
-    ReactCurrentBatchConfig.transition._updatedFibers = new Set();
+    ReactSharedInternals.T._updatedFibers = new Set();
   }
 
   // Optimistically update the pending state, similar to useTransition.
@@ -2047,7 +2047,7 @@ function runActionStateAction<S, P>(
       (setState: any),
     );
   } finally {
-    ReactCurrentBatchConfig.transition = prevTransition;
+    ReactSharedInternals.T = prevTransition;
 
     if (__DEV__) {
       if (prevTransition === null && currentTransition._updatedFibers) {
@@ -2793,7 +2793,7 @@ function startTransition<S>(
     higherEventPriority(previousPriority, ContinuousEventPriority),
   );
 
-  const prevTransition = ReactCurrentBatchConfig.transition;
+  const prevTransition = ReactSharedInternals.T;
   const currentTransition: BatchConfigTransition = {
     _callbacks: new Set<(BatchConfigTransition, mixed) => mixed>(),
   };
@@ -2805,23 +2805,23 @@ function startTransition<S>(
     // optimistic update anyway to make it less likely the behavior accidentally
     // diverges; for example, both an optimistic update and this one should
     // share the same lane.
-    ReactCurrentBatchConfig.transition = currentTransition;
+    ReactSharedInternals.T = currentTransition;
     dispatchOptimisticSetState(fiber, false, queue, pendingState);
   } else {
-    ReactCurrentBatchConfig.transition = null;
+    ReactSharedInternals.T = null;
     dispatchSetState(fiber, queue, pendingState);
-    ReactCurrentBatchConfig.transition = currentTransition;
+    ReactSharedInternals.T = currentTransition;
   }
 
   if (enableTransitionTracing) {
     if (options !== undefined && options.name !== undefined) {
-      ReactCurrentBatchConfig.transition.name = options.name;
-      ReactCurrentBatchConfig.transition.startTime = now();
+      currentTransition.name = options.name;
+      currentTransition.startTime = now();
     }
   }
 
   if (__DEV__) {
-    ReactCurrentBatchConfig.transition._updatedFibers = new Set();
+    currentTransition._updatedFibers = new Set();
   }
 
   try {
@@ -2877,7 +2877,7 @@ function startTransition<S>(
   } finally {
     setCurrentUpdatePriority(previousPriority);
 
-    ReactCurrentBatchConfig.transition = prevTransition;
+    ReactSharedInternals.T = prevTransition;
 
     if (__DEV__) {
       if (prevTransition === null && currentTransition._updatedFibers) {
@@ -3214,11 +3214,10 @@ function dispatchSetState<S, A>(
       // same as the current state, we may be able to bail out entirely.
       const lastRenderedReducer = queue.lastRenderedReducer;
       if (lastRenderedReducer !== null) {
-        let prevDispatcher;
+        let prevDispatcher = null;
         if (__DEV__) {
-          prevDispatcher = ReactCurrentDispatcher.current;
-          ReactCurrentDispatcher.current =
-            InvalidNestedHooksDispatcherOnUpdateInDEV;
+          prevDispatcher = ReactSharedInternals.H;
+          ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
         }
         try {
           const currentState: S = (queue.lastRenderedState: any);
@@ -3242,7 +3241,7 @@ function dispatchSetState<S, A>(
           // Suppress the error. It will throw again in the render phase.
         } finally {
           if (__DEV__) {
-            ReactCurrentDispatcher.current = prevDispatcher;
+            ReactSharedInternals.H = prevDispatcher;
           }
         }
       }
@@ -3655,12 +3654,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useMemo';
       mountHookTypesDev();
       checkDepsAreArrayDev(deps);
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -3670,12 +3669,12 @@ if (__DEV__) {
     ): [S, Dispatch<A>] {
       currentHookNameInDev = 'useReducer';
       mountHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -3688,12 +3687,12 @@ if (__DEV__) {
     ): [S, Dispatch<BasicStateAction<S>>] {
       currentHookNameInDev = 'useState';
       mountHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -3834,12 +3833,12 @@ if (__DEV__) {
     useMemo<T>(create: () => T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useMemo';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -3849,12 +3848,12 @@ if (__DEV__) {
     ): [S, Dispatch<A>] {
       currentHookNameInDev = 'useReducer';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -3867,12 +3866,12 @@ if (__DEV__) {
     ): [S, Dispatch<BasicStateAction<S>>] {
       currentHookNameInDev = 'useState';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -4015,13 +4014,12 @@ if (__DEV__) {
     useMemo<T>(create: () => T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useMemo';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -4031,13 +4029,12 @@ if (__DEV__) {
     ): [S, Dispatch<A>] {
       currentHookNameInDev = 'useReducer';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -4050,13 +4047,12 @@ if (__DEV__) {
     ): [S, Dispatch<BasicStateAction<S>>] {
       currentHookNameInDev = 'useState';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -4198,13 +4194,12 @@ if (__DEV__) {
     useMemo<T>(create: () => T, deps: Array<mixed> | void | null): T {
       currentHookNameInDev = 'useMemo';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnRerenderInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnRerenderInDEV;
       try {
         return updateMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -4214,13 +4209,12 @@ if (__DEV__) {
     ): [S, Dispatch<A>] {
       currentHookNameInDev = 'useReducer';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnRerenderInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnRerenderInDEV;
       try {
         return rerenderReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -4233,13 +4227,12 @@ if (__DEV__) {
     ): [S, Dispatch<BasicStateAction<S>>] {
       currentHookNameInDev = 'useState';
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnRerenderInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnRerenderInDEV;
       try {
         return rerenderState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -4392,12 +4385,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useMemo';
       warnInvalidHookAccess();
       mountHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -4408,12 +4401,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useReducer';
       warnInvalidHookAccess();
       mountHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -4428,12 +4421,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useState';
       warnInvalidHookAccess();
       mountHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current = InvalidNestedHooksDispatcherOnMountInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnMountInDEV;
       try {
         return mountState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -4598,13 +4591,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useMemo';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -4615,13 +4607,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useReducer';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -4636,13 +4627,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useState';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {
@@ -4807,13 +4797,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useMemo';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return updateMemo(create, deps);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useReducer<S, I, A>(
@@ -4824,13 +4813,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useReducer';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return rerenderReducer(reducer, initialArg, init);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useRef<T>(initialValue: T): {current: T} {
@@ -4845,13 +4833,12 @@ if (__DEV__) {
       currentHookNameInDev = 'useState';
       warnInvalidHookAccess();
       updateHookTypesDev();
-      const prevDispatcher = ReactCurrentDispatcher.current;
-      ReactCurrentDispatcher.current =
-        InvalidNestedHooksDispatcherOnUpdateInDEV;
+      const prevDispatcher = ReactSharedInternals.H;
+      ReactSharedInternals.H = InvalidNestedHooksDispatcherOnUpdateInDEV;
       try {
         return rerenderState(initialState);
       } finally {
-        ReactCurrentDispatcher.current = prevDispatcher;
+        ReactSharedInternals.H = prevDispatcher;
       }
     },
     useDebugValue<T>(value: T, formatterFn: ?(value: T) => mixed): void {

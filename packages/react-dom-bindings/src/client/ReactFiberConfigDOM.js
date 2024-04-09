@@ -7,7 +7,6 @@
  * @flow
  */
 
-import type {EventPriority} from 'react-reconciler/src/ReactEventPriorities';
 import type {DOMEventName} from '../events/DOMEventNames';
 import type {Fiber, FiberRoot} from 'react-reconciler/src/ReactInternalTypes';
 import type {
@@ -29,11 +28,15 @@ import type {
 
 import {NotPending} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
 import {getCurrentRootHostContainer} from 'react-reconciler/src/ReactFiberHostContext';
-import {DefaultEventPriority} from 'react-reconciler/src/ReactEventPriorities';
 
 import hasOwnProperty from 'shared/hasOwnProperty';
 import {checkAttributeStringCoercion} from 'shared/CheckStringCoercion';
 
+export {
+  setCurrentUpdatePriority,
+  getCurrentUpdatePriority,
+  resolveUpdatePriority,
+} from './ReactDOMUpdatePriority';
 import {
   precacheFiberNode,
   updateFiberProps,
@@ -69,7 +72,6 @@ import {
 import {
   isEnabled as ReactBrowserEventEmitterIsEnabled,
   setEnabled as ReactBrowserEventEmitterSetEnabled,
-  getEventPriority,
 } from '../events/ReactDOMEventListener';
 import {SVG_NAMESPACE, MATH_NAMESPACE} from './DOMNamespaces';
 import {
@@ -88,6 +90,7 @@ import {
   enableScopeAPI,
   enableTrustedTypesIntegration,
   enableAsyncActions,
+  disableLegacyMode,
 } from 'shared/ReactFeatureFlags';
 import {
   HostComponent,
@@ -98,10 +101,9 @@ import {
 import {listenToAllSupportedEvents} from '../events/DOMPluginEventSystem';
 import {validateLinkPropsForStyleResource} from '../shared/ReactDOMResourceValidation';
 import escapeSelectorAttributeValueInsideDoubleQuotes from './escapeSelectorAttributeValueInsideDoubleQuotes';
+import {flushSyncWork as flushSyncWorkOnAllRoots} from 'react-reconciler/src/ReactFiberWorkLoop';
 
 import ReactDOMSharedInternals from 'shared/ReactDOMSharedInternals';
-const ReactDOMCurrentDispatcher =
-  ReactDOMSharedInternals.ReactDOMCurrentDispatcher;
 
 export type Type = string;
 export type Props = {
@@ -570,14 +572,6 @@ export function createTextInstance(
   ).createTextNode(text);
   precacheFiberNode(internalInstanceHandle, textNode);
   return textNode;
-}
-
-export function getCurrentEventPriority(): EventPriority {
-  const currentEvent = window.event;
-  if (currentEvent === undefined) {
-    return DefaultEventPriority;
-  }
-  return getEventPriority(currentEvent.type);
 }
 
 let currentPopstateTransitionEvent: Event | null = null;
@@ -1928,16 +1922,34 @@ function getDocumentFromRoot(root: HoistableRoot): Document {
   return root.ownerDocument || root;
 }
 
-const previousDispatcher = ReactDOMCurrentDispatcher.current;
-ReactDOMCurrentDispatcher.current = {
-  prefetchDNS,
-  preconnect,
-  preload,
-  preloadModule,
-  preinitStyle,
-  preinitScript,
-  preinitModuleScript,
+const previousDispatcher =
+  ReactDOMSharedInternals.d; /* ReactDOMCurrentDispatcher */
+ReactDOMSharedInternals.d /* ReactDOMCurrentDispatcher */ = {
+  f /* flushSyncWork */: disableLegacyMode
+    ? flushSyncWork
+    : previousDispatcher.f /* flushSyncWork */,
+  D /* prefetchDNS */: prefetchDNS,
+  C /* preconnect */: preconnect,
+  L /* preload */: preload,
+  m /* preloadModule */: preloadModule,
+  X /* preinitScript */: preinitScript,
+  S /* preinitStyle */: preinitStyle,
+  M /* preinitModuleScript */: preinitModuleScript,
 };
+
+function flushSyncWork() {
+  if (disableLegacyMode) {
+    const previousWasRendering = previousDispatcher.f(); /* flushSyncWork */
+    const wasRendering = flushSyncWorkOnAllRoots();
+    // Since multiple dispatchers can flush sync work during a single flushSync call
+    // we need to return true if any of them were rendering.
+    return previousWasRendering || wasRendering;
+  } else {
+    throw new Error(
+      'flushSyncWork should not be called from builds that support legacy mode. This is a bug in React.',
+    );
+  }
+}
 
 // We expect this to get inlined. It is a function mostly to communicate the special nature of
 // how we resolve the HoistableRoot for ReactDOM.pre*() methods. Because we support calling
@@ -1978,17 +1990,17 @@ function preconnectAs(
 }
 
 function prefetchDNS(href: string) {
-  previousDispatcher.prefetchDNS(href);
+  previousDispatcher.D(/* prefetchDNS */ href);
   preconnectAs('dns-prefetch', href, null);
 }
 
 function preconnect(href: string, crossOrigin?: ?CrossOriginEnum) {
-  previousDispatcher.preconnect(href, crossOrigin);
+  previousDispatcher.C(/* preconnect */ href, crossOrigin);
   preconnectAs('preconnect', href, crossOrigin);
 }
 
 function preload(href: string, as: string, options?: ?PreloadImplOptions) {
-  previousDispatcher.preload(href, as, options);
+  previousDispatcher.L(/* preload */ href, as, options);
   const ownerDocument = getGlobalDocument();
   if (ownerDocument && href && as) {
     let preloadSelector = `link[rel="preload"][as="${escapeSelectorAttributeValueInsideDoubleQuotes(
@@ -2066,7 +2078,7 @@ function preload(href: string, as: string, options?: ?PreloadImplOptions) {
 }
 
 function preloadModule(href: string, options?: ?PreloadModuleImplOptions) {
-  previousDispatcher.preloadModule(href, options);
+  previousDispatcher.m(/* preloadModule */ href, options);
   const ownerDocument = getGlobalDocument();
   if (ownerDocument && href) {
     const as =
@@ -2127,7 +2139,7 @@ function preinitStyle(
   precedence: ?string,
   options?: ?PreinitStyleOptions,
 ) {
-  previousDispatcher.preinitStyle(href, precedence, options);
+  previousDispatcher.S(/* preinitStyle */ href, precedence, options);
 
   const ownerDocument = getGlobalDocument();
   if (ownerDocument && href) {
@@ -2201,7 +2213,7 @@ function preinitStyle(
 }
 
 function preinitScript(src: string, options?: ?PreinitScriptOptions) {
-  previousDispatcher.preinitScript(src, options);
+  previousDispatcher.X(/* preinitScript */ src, options);
 
   const ownerDocument = getGlobalDocument();
   if (ownerDocument && src) {
@@ -2257,7 +2269,7 @@ function preinitModuleScript(
   src: string,
   options?: ?PreinitModuleScriptOptions,
 ) {
-  previousDispatcher.preinitModuleScript(src, options);
+  previousDispatcher.M(/* preinitModuleScript */ src, options);
 
   const ownerDocument = getGlobalDocument();
   if (ownerDocument && src) {
@@ -2405,9 +2417,15 @@ export function getResource(
       return null;
     }
     case 'script': {
-      if (typeof pendingProps.src === 'string' && pendingProps.async === true) {
-        const scriptProps: ScriptProps = pendingProps;
-        const key = getScriptKey(scriptProps.src);
+      const async = pendingProps.async;
+      const src = pendingProps.src;
+      if (
+        typeof src === 'string' &&
+        async &&
+        typeof async !== 'function' &&
+        typeof async !== 'symbol'
+      ) {
+        const key = getScriptKey(src);
         const scripts = getResourcesFromRoot(resourceRoot).hoistableScripts;
 
         let resource = scripts.get(key);
@@ -3053,16 +3071,20 @@ export function isHostHoistableType(
       }
     }
     case 'script': {
+      const isAsync =
+        props.async &&
+        typeof props.async !== 'function' &&
+        typeof props.async !== 'symbol';
       if (
-        props.async !== true ||
+        !isAsync ||
         props.onLoad ||
         props.onError ||
-        typeof props.src !== 'string' ||
-        !props.src
+        !props.src ||
+        typeof props.src !== 'string'
       ) {
         if (__DEV__) {
           if (outsideHostContainerContext) {
-            if (props.async !== true) {
+            if (!isAsync) {
               console.error(
                 'Cannot render a sync or defer <script> outside the main document without knowing its order.' +
                   ' Try adding async="" or moving it into the root <head> tag.',

@@ -25,6 +25,7 @@ import type {ReactNodeList, ReactFormState} from 'shared/ReactTypes';
 import type {Lane} from './ReactFiberLane';
 import type {SuspenseState} from './ReactFiberSuspenseComponent';
 
+import {LegacyRoot} from './ReactRootTags';
 import {
   findCurrentHostFiber,
   findCurrentHostFiberWithNoPortals,
@@ -61,7 +62,8 @@ import {
   scheduleInitialHydrationOnRoot,
   flushRoot,
   batchedUpdates,
-  flushSync,
+  flushSyncFromReconciler,
+  flushSyncWork,
   isAlreadyRendering,
   deferredUpdates,
   discreteUpdates,
@@ -86,10 +88,6 @@ import {
   getHighestPriorityPendingLanes,
   higherPriorityLane,
 } from './ReactFiberLane';
-import {
-  getCurrentUpdatePriority,
-  runWithPriority,
-} from './ReactEventPriorities';
 import {
   scheduleRefresh,
   scheduleRoot,
@@ -361,11 +359,51 @@ export function updateContainer(
   parentComponent: ?React$Component<any, any>,
   callback: ?Function,
 ): Lane {
+  const current = container.current;
+  const lane = requestUpdateLane(current);
+  updateContainerImpl(
+    current,
+    lane,
+    element,
+    container,
+    parentComponent,
+    callback,
+  );
+  return lane;
+}
+
+export function updateContainerSync(
+  element: ReactNodeList,
+  container: OpaqueRoot,
+  parentComponent: ?React$Component<any, any>,
+  callback: ?Function,
+): Lane {
+  if (container.tag === LegacyRoot) {
+    flushPassiveEffects();
+  }
+  const current = container.current;
+  updateContainerImpl(
+    current,
+    SyncLane,
+    element,
+    container,
+    parentComponent,
+    callback,
+  );
+  return SyncLane;
+}
+
+function updateContainerImpl(
+  rootFiber: Fiber,
+  lane: Lane,
+  element: ReactNodeList,
+  container: OpaqueRoot,
+  parentComponent: ?React$Component<any, any>,
+  callback: ?Function,
+): void {
   if (__DEV__) {
     onScheduleRoot(container, element);
   }
-  const current = container.current;
-  const lane = requestUpdateLane(current);
 
   if (enableSchedulingProfiler) {
     markRenderScheduled(lane);
@@ -414,20 +452,19 @@ export function updateContainer(
     update.callback = callback;
   }
 
-  const root = enqueueUpdate(current, update, lane);
+  const root = enqueueUpdate(rootFiber, update, lane);
   if (root !== null) {
-    scheduleUpdateOnFiber(root, current, lane);
-    entangleTransitions(root, current, lane);
+    scheduleUpdateOnFiber(root, rootFiber, lane);
+    entangleTransitions(root, rootFiber, lane);
   }
-
-  return lane;
 }
 
 export {
   batchedUpdates,
   deferredUpdates,
   discreteUpdates,
-  flushSync,
+  flushSyncFromReconciler,
+  flushSyncWork,
   isAlreadyRendering,
   flushPassiveEffects,
 };
@@ -460,12 +497,11 @@ export function attemptSynchronousHydration(fiber: Fiber): void {
       break;
     }
     case SuspenseComponent: {
-      flushSync(() => {
-        const root = enqueueConcurrentRenderForLane(fiber, SyncLane);
-        if (root !== null) {
-          scheduleUpdateOnFiber(root, fiber, SyncLane);
-        }
-      });
+      const root = enqueueConcurrentRenderForLane(fiber, SyncLane);
+      if (root !== null) {
+        scheduleUpdateOnFiber(root, fiber, SyncLane);
+      }
+      flushSyncWork();
       // If we're still blocked after this, we need to increase
       // the priority of any promises resolving within this
       // boundary so that they next attempt also has higher pri.
@@ -524,8 +560,6 @@ export function attemptHydrationAtCurrentPriority(fiber: Fiber): void {
   }
   markRetryLaneIfNotHydrated(fiber, lane);
 }
-
-export {getCurrentUpdatePriority, runWithPriority};
 
 export {findHostInstance};
 
@@ -825,7 +859,6 @@ function getCurrentFiberForDevTools() {
 
 export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
   const {findFiberByHostInstance} = devToolsConfig;
-  const {ReactCurrentDispatcher} = ReactSharedInternals;
 
   return injectInternals({
     bundleType: devToolsConfig.bundleType,
@@ -841,7 +874,7 @@ export function injectIntoDevTools(devToolsConfig: DevToolsConfig): boolean {
     setErrorHandler,
     setSuspenseHandler,
     scheduleUpdate,
-    currentDispatcherRef: ReactCurrentDispatcher,
+    currentDispatcherRef: ReactSharedInternals,
     findHostInstanceByFiber,
     findFiberByHostInstance:
       findFiberByHostInstance || emptyFindFiberByHostInstance,

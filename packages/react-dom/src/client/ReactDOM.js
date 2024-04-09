@@ -14,34 +14,27 @@ import type {
   CreateRootOptions,
 } from './ReactDOMRoot';
 
+import {disableLegacyMode} from 'shared/ReactFeatureFlags';
 import {
   createRoot as createRootImpl,
   hydrateRoot as hydrateRootImpl,
   isValidContainer,
 } from './ReactDOMRoot';
 import {createEventHandle} from 'react-dom-bindings/src/client/ReactDOMEventHandle';
+import {runWithPriority} from 'react-dom-bindings/src/client/ReactDOMUpdatePriority';
+import {flushSync as flushSyncIsomorphic} from '../shared/ReactDOMFlushSync';
 
 import {
-  flushSync as flushSyncWithoutWarningIfAlreadyRendering,
+  flushSyncFromReconciler as flushSyncWithoutWarningIfAlreadyRendering,
   isAlreadyRendering,
   injectIntoDevTools,
   findHostInstance,
 } from 'react-reconciler/src/ReactFiberReconciler';
-import {runWithPriority} from 'react-reconciler/src/ReactEventPriorities';
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import ReactVersion from 'shared/ReactVersion';
 
-import {
-  getClosestInstanceFromNode,
-  getInstanceFromNode,
-  getNodeFromInstance,
-  getFiberCurrentPropsFromNode,
-} from 'react-dom-bindings/src/client/ReactDOMComponentTree';
-import {
-  enqueueStateRestore,
-  restoreStateIfNeeded,
-} from 'react-dom-bindings/src/events/ReactDOMControlledComponent';
+import {getClosestInstanceFromNode} from 'react-dom-bindings/src/client/ReactDOMComponentTree';
 import Internals from '../ReactDOMSharedInternals';
 
 export {
@@ -95,7 +88,7 @@ function createRoot(
   options?: CreateRootOptions,
 ): RootType {
   if (__DEV__) {
-    if (!Internals.usingClientEntryPoint && !__UMD__) {
+    if (!(Internals: any).usingClientEntryPoint && !__UMD__) {
       console.error(
         'You are importing createRoot from "react-dom" which is not supported. ' +
           'You should instead import it from "react-dom/client".',
@@ -111,7 +104,7 @@ function hydrateRoot(
   options?: HydrateRootOptions,
 ): RootType {
   if (__DEV__) {
-    if (!Internals.usingClientEntryPoint && !__UMD__) {
+    if (!(Internals: any).usingClientEntryPoint && !__UMD__) {
       console.error(
         'You are importing hydrateRoot from "react-dom" which is not supported. ' +
           'You should instead import it from "react-dom/client".',
@@ -123,11 +116,11 @@ function hydrateRoot(
 
 // Overload the definition to the two valid signatures.
 // Warning, this opts-out of checking the function body.
-declare function flushSync<R>(fn: () => R): R;
+declare function flushSyncFromReconciler<R>(fn: () => R): R;
 // eslint-disable-next-line no-redeclare
-declare function flushSync(): void;
+declare function flushSyncFromReconciler(): void;
 // eslint-disable-next-line no-redeclare
-function flushSync<R>(fn: (() => R) | void): R | void {
+function flushSyncFromReconciler<R>(fn: (() => R) | void): R | void {
   if (__DEV__) {
     if (isAlreadyRendering()) {
       console.error(
@@ -139,6 +132,10 @@ function flushSync<R>(fn: (() => R) | void): R | void {
   }
   return flushSyncWithoutWarningIfAlreadyRendering(fn);
 }
+
+const flushSync: typeof flushSyncIsomorphic = disableLegacyMode
+  ? flushSyncIsomorphic
+  : flushSyncFromReconciler;
 
 function findDOMNode(
   componentOrElement: React$Component<any, any>,
@@ -170,17 +167,6 @@ export {
   // This should only be used by React internals.
   runWithPriority as unstable_runWithPriority,
 };
-
-// Keep in sync with ReactTestUtils.js.
-// This is an array for better minification.
-Internals.Events = [
-  getInstanceFromNode,
-  getNodeFromInstance,
-  getFiberCurrentPropsFromNode,
-  enqueueStateRestore,
-  restoreStateIfNeeded,
-  unstable_batchedUpdates,
-];
 
 const foundDevTools = injectIntoDevTools({
   findFiberByHostInstance: getClosestInstanceFromNode,

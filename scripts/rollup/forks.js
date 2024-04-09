@@ -58,7 +58,9 @@ const forks = Object.freeze({
   './packages/shared/ReactSharedInternals.js': (
     bundleType,
     entry,
-    dependencies
+    dependencies,
+    _moduleType,
+    bundle
   ) => {
     if (entry === 'react') {
       return './packages/react/src/ReactSharedInternalsClient.js';
@@ -68,6 +70,9 @@ const forks = Object.freeze({
       entry === 'react/src/ReactServerFB.js'
     ) {
       return './packages/react/src/ReactSharedInternalsServer.js';
+    }
+    if (bundle.condition === 'react-server') {
+      return './packages/react-server/src/ReactSharedInternalsServer.js';
     }
     if (!entry.startsWith('react/') && dependencies.indexOf('react') === -1) {
       // React internals are unavailable if we can't reference the package.
@@ -96,7 +101,15 @@ const forks = Object.freeze({
       entry === 'react-dom/src/ReactDOMServer.js' ||
       entry === 'react-dom/unstable_testing'
     ) {
-      return './packages/react-dom/src/ReactDOMSharedInternals.js';
+      if (
+        bundleType === FB_WWW_DEV ||
+        bundleType === FB_WWW_PROD ||
+        bundleType === FB_WWW_PROFILING
+      ) {
+        return './packages/react-dom/src/ReactDOMSharedInternalsFB.js';
+      } else {
+        return './packages/react-dom/src/ReactDOMSharedInternals.js';
+      }
     }
     if (
       !entry.startsWith('react-dom/') &&

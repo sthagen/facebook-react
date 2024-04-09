@@ -108,8 +108,9 @@ import {
   objectName,
 } from 'shared/ReactSerializationErrors';
 
-import ReactSharedInternals from 'shared/ReactSharedInternals';
-import ReactServerSharedInternals from './ReactServerSharedInternals';
+import type {SharedStateServer} from 'react/src/ReactSharedInternalsServer';
+import ReactSharedInternalsImpl from 'shared/ReactSharedInternals';
+const ReactSharedInternals: SharedStateServer = (ReactSharedInternalsImpl: any);
 import isArray from 'shared/isArray';
 import getPrototypeOf from 'shared/getPrototypeOf';
 import binaryToComparableString from 'shared/binaryToComparableString';
@@ -154,7 +155,7 @@ function patchConsole(consoleInst: typeof console, methodName: string) {
         // We don't currently use this id for anything but we emit it so that we can later
         // refer to previous logs in debug info to associate them with a component.
         const id = request.nextChunkId++;
-        const owner: null | ReactComponentInfo = ReactCurrentOwner.current;
+        const owner: null | ReactComponentInfo = ReactSharedInternals.owner;
         emitConsoleChunk(request, id, methodName, owner, stack, arguments);
       }
       // $FlowFixMe[prop-missing]
@@ -305,10 +306,7 @@ const {
   TaintRegistryValues,
   TaintRegistryByteLengths,
   TaintRegistryPendingRequests,
-  ReactCurrentCache,
-} = ReactServerSharedInternals;
-const ReactCurrentDispatcher = ReactSharedInternals.ReactCurrentDispatcher;
-const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
+} = ReactSharedInternals;
 
 function throwTaintViolation(message: string) {
   // eslint-disable-next-line react-internal/prod-error-codes
@@ -354,14 +352,14 @@ export function createRequest(
   environmentName: void | string,
 ): Request {
   if (
-    ReactCurrentCache.current !== null &&
-    ReactCurrentCache.current !== DefaultCacheDispatcher
+    ReactSharedInternals.C !== null &&
+    ReactSharedInternals.C !== DefaultCacheDispatcher
   ) {
     throw new Error(
       'Currently React only supports one RSC renderer at a time.',
     );
   }
-  ReactCurrentCache.current = DefaultCacheDispatcher;
+  ReactSharedInternals.C = DefaultCacheDispatcher;
 
   const abortSet: Set<Task> = new Set();
   const pingedTasks: Array<Task> = [];
@@ -644,11 +642,11 @@ function renderFunctionComponent<Props>(
   const secondArg = undefined;
   let result;
   if (__DEV__) {
-    ReactCurrentOwner.current = componentDebugInfo;
+    ReactSharedInternals.owner = componentDebugInfo;
     try {
       result = Component(props, secondArg);
     } finally {
-      ReactCurrentOwner.current = null;
+      ReactSharedInternals.owner = null;
     }
   } else {
     result = Component(props, secondArg);
@@ -1239,27 +1237,25 @@ function serializeTypedArray(
 }
 
 function serializeBlob(request: Request, blob: Blob): string {
-  const id = request.nextChunkId++;
-  request.pendingChunks++;
+  const model: Array<string | Uint8Array> = [blob.type];
+  const newTask = createTask(
+    request,
+    model,
+    null,
+    false,
+    request.abortableTasks,
+  );
 
   const reader = blob.stream().getReader();
-
-  const model: Array<string | Uint8Array> = [blob.type];
 
   function progress(
     entry: {done: false, value: Uint8Array} | {done: true, value: void},
   ): Promise<void> | void {
     if (entry.done) {
-      const blobId = outlineModel(request, model);
-      const blobReference = '$B' + blobId.toString(16);
-      const processedChunk = encodeReferenceChunk(request, id, blobReference);
-      request.completedRegularChunks.push(processedChunk);
-      if (request.destination !== null) {
-        flushCompletedChunks(request, request.destination);
-      }
+      pingTask(request, newTask);
       return;
     }
-    // TODO: Emit the chunk early and refer to it later.
+    // TODO: Emit the chunk early and refer to it later by dedupe.
     model.push(entry.value);
     // $FlowFixMe[incompatible-call]
     return reader.read().then(progress).catch(error);
@@ -1267,7 +1263,8 @@ function serializeBlob(request: Request, blob: Blob): string {
 
   function error(reason: mixed) {
     const digest = logRecoverableError(request, reason);
-    emitErrorChunk(request, id, digest, reason);
+    emitErrorChunk(request, newTask.id, digest, reason);
+    request.abortableTasks.delete(newTask);
     if (request.destination !== null) {
       flushCompletedChunks(request, request.destination);
     }
@@ -1275,7 +1272,7 @@ function serializeBlob(request: Request, blob: Blob): string {
   // $FlowFixMe[incompatible-call]
   reader.read().then(progress).catch(error);
 
-  return '$' + id.toString(16);
+  return '$B' + newTask.id.toString(16);
 }
 
 function escapeStringValue(value: string): string {
@@ -2493,8 +2490,8 @@ function retryTask(request: Request, task: Task): void {
 }
 
 function performWork(request: Request): void {
-  const prevDispatcher = ReactCurrentDispatcher.current;
-  ReactCurrentDispatcher.current = HooksDispatcher;
+  const prevDispatcher = ReactSharedInternals.H;
+  ReactSharedInternals.H = HooksDispatcher;
   const prevRequest = currentRequest;
   currentRequest = request;
   prepareToUseHooksForRequest(request);
@@ -2513,7 +2510,7 @@ function performWork(request: Request): void {
     logRecoverableError(request, error);
     fatalError(request, error);
   } finally {
-    ReactCurrentDispatcher.current = prevDispatcher;
+    ReactSharedInternals.H = prevDispatcher;
     resetHooksForRequest();
     currentRequest = prevRequest;
   }
