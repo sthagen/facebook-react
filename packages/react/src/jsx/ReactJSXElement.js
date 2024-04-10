@@ -33,6 +33,7 @@ let specialPropKeyWarningShown;
 let specialPropRefWarningShown;
 let didWarnAboutStringRefs;
 let didWarnAboutElementRef;
+let didWarnAboutOldJSXRuntime;
 
 if (__DEV__) {
   didWarnAboutStringRefs = {};
@@ -722,6 +723,28 @@ export function createElement(type, config, children) {
   let ref = null;
 
   if (config != null) {
+    if (__DEV__) {
+      if (
+        !didWarnAboutOldJSXRuntime &&
+        '__self' in config &&
+        // Do not assume this is the result of an oudated JSX transform if key
+        // is present, because the modern JSX transform sometimes outputs
+        // createElement to preserve precedence between a static key and a
+        // spread key. To avoid false positive warnings, we never warn if
+        // there's a key.
+        !('key' in config)
+      ) {
+        didWarnAboutOldJSXRuntime = true;
+        console.warn(
+          'Your app (or one of its dependencies) is using an outdated JSX ' +
+            'transform. Update to the modern JSX transform for ' +
+            'faster performance: ' +
+            // TODO: Create a short link for this
+            'https://reactjs.org/blog/2020/09/22/introducing-the-new-jsx-transform.html',
+        );
+      }
+    }
+
     if (hasValidRef(config)) {
       if (!enableRefAsProp) {
         ref = config.ref;
@@ -866,6 +889,7 @@ export function cloneElement(element, config, children) {
 
   if (config != null) {
     if (hasValidRef(config)) {
+      owner = ReactSharedInternals.owner;
       if (!enableRefAsProp) {
         // Silently steal the ref from the parent.
         ref = config.ref;
@@ -873,7 +897,6 @@ export function cloneElement(element, config, children) {
           ref = coerceStringRef(ref, owner, element.type);
         }
       }
-      owner = ReactSharedInternals.owner;
     }
     if (hasValidKey(config)) {
       if (__DEV__) {
