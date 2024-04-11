@@ -91,6 +91,7 @@ import {
   StoreConsistency,
   MountLayoutDev as MountLayoutDevEffect,
   MountPassiveDev as MountPassiveDevEffect,
+  FormReset,
 } from './ReactFiberFlags';
 import {
   HasEffect as HookHasEffect,
@@ -844,15 +845,29 @@ export function TransitionAwareHostComponent(): TransitionStatus {
   if (!enableAsyncActions) {
     throw new Error('Not implemented.');
   }
+
   const dispatcher: any = ReactSharedInternals.H;
   const [maybeThenable] = dispatcher.useState();
+  let nextState;
   if (typeof maybeThenable.then === 'function') {
     const thenable: Thenable<TransitionStatus> = (maybeThenable: any);
-    return useThenable(thenable);
+    nextState = useThenable(thenable);
   } else {
     const status: TransitionStatus = maybeThenable;
-    return status;
+    nextState = status;
   }
+
+  // The "reset state" is an object. If it changes, that means something
+  // requested that we reset the form.
+  const [nextResetState] = dispatcher.useState();
+  const prevResetState =
+    currentHook !== null ? currentHook.memoizedState : null;
+  if (prevResetState !== nextResetState) {
+    // Schedule a form reset
+    currentlyRenderingFiber.flags |= FormReset;
+  }
+
+  return nextState;
 }
 
 export function checkDidRenderIdHook(): boolean {
@@ -2915,51 +2930,12 @@ export function startHostTransition<F>(
     );
   }
 
-  let queue: UpdateQueue<
+  const stateHook = ensureFormComponentIsStateful(formFiber);
+
+  const queue: UpdateQueue<
     Thenable<TransitionStatus> | TransitionStatus,
     BasicStateAction<Thenable<TransitionStatus> | TransitionStatus>,
-  >;
-  if (formFiber.memoizedState === null) {
-    // Upgrade this host component fiber to be stateful. We're going to pretend
-    // it was stateful all along so we can reuse most of the implementation
-    // for function components and useTransition.
-    //
-    // Create the state hook used by TransitionAwareHostComponent. This is
-    // essentially an inlined version of mountState.
-    const newQueue: UpdateQueue<
-      Thenable<TransitionStatus> | TransitionStatus,
-      BasicStateAction<Thenable<TransitionStatus> | TransitionStatus>,
-    > = {
-      pending: null,
-      lanes: NoLanes,
-      // We're going to cheat and intentionally not create a bound dispatch
-      // method, because we can call it directly in startTransition.
-      dispatch: (null: any),
-      lastRenderedReducer: basicStateReducer,
-      lastRenderedState: NoPendingHostTransition,
-    };
-    queue = newQueue;
-
-    const stateHook: Hook = {
-      memoizedState: NoPendingHostTransition,
-      baseState: NoPendingHostTransition,
-      baseQueue: null,
-      queue: newQueue,
-      next: null,
-    };
-
-    // Add the state hook to both fiber alternates. The idea is that the fiber
-    // had this hook all along.
-    formFiber.memoizedState = stateHook;
-    const alternate = formFiber.alternate;
-    if (alternate !== null) {
-      alternate.memoizedState = stateHook;
-    }
-  } else {
-    // This fiber was already upgraded to be stateful.
-    const stateHook: Hook = formFiber.memoizedState;
-    queue = stateHook.queue;
-  }
+  > = stateHook.queue;
 
   startTransition(
     formFiber,
@@ -2968,8 +2944,108 @@ export function startHostTransition<F>(
     NoPendingHostTransition,
     // TODO: We can avoid this extra wrapper, somehow. Figure out layering
     // once more of this function is implemented.
-    () => callback(formData),
+    () => {
+      // Automatically reset the form when the action completes.
+      requestFormReset(formFiber);
+      return callback(formData);
+    },
   );
+}
+
+function ensureFormComponentIsStateful(formFiber: Fiber) {
+  const existingStateHook: Hook | null = formFiber.memoizedState;
+  if (existingStateHook !== null) {
+    // This fiber was already upgraded to be stateful.
+    return existingStateHook;
+  }
+
+  // Upgrade this host component fiber to be stateful. We're going to pretend
+  // it was stateful all along so we can reuse most of the implementation
+  // for function components and useTransition.
+  //
+  // Create the state hook used by TransitionAwareHostComponent. This is
+  // essentially an inlined version of mountState.
+  const newQueue: UpdateQueue<
+    Thenable<TransitionStatus> | TransitionStatus,
+    BasicStateAction<Thenable<TransitionStatus> | TransitionStatus>,
+  > = {
+    pending: null,
+    lanes: NoLanes,
+    // We're going to cheat and intentionally not create a bound dispatch
+    // method, because we can call it directly in startTransition.
+    dispatch: (null: any),
+    lastRenderedReducer: basicStateReducer,
+    lastRenderedState: NoPendingHostTransition,
+  };
+
+  const stateHook: Hook = {
+    memoizedState: NoPendingHostTransition,
+    baseState: NoPendingHostTransition,
+    baseQueue: null,
+    queue: newQueue,
+    next: null,
+  };
+
+  // We use another state hook to track whether the form needs to be reset.
+  // The state is an empty object. To trigger a reset, we update the state
+  // to a new object. Then during rendering, we detect that the state has
+  // changed and schedule a commit effect.
+  const initialResetState = {};
+  const newResetStateQueue: UpdateQueue<Object, Object> = {
+    pending: null,
+    lanes: NoLanes,
+    // We're going to cheat and intentionally not create a bound dispatch
+    // method, because we can call it directly in startTransition.
+    dispatch: (null: any),
+    lastRenderedReducer: basicStateReducer,
+    lastRenderedState: initialResetState,
+  };
+  const resetStateHook: Hook = {
+    memoizedState: initialResetState,
+    baseState: initialResetState,
+    baseQueue: null,
+    queue: newResetStateQueue,
+    next: null,
+  };
+  stateHook.next = resetStateHook;
+
+  // Add the hook list to both fiber alternates. The idea is that the fiber
+  // had this hook all along.
+  formFiber.memoizedState = stateHook;
+  const alternate = formFiber.alternate;
+  if (alternate !== null) {
+    alternate.memoizedState = stateHook;
+  }
+
+  return stateHook;
+}
+
+export function requestFormReset(formFiber: Fiber) {
+  const transition = requestCurrentTransition();
+
+  if (__DEV__) {
+    if (transition === null) {
+      // An optimistic update occurred, but startTransition is not on the stack.
+      // The form reset will be scheduled at default (sync) priority, which
+      // is probably not what the user intended. Most likely because the
+      // requestFormReset call happened after an `await`.
+      // TODO: Theoretically, requestFormReset is still useful even for
+      // non-transition updates because it allows you to update defaultValue
+      // synchronously and then wait to reset until after the update commits.
+      // I've chosen to warn anyway because it's more likely the `await` mistake
+      // described above. But arguably we shouldn't.
+      console.error(
+        'requestFormReset was called outside a transition or action. To ' +
+          'fix, move to an action, or wrap with startTransition.',
+      );
+    }
+  }
+
+  const stateHook = ensureFormComponentIsStateful(formFiber);
+  const newResetState = {};
+  const resetStateHook: Hook = (stateHook.next: any);
+  const resetStateQueue = resetStateHook.queue;
+  dispatchSetState(formFiber, resetStateQueue, newResetState);
 }
 
 function mountTransition(): [
