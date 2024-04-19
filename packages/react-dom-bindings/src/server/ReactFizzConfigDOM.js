@@ -294,8 +294,8 @@ const scriptCrossOrigin = stringToPrecomputedChunk('" crossorigin="');
 const endAsyncScript = stringToPrecomputedChunk('" async=""></script>');
 
 /**
- * This escaping function is designed to work with bootstrapScriptContent and importMap only.
- * because we know we are escaping the entire script. We can avoid for instance
+ * This escaping function is designed to work with with inline scripts where the entire
+ * contents are escaped. Because we know we are escaping the entire script we can avoid for instance
  * escaping html comment string sequences that are valid javascript as well because
  * if there are no sebsequent <script sequences the html parser will never enter
  * script data double escaped state (see: https://www.w3.org/TR/html53/syntax.html#script-data-double-escaped-state)
@@ -303,7 +303,7 @@ const endAsyncScript = stringToPrecomputedChunk('" async=""></script>');
  * While untrusted script content should be made safe before using this api it will
  * ensure that the script cannot be early terminated or never terminated state
  */
-function escapeBootstrapAndImportMapScriptContent(scriptText: string) {
+function escapeEntireInlineScriptContent(scriptText: string) {
   if (__DEV__) {
     checkHtmlStringCoercion(scriptText);
   }
@@ -372,9 +372,7 @@ export function createRenderState(
   if (bootstrapScriptContent !== undefined) {
     bootstrapChunks.push(
       inlineScriptWithNonce,
-      stringToChunk(
-        escapeBootstrapAndImportMapScriptContent(bootstrapScriptContent),
-      ),
+      stringToChunk(escapeEntireInlineScriptContent(bootstrapScriptContent)),
       endInlineScript,
     );
   }
@@ -411,9 +409,7 @@ export function createRenderState(
     const map = importMap;
     importMapChunks.push(importMapScriptStart);
     importMapChunks.push(
-      stringToChunk(
-        escapeBootstrapAndImportMapScriptContent(JSON.stringify(map)),
-      ),
+      stringToChunk(escapeEntireInlineScriptContent(JSON.stringify(map))),
     );
     importMapChunks.push(importMapScriptEnd);
   }
@@ -2669,6 +2665,26 @@ function pushStyle(
   }
 }
 
+/**
+ * This escaping function is designed to work with style tag textContent only.
+ *
+ * While untrusted style content should be made safe before using this api it will
+ * ensure that the style cannot be early terminated or never terminated state
+ */
+function escapeStyleTextContent(styleText: string) {
+  if (__DEV__) {
+    checkHtmlStringCoercion(styleText);
+  }
+  return ('' + styleText).replace(styleRegex, styleReplacer);
+}
+const styleRegex = /(<\/|<)(s)(tyle)/gi;
+const styleReplacer = (
+  match: string,
+  prefix: string,
+  s: string,
+  suffix: string,
+) => `${prefix}${s === 's' ? '\\73 ' : '\\53 '}${suffix}`;
+
 function pushStyleImpl(
   target: Array<Chunk | PrecomputedChunk>,
   props: Object,
@@ -2710,7 +2726,7 @@ function pushStyleImpl(
     child !== undefined
   ) {
     // eslint-disable-next-line react-internal/safe-string-coercion
-    target.push(stringToChunk(escapeTextForBrowser('' + child)));
+    target.push(stringToChunk(escapeStyleTextContent(child)));
   }
   pushInnerHTML(target, innerHTML, children);
   target.push(endChunkForTag('style'));
@@ -2752,7 +2768,7 @@ function pushStyleContents(
     child !== undefined
   ) {
     // eslint-disable-next-line react-internal/safe-string-coercion
-    target.push(stringToChunk(escapeTextForBrowser('' + child)));
+    target.push(stringToChunk(escapeStyleTextContent(child)));
   }
   pushInnerHTML(target, innerHTML, children);
   return;
@@ -3246,7 +3262,7 @@ function pushScriptImpl(
 
   pushInnerHTML(target, innerHTML, children);
   if (typeof children === 'string') {
-    target.push(stringToChunk(encodeHTMLTextNode(children)));
+    target.push(stringToChunk(escapeEntireInlineScriptContent(children)));
   }
   target.push(endChunkForTag('script'));
   return null;

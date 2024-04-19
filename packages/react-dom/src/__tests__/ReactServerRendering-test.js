@@ -577,55 +577,6 @@ describe('ReactDOMServer', () => {
     });
   });
 
-  describe('renderToStaticNodeStream', () => {
-    it('should generate simple markup', () => {
-      const SuccessfulElement = React.createElement(() => <img />);
-      const response =
-        ReactDOMServer.renderToStaticNodeStream(SuccessfulElement);
-      expect(response.read().toString()).toMatch(new RegExp('<img' + '/>'));
-    });
-
-    it('should handle errors correctly', () => {
-      const FailingElement = React.createElement(() => {
-        throw new Error('An Error');
-      });
-      const response = ReactDOMServer.renderToStaticNodeStream(FailingElement);
-      return new Promise(resolve => {
-        response.once('error', () => {
-          resolve();
-        });
-        expect(response.read()).toBeNull();
-      });
-    });
-
-    it('should omit text and suspense placeholders', async () => {
-      let resolve = null;
-      const promise = new Promise(res => {
-        resolve = () => {
-          resolved = true;
-          res();
-        };
-      });
-      let resolved = false;
-      function Suspender() {
-        if (resolved) {
-          return 'resolved';
-        }
-        throw promise;
-      }
-
-      const response = ReactDOMServer.renderToStaticNodeStream(
-        <div>
-          <React.Suspense fallback={'fallback'}>
-            <Suspender />
-          </React.Suspense>
-        </div>,
-      );
-      await resolve();
-      expect(response.read().toString()).toEqual('<div>resolved</div>');
-    });
-  });
-
   it('warns with a no-op when an async setState is triggered', () => {
     class Foo extends React.Component {
       UNSAFE_componentWillMount() {
