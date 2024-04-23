@@ -82,6 +82,7 @@ export const enableFetchInstrumentation = true;
 
 export const enableBinaryFlight = __EXPERIMENTAL__;
 export const enableFlightReadableStream = __EXPERIMENTAL__;
+export const enableAsyncIterableChildren = __EXPERIMENTAL__;
 
 export const enableTaint = __EXPERIMENTAL__;
 
@@ -142,6 +143,9 @@ export const transitionLaneExpirationMs = 5000;
 // different section of this file.
 
 // const __NEXT_MAJOR__ = __EXPERIMENTAL__;
+
+// Renames the internal symbol for elements since they have changed signature/constructor
+export const renameElementSymbol = true;
 
 // Removes legacy style context
 export const disableLegacyContext = true;

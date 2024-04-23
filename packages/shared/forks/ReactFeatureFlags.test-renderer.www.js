@@ -23,6 +23,7 @@ export const enableLegacyCache = true;
 export const enableFetchInstrumentation = false;
 export const enableBinaryFlight = true;
 export const enableFlightReadableStream = true;
+export const enableAsyncIterableChildren = false;
 export const enableTaint = true;
 export const enablePostpone = false;
 export const disableCommentsAsDOMContainers = true;
@@ -89,6 +90,8 @@ export const disableDOMTestUtils = false;
 
 export const disableDefaultPropsExceptForClasses = false;
 export const enableEarlyReturnForPropDiffing = false;
+
+export const renameElementSymbol = false;
 
 // Flow magic to verify the exports of this file match the original version.
 ((((null: any): ExportsType): FeatureFlagsType): ExportsType);

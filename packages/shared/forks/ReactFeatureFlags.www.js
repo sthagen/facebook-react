@@ -65,12 +65,15 @@ export const enableSchedulingProfiler: boolean =
 export const disableLegacyContext = __EXPERIMENTAL__;
 export const enableGetInspectorDataForInstanceInProduction = false;
 
+export const renameElementSymbol = false;
+
 export const enableCache = true;
 export const enableLegacyCache = true;
 export const enableFetchInstrumentation = false;
 
 export const enableBinaryFlight = false;
 export const enableFlightReadableStream = false;
+export const enableAsyncIterableChildren = false;
 
 export const enableTaint = false;
 
