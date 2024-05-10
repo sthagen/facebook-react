@@ -361,11 +361,21 @@ describe('ReactFlightDOMReply', () => {
         temporaryReferences,
       },
     );
+
+    const temporaryReferencesServer =
+      ReactServerDOMServer.createTemporaryReferenceSet();
     const serverPayload = await ReactServerDOMServer.decodeReply(
       body,
       webpackServerMap,
+      {temporaryReferences: temporaryReferencesServer},
     );
-    const stream = ReactServerDOMServer.renderToReadableStream(serverPayload);
+    const stream = ReactServerDOMServer.renderToReadableStream(
+      serverPayload,
+      null,
+      {
+        temporaryReferences: temporaryReferencesServer,
+      },
+    );
     const response = await ReactServerDOMClient.createFromReadableStream(
       stream,
       {
@@ -375,6 +385,48 @@ describe('ReactFlightDOMReply', () => {
 
     // This should've been the same reference that we already saw.
     expect(response.children).toBe(children);
+  });
+
+  it('can return the same object using temporary references', async () => {
+    const obj = {
+      this: {is: 'a large object'},
+      with: {many: 'properties in it'},
+    };
+
+    const root = {obj};
+
+    const temporaryReferences =
+      ReactServerDOMClient.createTemporaryReferenceSet();
+    const body = await ReactServerDOMClient.encodeReply(root, {
+      temporaryReferences,
+    });
+
+    const temporaryReferencesServer =
+      ReactServerDOMServer.createTemporaryReferenceSet();
+    const serverPayload = await ReactServerDOMServer.decodeReply(
+      body,
+      webpackServerMap,
+      {temporaryReferences: temporaryReferencesServer},
+    );
+    const stream = ReactServerDOMServer.renderToReadableStream(
+      {
+        root: serverPayload,
+        obj: serverPayload.obj,
+      },
+      null,
+      {temporaryReferences: temporaryReferencesServer},
+    );
+    const response = await ReactServerDOMClient.createFromReadableStream(
+      stream,
+      {
+        temporaryReferences,
+      },
+    );
+
+    // This should've been the same reference that we already saw because
+    // we returned it by reference.
+    expect(response.root).toBe(root);
+    expect(response.obj).toBe(obj);
   });
 
   // @gate enableFlightReadableStream
@@ -536,5 +588,14 @@ describe('ReactFlightDOMReply', () => {
     expect(() => iterator3.next('this is not allowed')).toThrow(
       'Values cannot be passed to next() of AsyncIterables passed to Client Components.',
     );
+  });
+
+  it('can transport cyclic objects', async () => {
+    const cyclic = {obj: null};
+    cyclic.obj = cyclic;
+
+    const body = await ReactServerDOMClient.encodeReply({prop: cyclic});
+    const root = await ReactServerDOMServer.decodeReply(body, webpackServerMap);
+    expect(root.prop.obj).toBe(root.prop);
   });
 });

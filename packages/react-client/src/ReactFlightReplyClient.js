@@ -109,8 +109,8 @@ function serializeServerReferenceID(id: number): string {
   return '$F' + id.toString(16);
 }
 
-function serializeTemporaryReferenceID(id: number): string {
-  return '$T' + id.toString(16);
+function serializeTemporaryReferenceMarker(): string {
+  return '$T';
 }
 
 function serializeFormDataReference(id: number): string {
@@ -176,6 +176,8 @@ function escapeStringValue(value: string): string {
   }
 }
 
+interface Reference {}
+
 export function processReply(
   root: ReactServerValue,
   formFieldPrefix: string,
@@ -186,6 +188,8 @@ export function processReply(
   let nextPartId = 1;
   let pendingParts = 0;
   let formData: null | FormData = null;
+  const writtenObjects: WeakMap<Reference, string> = new WeakMap();
+  let modelRoot: null | ReactServerValue = root;
 
   function serializeTypedArray(
     tag: string,
@@ -401,15 +405,22 @@ export function processReply(
     if (typeof value === 'object') {
       switch ((value: any).$$typeof) {
         case REACT_ELEMENT_TYPE: {
-          if (temporaryReferences === undefined) {
-            throw new Error(
-              'React Element cannot be passed to Server Functions from the Client without a ' +
-                'temporary reference set. Pass a TemporaryReferenceSet to the options.' +
-                (__DEV__ ? describeObjectForErrorMessage(parent, key) : ''),
-            );
+          if (temporaryReferences !== undefined && key.indexOf(':') === -1) {
+            // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+            const parentReference = writtenObjects.get(parent);
+            if (parentReference !== undefined) {
+              // If the parent has a reference, we can refer to this object indirectly
+              // through the property name inside that parent.
+              const reference = parentReference + ':' + key;
+              // Store this object so that the server can refer to it later in responses.
+              writeTemporaryReference(temporaryReferences, reference, value);
+              return serializeTemporaryReferenceMarker();
+            }
           }
-          return serializeTemporaryReferenceID(
-            writeTemporaryReference(temporaryReferences, value),
+          throw new Error(
+            'React Element cannot be passed to Server Functions from the Client without a ' +
+              'temporary reference set. Pass a TemporaryReferenceSet to the options.' +
+              (__DEV__ ? describeObjectForErrorMessage(parent, key) : ''),
           );
         }
         case REACT_LAZY_TYPE: {
@@ -427,7 +438,7 @@ export function processReply(
             // We always outline this as a separate part even though we could inline it
             // because it ensures a more deterministic encoding.
             const lazyId = nextPartId++;
-            const partJSON = JSON.stringify(resolvedModel, resolveToJSON);
+            const partJSON = serializeModel(resolvedModel, lazyId);
             // $FlowFixMe[incompatible-type] We know it's not null because we assigned it above.
             const data: FormData = formData;
             // eslint-disable-next-line react-internal/safe-string-coercion
@@ -447,7 +458,7 @@ export function processReply(
                 // While the first promise resolved, its value isn't necessarily what we'll
                 // resolve into because we might suspend again.
                 try {
-                  const partJSON = JSON.stringify(value, resolveToJSON);
+                  const partJSON = serializeModel(value, lazyId);
                   // $FlowFixMe[incompatible-type] We know it's not null because we assigned it above.
                   const data: FormData = formData;
                   // eslint-disable-next-line react-internal/safe-string-coercion
@@ -488,7 +499,7 @@ export function processReply(
         thenable.then(
           partValue => {
             try {
-              const partJSON = JSON.stringify(partValue, resolveToJSON);
+              const partJSON = serializeModel(partValue, promiseId);
               // $FlowFixMe[incompatible-type] We know it's not null because we assigned it above.
               const data: FormData = formData;
               // eslint-disable-next-line react-internal/safe-string-coercion
@@ -507,6 +518,33 @@ export function processReply(
         );
         return serializePromiseID(promiseId);
       }
+
+      const existingReference = writtenObjects.get(value);
+      if (existingReference !== undefined) {
+        if (modelRoot === value) {
+          // This is the ID we're currently emitting so we need to write it
+          // once but if we discover it again, we refer to it by id.
+          modelRoot = null;
+        } else {
+          // We've already emitted this as an outlined object, so we can
+          // just refer to that by its existing ID.
+          return existingReference;
+        }
+      } else if (key.indexOf(':') === -1) {
+        // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+        const parentReference = writtenObjects.get(parent);
+        if (parentReference !== undefined) {
+          // If the parent has a reference, we can refer to this object indirectly
+          // through the property name inside that parent.
+          const reference = parentReference + ':' + key;
+          writtenObjects.set(value, reference);
+          if (temporaryReferences !== undefined) {
+            // Store this object so that the server can refer to it later in responses.
+            writeTemporaryReference(temporaryReferences, reference, value);
+          }
+        }
+      }
+
       if (isArray(value)) {
         // $FlowFixMe[incompatible-return]
         return value;
@@ -530,20 +568,20 @@ export function processReply(
         return serializeFormDataReference(refId);
       }
       if (value instanceof Map) {
-        const partJSON = JSON.stringify(Array.from(value), resolveToJSON);
+        const mapId = nextPartId++;
+        const partJSON = serializeModel(Array.from(value), mapId);
         if (formData === null) {
           formData = new FormData();
         }
-        const mapId = nextPartId++;
         formData.append(formFieldPrefix + mapId, partJSON);
         return serializeMapID(mapId);
       }
       if (value instanceof Set) {
-        const partJSON = JSON.stringify(Array.from(value), resolveToJSON);
+        const setId = nextPartId++;
+        const partJSON = serializeModel(Array.from(value), setId);
         if (formData === null) {
           formData = new FormData();
         }
-        const setId = nextPartId++;
         formData.append(formFieldPrefix + setId, partJSON);
         return serializeSetID(setId);
       }
@@ -622,14 +660,14 @@ export function processReply(
         const iterator = iteratorFn.call(value);
         if (iterator === value) {
           // Iterator, not Iterable
-          const partJSON = JSON.stringify(
+          const iteratorId = nextPartId++;
+          const partJSON = serializeModel(
             Array.from((iterator: any)),
-            resolveToJSON,
+            iteratorId,
           );
           if (formData === null) {
             formData = new FormData();
           }
-          const iteratorId = nextPartId++;
           formData.append(formFieldPrefix + iteratorId, partJSON);
           return serializeIteratorID(iteratorId);
         }
@@ -667,10 +705,9 @@ export function processReply(
               'Classes or null prototypes are not supported.',
           );
         }
-        // We can serialize class instances as temporary references.
-        return serializeTemporaryReferenceID(
-          writeTemporaryReference(temporaryReferences, value),
-        );
+        // We will have written this object to the temporary reference set above
+        // so we can replace it with a marker to refer to this slot later.
+        return serializeTemporaryReferenceMarker();
       }
       if (__DEV__) {
         if (
@@ -751,27 +788,41 @@ export function processReply(
         formData.set(formFieldPrefix + refId, metaDataJSON);
         return serializeServerReferenceID(refId);
       }
-      if (temporaryReferences === undefined) {
-        throw new Error(
-          'Client Functions cannot be passed directly to Server Functions. ' +
-            'Only Functions passed from the Server can be passed back again.',
-        );
+      if (temporaryReferences !== undefined && key.indexOf(':') === -1) {
+        // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+        const parentReference = writtenObjects.get(parent);
+        if (parentReference !== undefined) {
+          // If the parent has a reference, we can refer to this object indirectly
+          // through the property name inside that parent.
+          const reference = parentReference + ':' + key;
+          // Store this object so that the server can refer to it later in responses.
+          writeTemporaryReference(temporaryReferences, reference, value);
+          return serializeTemporaryReferenceMarker();
+        }
       }
-      return serializeTemporaryReferenceID(
-        writeTemporaryReference(temporaryReferences, value),
+      throw new Error(
+        'Client Functions cannot be passed directly to Server Functions. ' +
+          'Only Functions passed from the Server can be passed back again.',
       );
     }
 
     if (typeof value === 'symbol') {
-      if (temporaryReferences === undefined) {
-        throw new Error(
-          'Symbols cannot be passed to a Server Function without a ' +
-            'temporary reference set. Pass a TemporaryReferenceSet to the options.' +
-            (__DEV__ ? describeObjectForErrorMessage(parent, key) : ''),
-        );
+      if (temporaryReferences !== undefined && key.indexOf(':') === -1) {
+        // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+        const parentReference = writtenObjects.get(parent);
+        if (parentReference !== undefined) {
+          // If the parent has a reference, we can refer to this object indirectly
+          // through the property name inside that parent.
+          const reference = parentReference + ':' + key;
+          // Store this object so that the server can refer to it later in responses.
+          writeTemporaryReference(temporaryReferences, reference, value);
+          return serializeTemporaryReferenceMarker();
+        }
       }
-      return serializeTemporaryReferenceID(
-        writeTemporaryReference(temporaryReferences, value),
+      throw new Error(
+        'Symbols cannot be passed to a Server Function without a ' +
+          'temporary reference set. Pass a TemporaryReferenceSet to the options.' +
+          (__DEV__ ? describeObjectForErrorMessage(parent, key) : ''),
       );
     }
 
@@ -784,8 +835,22 @@ export function processReply(
     );
   }
 
-  // $FlowFixMe[incompatible-type] it's not going to be undefined because we'll encode it.
-  const json: string = JSON.stringify(root, resolveToJSON);
+  function serializeModel(model: ReactServerValue, id: number): string {
+    if (typeof model === 'object' && model !== null) {
+      const reference = serializeByValueID(id);
+      writtenObjects.set(model, reference);
+      if (temporaryReferences !== undefined) {
+        // Store this object so that the server can refer to it later in responses.
+        writeTemporaryReference(temporaryReferences, reference, model);
+      }
+    }
+    modelRoot = model;
+    // $FlowFixMe[incompatible-return] it's not going to be undefined because we'll encode it.
+    return JSON.stringify(model, resolveToJSON);
+  }
+
+  const json = serializeModel(root, 0);
+
   if (formData === null) {
     // If it's a simple data structure, we just use plain JSON.
     resolve(json);
