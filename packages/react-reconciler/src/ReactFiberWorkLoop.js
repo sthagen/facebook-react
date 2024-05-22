@@ -23,6 +23,7 @@ import type {
 } from './ReactFiberTracingMarkerComponent';
 import type {OffscreenInstance} from './ReactFiberActivityComponent';
 import type {RenderTaskFn} from './ReactFiberRootScheduler';
+import type {Resource} from './ReactFiberConfig';
 
 import {
   enableCreateEventHandleAPI,
@@ -75,6 +76,7 @@ import {
   startSuspendingCommit,
   waitForCommitToBeReady,
   preloadInstance,
+  preloadResource,
   supportsHydration,
   setCurrentUpdatePriority,
   getCurrentUpdatePriority,
@@ -123,6 +125,7 @@ import {
   MountPassiveDev,
   MountLayoutDev,
   DidDefer,
+  ShouldSuspendCommit,
 } from './ReactFiberFlags';
 import {
   NoLanes,
@@ -151,7 +154,6 @@ import {
   movePendingFibersToMemoized,
   addTransitionToLanesMap,
   getTransitionsForLanes,
-  includesOnlyNonUrgentLanes,
   includesSomeLane,
   OffscreenLane,
   SyncUpdateLanes,
@@ -249,6 +251,7 @@ import {
   markRenderStopped,
   onCommitRoot as onCommitRootDevTools,
   onPostCommitRoot as onPostCommitRootDevTools,
+  setIsStrictModeForDevtools,
 } from './ReactFiberDevToolsHook';
 import {onCommitRoot as onCommitRootTestSelector} from './ReactTestSelectors';
 import {releaseCache} from './ReactFiberCacheComponent';
@@ -1182,7 +1185,7 @@ function commitRootWhenReady(
 ) {
   // TODO: Combine retry throttling with Suspensey commits. Right now they run
   // one after the other.
-  if (includesOnlyNonUrgentLanes(lanes)) {
+  if (finishedWork.subtreeFlags & ShouldSuspendCommit) {
     // Before committing, ask the renderer whether the host tree is ready.
     // If it's not, we'll wait until it notifies us.
     startSuspendingCommit();
@@ -2219,9 +2222,13 @@ function renderRootConcurrent(root: FiberRoot, lanes: Lanes) {
             break;
           }
           case SuspendedOnInstanceAndReadyToContinue: {
+            let resource: null | Resource = null;
             switch (workInProgress.tag) {
+              case HostHoistable: {
+                resource = workInProgress.memoizedState;
+              }
+              // intentional fallthrough
               case HostComponent:
-              case HostHoistable:
               case HostSingleton: {
                 // Before unwinding the stack, check one more time if the
                 // instance is ready. It may have loaded when React yielded to
@@ -2232,7 +2239,9 @@ function renderRootConcurrent(root: FiberRoot, lanes: Lanes) {
                 const hostFiber = workInProgress;
                 const type = hostFiber.type;
                 const props = hostFiber.pendingProps;
-                const isReady = preloadInstance(type, props);
+                const isReady = resource
+                  ? preloadResource(resource)
+                  : preloadInstance(type, props);
                 if (isReady) {
                   // The data resolved. Resume the work loop as if nothing
                   // suspended. Unlike when a user component suspends, we don't
@@ -3667,6 +3676,7 @@ function doubleInvokeEffectsOnFiber(
   fiber: Fiber,
   shouldDoubleInvokePassiveEffects: boolean = true,
 ) {
+  setIsStrictModeForDevtools(true);
   disappearLayoutEffects(fiber);
   if (shouldDoubleInvokePassiveEffects) {
     disconnectPassiveEffect(fiber);
@@ -3675,6 +3685,7 @@ function doubleInvokeEffectsOnFiber(
   if (shouldDoubleInvokePassiveEffects) {
     reconnectPassiveEffects(root, fiber, NoLanes, null, false);
   }
+  setIsStrictModeForDevtools(false);
 }
 
 function doubleInvokeEffectsInDEVIfNecessary(
