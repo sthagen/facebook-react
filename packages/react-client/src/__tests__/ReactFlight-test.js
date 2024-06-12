@@ -27,14 +27,27 @@ function normalizeCodeLocInfo(str) {
   );
 }
 
+function normalizeComponentInfo(debugInfo) {
+  if (typeof debugInfo.stack === 'string') {
+    const {task, ...copy} = debugInfo;
+    copy.stack = normalizeCodeLocInfo(debugInfo.stack);
+    if (debugInfo.owner) {
+      copy.owner = normalizeComponentInfo(debugInfo.owner);
+    }
+    return copy;
+  } else {
+    return debugInfo;
+  }
+}
+
 function getDebugInfo(obj) {
   const debugInfo = obj._debugInfo;
   if (debugInfo) {
+    const copy = [];
     for (let i = 0; i < debugInfo.length; i++) {
-      if (typeof debugInfo[i].stack === 'string') {
-        debugInfo[i].stack = normalizeCodeLocInfo(debugInfo[i].stack);
-      }
+      copy.push(normalizeComponentInfo(debugInfo[i]));
     }
+    return copy;
   }
   return debugInfo;
 }
@@ -1050,8 +1063,10 @@ describe('ReactFlight', () => {
     }
 
     const expectedStack = __DEV__
-      ? // TODO: This should include Throw but it doesn't have a Fiber.
-        '\n    in div' + '\n    in ErrorBoundary (at **)' + '\n    in App'
+      ? '\n    in Throw' +
+        '\n    in div' +
+        '\n    in ErrorBoundary (at **)' +
+        '\n    in App'
       : '\n    in div' + '\n    in ErrorBoundary (at **)';
 
     function App() {
@@ -1062,6 +1077,46 @@ describe('ReactFlight', () => {
           <div>
             <Throw value={new TypeError('This is a real Error.')} />
           </div>
+        </ClientErrorBoundary>
+      );
+    }
+
+    const transport = ReactNoopFlightServer.render(<App />, {
+      onError(x) {
+        if (__DEV__) {
+          return 'a dev digest';
+        }
+        if (x instanceof Error) {
+          return `digest("${x.message}")`;
+        } else if (Array.isArray(x)) {
+          return `digest([])`;
+        } else if (typeof x === 'object' && x !== null) {
+          return `digest({})`;
+        }
+        return `digest(${String(x)})`;
+      },
+    });
+
+    await act(() => {
+      startTransition(() => {
+        ReactNoop.render(ReactNoopFlightClient.read(transport));
+      });
+    });
+  });
+
+  it('should handle serialization errors in element inside error boundary', async () => {
+    const ClientErrorBoundary = clientReference(ErrorBoundary);
+
+    const expectedStack = __DEV__
+      ? '\n    in div' + '\n    in ErrorBoundary (at **)' + '\n    in App'
+      : '\n    in ErrorBoundary (at **)';
+
+    function App() {
+      return (
+        <ClientErrorBoundary
+          expectedMessage="Event handlers cannot be passed to Client Component props."
+          expectedStack={expectedStack}>
+          <div onClick={function () {}} />
         </ClientErrorBoundary>
       );
     }
