@@ -9,7 +9,6 @@
 
 export * from 'react-client/src/ReactFlightClientStreamConfigWeb';
 export * from 'react-client/src/ReactClientConsoleConfigBrowser';
-export * from 'react-dom-bindings/src/shared/ReactFlightClientConfigDOM';
 
 export type Response = any;
 export opaque type ModuleLoading = mixed;
@@ -22,5 +21,6 @@ export const resolveClientReference: any = null;
 export const resolveServerReference: any = null;
 export const preloadModule: any = null;
 export const requireModule: any = null;
+export const dispatchHint: any = null;
 export const prepareDestinationForModule: any = null;
 export const usedWithSSR = true;
