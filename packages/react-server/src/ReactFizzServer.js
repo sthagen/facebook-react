@@ -152,6 +152,7 @@ import {
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
   disableLegacyContext,
+  disableLegacyContextForFunctionComponents,
   enableScopeAPI,
   enableSuspenseAvoidThisFallbackFizz,
   enableCache,
@@ -1654,7 +1655,7 @@ function renderFunctionComponent(
   props: any,
 ): void {
   let legacyContext;
-  if (!disableLegacyContext) {
+  if (!disableLegacyContext && !disableLegacyContextForFunctionComponents) {
     legacyContext = getMaskedContext(Component, task.legacyContext);
   }
   if (__DEV__) {
@@ -1696,13 +1697,15 @@ function renderFunctionComponent(
         if (disableLegacyContext) {
           console.error(
             '%s uses the legacy contextTypes API which was removed in React 19. ' +
-              'Use React.createContext() with React.useContext() instead.',
+              'Use React.createContext() with React.useContext() instead. ' +
+              '(https://react.dev/link/legacy-context)',
             componentName,
           );
         } else {
           console.error(
             '%s uses the legacy contextTypes API which will be removed soon. ' +
-              'Use React.createContext() with React.useContext() instead.',
+              'Use React.createContext() with React.useContext() instead. ' +
+              '(https://react.dev/link/legacy-context)',
             componentName,
           );
         }
