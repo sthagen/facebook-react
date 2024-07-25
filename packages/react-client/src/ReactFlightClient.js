@@ -827,7 +827,7 @@ function getChunk(response: Response, id: number): SomeChunk<any> {
 }
 
 function waitForReference<T>(
-  referencedChunk: PendingChunk<T> | BlockedChunk<T>,
+  referencedChunk: SomeChunk<T>,
   parentObject: Object,
   key: string,
   response: Response,
@@ -1003,6 +1003,21 @@ function getOutlinedModel<T>(
       let value = chunk.value;
       for (let i = 1; i < path.length; i++) {
         value = value[path[i]];
+        if (value.$$typeof === REACT_LAZY_TYPE) {
+          const referencedChunk: SomeChunk<any> = value._payload;
+          if (referencedChunk.status === INITIALIZED) {
+            value = referencedChunk.value;
+          } else {
+            return waitForReference(
+              referencedChunk,
+              parentObject,
+              key,
+              response,
+              map,
+              path.slice(i),
+            );
+          }
+        }
       }
       const chunkValue = map(response, value);
       if (__DEV__ && chunk._debugInfo) {
@@ -1955,7 +1970,7 @@ function createFakeFunction<T>(
 
   if (!name) {
     // An eval:ed function with no name gets the name "eval". We give it something more descriptive.
-    name = '(anonymous)';
+    name = '<anonymous>';
   }
   const encodedName = JSON.stringify(name);
   // We generate code where the call is at the line and column of the server executed code.
