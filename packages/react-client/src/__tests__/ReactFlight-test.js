@@ -1241,10 +1241,10 @@ describe('ReactFlight', () => {
     const ClientErrorBoundary = clientReference(MyErrorBoundary);
 
     function App() {
-      return (
-        <ClientErrorBoundary>
-          <ServerComponent />
-        </ClientErrorBoundary>
+      return ReactServer.createElement(
+        ClientErrorBoundary,
+        null,
+        ReactServer.createElement(ServerComponent),
       );
     }
 
@@ -1301,13 +1301,16 @@ describe('ReactFlight', () => {
         ],
         findSourceMapURLCalls: gate(flags => flags.enableOwnerStacks)
           ? [
-              [__filename],
-              [__filename],
+              [__filename, 'Server'],
+              [__filename, 'Server'],
               // TODO: What should we request here? The outer (<anonymous>) or the inner (inspected-page.html)?
-              ['inspected-page.html:29:11), <anonymous>'],
-              ['file://~/(some)(really)(exotic-directory)/ReactFlight-test.js'],
-              ['file:///testing.js'],
-              [__filename],
+              ['inspected-page.html:29:11), <anonymous>', 'Server'],
+              [
+                'file://~/(some)(really)(exotic-directory)/ReactFlight-test.js',
+                'Server',
+              ],
+              ['file:///testing.js', 'Server'],
+              [__filename, 'Server'],
             ]
           : [],
       });
@@ -2836,6 +2839,7 @@ describe('ReactFlight', () => {
       ); // The eval will end up normalizing these
 
     let sawReactPrefix = false;
+    const environments = [];
     await act(async () => {
       ReactNoop.render(
         <ErrorBoundary
@@ -2843,11 +2847,12 @@ describe('ReactFlight', () => {
           expectedEnviromentName="third-party"
           expectedErrorStack={expectedErrorStack}>
           {ReactNoopFlightClient.read(transport, {
-            findSourceMapURL(url) {
+            findSourceMapURL(url, environmentName) {
               if (url.startsWith('rsc://React/')) {
                 // We don't expect to see any React prefixed URLs here.
                 sawReactPrefix = true;
               }
+              environments.push(environmentName);
               // My not giving a source map, we should leave it intact.
               return null;
             },
@@ -2857,6 +2862,16 @@ describe('ReactFlight', () => {
     });
 
     expect(sawReactPrefix).toBe(false);
+    if (__DEV__ && gate(flags => flags.enableOwnerStacks)) {
+      expect(environments.slice(0, 4)).toEqual([
+        'Server',
+        'third-party',
+        'third-party',
+        'third-party',
+      ]);
+    } else {
+      expect(environments).toEqual([]);
+    }
   });
 
   it('can change the environment name inside a component', async () => {
@@ -3156,5 +3171,59 @@ describe('ReactFlight', () => {
       // so our simulated polyfill doesn't end up getting any component stacks yet.
       {withoutStack: true},
     );
+  });
+
+  it('can filter out stack frames of a serialized error in dev', async () => {
+    async function bar() {
+      throw new Error('my-error');
+    }
+
+    async function intermediate() {
+      await bar();
+    }
+
+    async function foo() {
+      await intermediate();
+    }
+
+    const rejectedPromise = foo();
+    const transport = ReactNoopFlightServer.render(
+      {model: rejectedPromise},
+      {
+        onError(x) {
+          return `digest("${x.message}")`;
+        },
+        filterStackFrame(url, functionName) {
+          return functionName !== 'intermediate';
+        },
+      },
+    );
+
+    let originalError;
+    try {
+      await rejectedPromise;
+    } catch (x) {
+      originalError = x;
+    }
+
+    const root = await ReactNoopFlightClient.read(transport);
+    let caughtError;
+    try {
+      await root.model;
+    } catch (x) {
+      caughtError = x;
+    }
+    if (__DEV__) {
+      expect(caughtError.message).toBe(originalError.message);
+      expect(normalizeCodeLocInfo(caughtError.stack)).toContain(
+        '\n    in bar (at **)' + '\n    in foo (at **)',
+      );
+    }
+    expect(normalizeCodeLocInfo(originalError.stack)).toContain(
+      '\n    in bar (at **)' +
+        '\n    in intermediate (at **)' +
+        '\n    in foo (at **)',
+    );
+    expect(caughtError.digest).toBe('digest("my-error")');
   });
 });
