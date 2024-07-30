@@ -3994,6 +3994,67 @@ describe('ReactDOMFizzServer', () => {
     expect(headers.Link.length).toBe(306);
   });
 
+  it('does not perform any additional work after fatally erroring', async () => {
+    let resolve: () => void;
+    const promise = new Promise(r => {
+      resolve = r;
+    });
+    function AsyncComp() {
+      React.use(promise);
+      return <DidRender>Async</DidRender>;
+    }
+
+    let didRender = false;
+    function DidRender({children}) {
+      didRender = true;
+      return children;
+    }
+
+    function ErrorComp() {
+      throw new Error('boom');
+    }
+
+    function App() {
+      return (
+        <div>
+          <Suspense fallback="loading...">
+            <AsyncComp />
+          </Suspense>
+          <ErrorComp />
+        </div>
+      );
+    }
+
+    let pipe;
+    const errors = [];
+    let didFatal = true;
+    await act(() => {
+      pipe = renderToPipeableStream(<App />, {
+        onError(error) {
+          errors.push(error.message);
+        },
+        onShellError(error) {
+          didFatal = true;
+        },
+      }).pipe;
+    });
+
+    expect(didRender).toBe(false);
+    await act(() => {
+      resolve();
+    });
+    expect(didRender).toBe(false);
+
+    const testWritable = new Stream.Writable();
+    await act(() => pipe(testWritable));
+    expect(didRender).toBe(false);
+    expect(didFatal).toBe(didFatal);
+    expect(errors).toEqual([
+      'boom',
+      'The destination stream errored while writing data.',
+    ]);
+  });
+
   describe('error escaping', () => {
     it('escapes error hash, message, and component stack values in directly flushed errors (html escaping)', async () => {
       window.__outlet = {};
@@ -8064,6 +8125,256 @@ describe('ReactDOMFizzServer', () => {
     });
 
     expect(document.body.textContent).toBe('HelloWorld');
+  });
+
+  it('can abort synchronously during render', async () => {
+    function Sibling() {
+      return <p>sibling</p>;
+    }
+
+    function App() {
+      return (
+        <div>
+          <Suspense fallback={<p>loading 1...</p>}>
+            <ComponentThatAborts />
+            <Sibling />
+          </Suspense>
+          <Suspense fallback={<p>loading 2...</p>}>
+            <Sibling />
+          </Suspense>
+          <div>
+            <Suspense fallback={<p>loading 3...</p>}>
+              <div>
+                <Sibling />
+              </div>
+            </Suspense>
+          </div>
+        </div>
+      );
+    }
+
+    const abortRef = {current: null};
+    function ComponentThatAborts() {
+      abortRef.current();
+      return <p>hello world</p>;
+    }
+
+    let finished = false;
+    await act(() => {
+      const {pipe, abort} = renderToPipeableStream(<App />);
+      abortRef.current = abort;
+      writable.on('finish', () => {
+        finished = true;
+      });
+      pipe(writable);
+    });
+
+    assertConsoleErrorDev([
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+    ]);
+
+    expect(finished).toBe(true);
+    expect(getVisibleChildren(container)).toEqual(
+      <div>
+        <p>loading 1...</p>
+        <p>loading 2...</p>
+        <div>
+          <p>loading 3...</p>
+        </div>
+      </div>,
+    );
+  });
+
+  it('can abort during render in a lazy initializer for a component', async () => {
+    function Sibling() {
+      return <p>sibling</p>;
+    }
+
+    function App() {
+      return (
+        <div>
+          <Suspense fallback={<p>loading 1...</p>}>
+            <LazyAbort />
+            <Sibling />
+          </Suspense>
+          <Suspense fallback={<p>loading 2...</p>}>
+            <Sibling />
+          </Suspense>
+          <div>
+            <Suspense fallback={<p>loading 3...</p>}>
+              <div>
+                <Sibling />
+              </div>
+            </Suspense>
+          </div>
+        </div>
+      );
+    }
+
+    const abortRef = {current: null};
+    const LazyAbort = React.lazy(() => {
+      abortRef.current();
+      return {
+        then(cb) {
+          cb({default: 'div'});
+        },
+      };
+    });
+
+    let finished = false;
+    await act(() => {
+      const {pipe, abort} = renderToPipeableStream(<App />);
+      abortRef.current = abort;
+      writable.on('finish', () => {
+        finished = true;
+      });
+      pipe(writable);
+    });
+
+    assertConsoleErrorDev([
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+    ]);
+
+    expect(finished).toBe(true);
+    expect(getVisibleChildren(container)).toEqual(
+      <div>
+        <p>loading 1...</p>
+        <p>loading 2...</p>
+        <div>
+          <p>loading 3...</p>
+        </div>
+      </div>,
+    );
+  });
+
+  it('can abort during render in a lazy initializer for an element', async () => {
+    function Sibling() {
+      return <p>sibling</p>;
+    }
+
+    function App() {
+      return (
+        <div>
+          <Suspense fallback={<p>loading 1...</p>}>
+            {lazyAbort}
+            <Sibling />
+          </Suspense>
+          <Suspense fallback={<p>loading 2...</p>}>
+            <Sibling />
+          </Suspense>
+          <div>
+            <Suspense fallback={<p>loading 3...</p>}>
+              <div>
+                <Sibling />
+              </div>
+            </Suspense>
+          </div>
+        </div>
+      );
+    }
+
+    const abortRef = {current: null};
+    const lazyAbort = React.lazy(() => {
+      abortRef.current();
+      return {
+        then(cb) {
+          cb({default: 'hello world'});
+        },
+      };
+    });
+
+    let finished = false;
+    await act(() => {
+      const {pipe, abort} = renderToPipeableStream(<App />);
+      abortRef.current = abort;
+      writable.on('finish', () => {
+        finished = true;
+      });
+      pipe(writable);
+    });
+
+    assertConsoleErrorDev([
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+    ]);
+
+    expect(finished).toBe(true);
+    expect(getVisibleChildren(container)).toEqual(
+      <div>
+        <p>loading 1...</p>
+        <p>loading 2...</p>
+        <div>
+          <p>loading 3...</p>
+        </div>
+      </div>,
+    );
+  });
+
+  it('can abort during a synchronous thenable resolution', async () => {
+    function Sibling() {
+      return <p>sibling</p>;
+    }
+
+    function App() {
+      return (
+        <div>
+          <Suspense fallback={<p>loading 1...</p>}>
+            {thenable}
+            <Sibling />
+          </Suspense>
+          <Suspense fallback={<p>loading 2...</p>}>
+            <Sibling />
+          </Suspense>
+          <div>
+            <Suspense fallback={<p>loading 3...</p>}>
+              <div>
+                <Sibling />
+              </div>
+            </Suspense>
+          </div>
+        </div>
+      );
+    }
+
+    const abortRef = {current: null};
+    const thenable = {
+      then(cb) {
+        abortRef.current();
+        cb(thenable.value);
+      },
+    };
+
+    let finished = false;
+    await act(() => {
+      const {pipe, abort} = renderToPipeableStream(<App />);
+      abortRef.current = abort;
+      writable.on('finish', () => {
+        finished = true;
+      });
+      pipe(writable);
+    });
+
+    assertConsoleErrorDev([
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+      'The render was aborted by the server without a reason.',
+    ]);
+
+    expect(finished).toBe(true);
+    expect(getVisibleChildren(container)).toEqual(
+      <div>
+        <p>loading 1...</p>
+        <p>loading 2...</p>
+        <div>
+          <p>loading 3...</p>
+        </div>
+      </div>,
+    );
   });
 
   it('should warn for using generators as children props', async () => {

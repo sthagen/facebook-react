@@ -1934,7 +1934,6 @@ function lowerExpression(
       switch (leftNode.type) {
         case 'Identifier': {
           const leftExpr = left as NodePath<t.Identifier>;
-          const identifier = lowerIdentifier(builder, leftExpr);
           const leftPlace = lowerExpressionToTemporary(builder, leftExpr);
           const right = lowerExpressionToTemporary(builder, expr.get('right'));
           const binaryPlace = lowerValueToTemporary(builder, {
@@ -1944,30 +1943,42 @@ function lowerExpression(
             right,
             loc: exprLoc,
           });
-          const kind = getStoreKind(builder, leftExpr);
-          if (kind === 'StoreLocal') {
-            lowerValueToTemporary(builder, {
-              kind: 'StoreLocal',
-              lvalue: {
-                place: {...identifier},
-                kind: InstructionKind.Reassign,
-              },
-              value: {...binaryPlace},
-              type: null,
-              loc: exprLoc,
-            });
-            return {kind: 'LoadLocal', place: identifier, loc: exprLoc};
+          const binding = builder.resolveIdentifier(leftExpr);
+          if (binding.kind === 'Identifier') {
+            const identifier = lowerIdentifier(builder, leftExpr);
+            const kind = getStoreKind(builder, leftExpr);
+            if (kind === 'StoreLocal') {
+              lowerValueToTemporary(builder, {
+                kind: 'StoreLocal',
+                lvalue: {
+                  place: {...identifier},
+                  kind: InstructionKind.Reassign,
+                },
+                value: {...binaryPlace},
+                type: null,
+                loc: exprLoc,
+              });
+              return {kind: 'LoadLocal', place: identifier, loc: exprLoc};
+            } else {
+              lowerValueToTemporary(builder, {
+                kind: 'StoreContext',
+                lvalue: {
+                  place: {...identifier},
+                  kind: InstructionKind.Reassign,
+                },
+                value: {...binaryPlace},
+                loc: exprLoc,
+              });
+              return {kind: 'LoadContext', place: identifier, loc: exprLoc};
+            }
           } else {
-            lowerValueToTemporary(builder, {
-              kind: 'StoreContext',
-              lvalue: {
-                place: {...identifier},
-                kind: InstructionKind.Reassign,
-              },
+            const temporary = lowerValueToTemporary(builder, {
+              kind: 'StoreGlobal',
+              name: leftExpr.node.name,
               value: {...binaryPlace},
               loc: exprLoc,
             });
-            return {kind: 'LoadContext', place: identifier, loc: exprLoc};
+            return {kind: 'LoadLocal', place: temporary, loc: temporary.loc};
           }
         }
         case 'MemberExpression': {
@@ -2113,10 +2124,10 @@ function lowerExpression(
         }
         props.push({kind: 'JsxAttribute', name: propName, place: value});
       }
-      if (
-        tag.kind === 'BuiltinTag' &&
-        (tag.name === 'fbt' || tag.name === 'fbs')
-      ) {
+
+      const isFbt =
+        tag.kind === 'BuiltinTag' && (tag.name === 'fbt' || tag.name === 'fbs');
+      if (isFbt) {
         const tagName = tag.name;
         const openingIdentifier = opening.get('name');
         const tagIdentifier = openingIdentifier.isJSXIdentifier()
@@ -2130,56 +2141,55 @@ function lowerExpression(
             suggestions: null,
           });
         }
-        const fbtEnumLocations: Array<SourceLocation> = [];
+        // see `error.todo-multiple-fbt-plural` fixture for explanation
+        const fbtLocations = {
+          enum: new Array<SourceLocation>(),
+          plural: new Array<SourceLocation>(),
+          pronoun: new Array<SourceLocation>(),
+        };
         expr.traverse({
+          JSXClosingElement(path) {
+            path.skip();
+          },
           JSXNamespacedName(path) {
-            if (
-              path.node.namespace.name === tagName &&
-              path.node.name.name === 'enum'
-            ) {
-              fbtEnumLocations.push(path.node.loc ?? GeneratedSource);
+            if (path.node.namespace.name === tagName) {
+              switch (path.node.name.name) {
+                case 'enum':
+                  fbtLocations.enum.push(path.node.loc ?? GeneratedSource);
+                  break;
+                case 'plural':
+                  fbtLocations.plural.push(path.node.loc ?? GeneratedSource);
+                  break;
+                case 'pronoun':
+                  fbtLocations.pronoun.push(path.node.loc ?? GeneratedSource);
+                  break;
+              }
             }
           },
         });
-        if (fbtEnumLocations.length > 1) {
-          CompilerError.throwTodo({
-            reason: `Support <${tagName}> tags with multiple <${tagName}:enum> values`,
-            loc: fbtEnumLocations.at(-1) ?? GeneratedSource,
-            description: null,
-            suggestions: null,
-          });
+        for (const [name, locations] of Object.entries(fbtLocations)) {
+          if (locations.length > 1) {
+            CompilerError.throwTodo({
+              reason: `Support <${tagName}> tags with multiple <${tagName}:${name}> values`,
+              loc: locations.at(-1) ?? GeneratedSource,
+              description: null,
+              suggestions: null,
+            });
+          }
         }
       }
 
-      let children: Array<Place>;
-      if (
-        tag.kind === 'BuiltinTag' &&
-        (tag.name === 'fbt' || tag.name === 'fbs')
-      ) {
-        children = expr
-          .get('children')
-          .map(child => {
-            if (child.isJSXText()) {
-              /*
-               * FBT whitespace normalization differs from standard JSX:
-               * https://github.com/facebook/fbt/blob/0b4e0d13c30bffd0daa2a75715d606e3587b4e40/packages/babel-plugin-fbt/src/FbtUtil.js#L76-L87
-               */
-              const text = child.node.value.replace(/[^\S\u00A0]+/g, ' ');
-              return lowerValueToTemporary(builder, {
-                kind: 'JSXText',
-                value: text,
-                loc: child.node.loc ?? GeneratedSource,
-              });
-            }
-            return lowerJsxElement(builder, child);
-          })
-          .filter(notNull);
-      } else {
-        children = expr
-          .get('children')
-          .map(child => lowerJsxElement(builder, child))
-          .filter(notNull);
-      }
+      /**
+       * Increment fbt counter before traversing into children, as whitespace
+       * in jsx text is handled differently for fbt subtrees.
+       */
+      isFbt && builder.fbtDepth++;
+      const children: Array<Place> = expr
+        .get('children')
+        .map(child => lowerJsxElement(builder, child))
+        .filter(notNull);
+      isFbt && builder.fbtDepth--;
+
       return {
         kind: 'JsxExpression',
         tag,
@@ -3141,7 +3151,19 @@ function lowerJsxElement(
       return lowerExpressionToTemporary(builder, expression);
     }
   } else if (exprPath.isJSXText()) {
-    const text = trimJsxText(exprPath.node.value);
+    let text: string | null;
+    if (builder.fbtDepth > 0) {
+      /*
+       * FBT whitespace normalization differs from standard JSX.
+       * https://github.com/facebook/fbt/blob/0b4e0d13c30bffd0daa2a75715d606e3587b4e40/packages/babel-plugin-fbt/src/FbtUtil.js#L76-L87
+       * Since the fbt transform runs after, let's just preserve all
+       * whitespace in FBT subtrees as is.
+       */
+      text = exprPath.node.value;
+    } else {
+      text = trimJsxText(exprPath.node.value);
+    }
+
     if (text === null) {
       return null;
     }

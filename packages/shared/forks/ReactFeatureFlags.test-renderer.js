@@ -44,6 +44,7 @@ export const enableComponentStackLocations = true;
 export const enableLegacyFBSupport = false;
 export const enableFilterEmptyStringAttributesDOM = true;
 export const enableGetInspectorDataForInstanceInProduction = false;
+export const enableFabricCompleteRootInCommitPhase = false;
 
 export const enableRetryLaneExpiration = false;
 export const retryLaneExpirationMs = 5000;
@@ -51,7 +52,7 @@ export const syncLaneExpirationMs = 250;
 export const transitionLaneExpirationMs = 5000;
 
 export const disableSchedulerTimeoutInWorkLoop = false;
-export const enableLazyContextPropagation = false;
+export const enableLazyContextPropagation = __EXPERIMENTAL__;
 export const enableContextProfiling = false;
 export const enableLegacyHidden = false;
 

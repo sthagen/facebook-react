@@ -88,14 +88,19 @@ export const enableTaint = __EXPERIMENTAL__;
 export const enablePostpone = __EXPERIMENTAL__;
 
 /**
+ * Switches the Fabric API from doing layout in commit work instead of complete work.
+ */
+export const enableFabricCompleteRootInCommitPhase = false;
+
+/**
  * Switches Fiber creation to a simple object instead of a constructor.
  */
 export const enableObjectFiber = false;
 
 export const enableTransitionTracing = false;
 
-// No known bugs, but needs performance testing
-export const enableLazyContextPropagation = false;
+// Shipped on FB, waiting for next stable release to roll out to OSS
+export const enableLazyContextPropagation = __EXPERIMENTAL__;
 
 // Expose unstable useContext for performance testing
 export const enableContextProfiling = false;
