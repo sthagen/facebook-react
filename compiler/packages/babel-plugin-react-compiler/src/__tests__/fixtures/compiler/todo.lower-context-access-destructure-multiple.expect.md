@@ -2,7 +2,7 @@
 ## Input
 
 ```javascript
-// @enableLowerContextAccess
+// @lowerContextAccess
 function App() {
   const context = useContext(MyContext);
   const {foo} = context;
@@ -15,7 +15,7 @@ function App() {
 ## Code
 
 ```javascript
-import { c as _c } from "react/compiler-runtime"; // @enableLowerContextAccess
+import { c as _c } from "react/compiler-runtime"; // @lowerContextAccess
 function App() {
   const $ = _c(3);
   const context = useContext(MyContext);

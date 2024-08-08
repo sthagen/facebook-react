@@ -263,7 +263,7 @@ function isFilePartOfSources(
     return sources(filename);
   }
 
-  for (const prefix in sources) {
+  for (const prefix of sources) {
     if (filename.indexOf(prefix) !== -1) {
       return true;
     }
@@ -502,6 +502,9 @@ export function compileProgram(
     }
   }
 
+  const hasLoweredContextAccess = compiledFns.some(
+    c => c.compiledFn.hasLoweredContextAccess,
+  );
   const externalFunctions: Array<ExternalFunction> = [];
   let gating: null | ExternalFunction = null;
   try {
@@ -509,6 +512,11 @@ export function compileProgram(
     if (pass.opts.gating != null) {
       gating = tryParseExternalFunction(pass.opts.gating);
       externalFunctions.push(gating);
+    }
+
+    const lowerContextAccess = pass.opts.environment?.lowerContextAccess;
+    if (lowerContextAccess && hasLoweredContextAccess) {
+      externalFunctions.push(tryParseExternalFunction(lowerContextAccess));
     }
 
     const enableEmitInstrumentForget =
