@@ -1148,8 +1148,9 @@ export function attach(
 
     // Recursively unmount all roots.
     hook.getFiberRoots(rendererID).forEach(root => {
-      currentRootID = getFiberInstanceThrows(root.current).id;
-      unmountFiberRecursively(root.current);
+      const rootInstance = getFiberInstanceThrows(root.current);
+      currentRootID = rootInstance.id;
+      unmountInstanceRecursively(rootInstance);
       flushPendingEvents(root);
       currentRootID = -1;
     });
@@ -2183,7 +2184,8 @@ export function attach(
     return fiberInstance;
   }
 
-  function recordUnmount(fiber: Fiber): null | FiberInstance {
+  function recordUnmount(fiberInstance: FiberInstance): void {
+    const fiber = fiberInstance.data;
     if (__DEBUG__) {
       debug('recordUnmount()', fiber, null);
     }
@@ -2200,25 +2202,13 @@ export function attach(
       }
     }
 
-    const fiberInstance = getFiberInstanceUnsafe(fiber);
-    if (fiberInstance === null) {
-      // If we've never seen this Fiber, it might be inside of a legacy render Suspense fragment (so the store is not even aware of it).
-      // In that case we can just ignore it or it will cause errors later on.
-      // One example of this is a Lazy component that never resolves before being unmounted.
-      //
-      // This also might indicate a Fast Refresh force-remount scenario.
-      //
-      // TODO: This is fragile and can obscure actual bugs.
-      return null;
-    }
-
     const id = fiberInstance.id;
     const isRoot = fiber.tag === HostRoot;
     if (isRoot) {
       // Roots must be removed only after all children have been removed.
       // So we track it separately.
       pendingUnmountedRootID = id;
-    } else if (!shouldFilterFiber(fiber)) {
+    } else {
       // To maintain child-first ordering,
       // we'll push it into one of these queues,
       // and later arrange them in the correct order.
@@ -2232,7 +2222,6 @@ export function attach(
       idToRootMap.delete(id);
       idToTreeBaseDurationMap.delete(id);
     }
-    return fiberInstance;
   }
 
   // Running state of the remaining children from the previous version of this parent that
@@ -2308,10 +2297,7 @@ export function attach(
   function unmountRemainingChildren() {
     let child = remainingReconcilingChildren;
     while (child !== null) {
-      if (child.kind === FIBER_INSTANCE) {
-        unmountFiberRecursively(child.data);
-      }
-      removeChild(child);
+      unmountInstanceRecursively(child);
       child = remainingReconcilingChildren;
     }
   }
@@ -2434,69 +2420,33 @@ export function attach(
 
   // We use this to simulate unmounting for Suspense trees
   // when we switch from primary to fallback, or deleting a subtree.
-  function unmountFiberRecursively(fiber: Fiber) {
+  function unmountInstanceRecursively(instance: DevToolsInstance) {
     if (__DEBUG__) {
-      debug('unmountFiberRecursively()', fiber, null);
+      if (instance.kind === FIBER_INSTANCE) {
+        debug('unmountInstanceRecursively()', instance.data, null);
+      }
     }
 
-    let fiberInstance = null;
-
-    const shouldIncludeInTree = !shouldFilterFiber(fiber);
     const stashedParent = reconcilingParent;
     const stashedPrevious = previouslyReconciledSibling;
     const stashedRemaining = remainingReconcilingChildren;
-    if (shouldIncludeInTree) {
-      fiberInstance = getFiberInstanceThrows(fiber);
-      // Push a new DevTools instance parent while reconciling this subtree.
-      reconcilingParent = fiberInstance;
-      previouslyReconciledSibling = null;
-      // Move all the children of this instance to the remaining set.
-      // We'll move them back one by one, and anything that remains is deleted.
-      remainingReconcilingChildren = fiberInstance.firstChild;
-      fiberInstance.firstChild = null;
-    }
+    // Push a new DevTools instance parent while reconciling this subtree.
+    reconcilingParent = instance;
+    previouslyReconciledSibling = null;
+    // Move all the children of this instance to the remaining set.
+    remainingReconcilingChildren = instance.firstChild;
     try {
-      // We might meet a nested Suspense on our way.
-      const isTimedOutSuspense =
-        fiber.tag === SuspenseComponent && fiber.memoizedState !== null;
-
-      if (fiber.tag === HostHoistable) {
-        releaseHostResource(fiber, fiber.memoizedState);
-      }
-
-      let child = fiber.child;
-      if (isTimedOutSuspense) {
-        // If it's showing fallback tree, let's traverse it instead.
-        const primaryChildFragment = fiber.child;
-        const fallbackChildFragment = primaryChildFragment
-          ? primaryChildFragment.sibling
-          : null;
-        // Skip over to the real Fiber child.
-        child = fallbackChildFragment ? fallbackChildFragment.child : null;
-      }
-
-      unmountChildrenRecursively(child);
+      // Unmount the remaining set.
+      unmountRemainingChildren();
     } finally {
-      if (shouldIncludeInTree) {
-        reconcilingParent = stashedParent;
-        previouslyReconciledSibling = stashedPrevious;
-        remainingReconcilingChildren = stashedRemaining;
-      }
+      reconcilingParent = stashedParent;
+      previouslyReconciledSibling = stashedPrevious;
+      remainingReconcilingChildren = stashedRemaining;
     }
-    if (fiberInstance !== null) {
-      recordUnmount(fiber);
-      removeChild(fiberInstance);
+    if (instance.kind === FIBER_INSTANCE) {
+      recordUnmount(instance);
     }
-  }
-
-  function unmountChildrenRecursively(firstChild: null | Fiber) {
-    let child: null | Fiber = firstChild;
-    while (child !== null) {
-      // Record simulated unmounts children-first.
-      // We skip nodes without return because those are real unmounts.
-      unmountFiberRecursively(child);
-      child = child.sibling;
-    }
+    removeChild(instance);
   }
 
   function recordProfilingDurations(fiber: Fiber) {
@@ -2566,24 +2516,28 @@ export function attach(
     }
   }
 
-  function recordResetChildren(
-    parentInstance: DevToolsInstance,
-    childSet: Fiber,
-  ) {
+  function recordResetChildren(parentInstance: DevToolsInstance) {
     if (__DEBUG__) {
-      debug('recordResetChildren()', childSet, parentInstance);
+      if (
+        parentInstance.firstChild !== null &&
+        parentInstance.firstChild.kind === FIBER_INSTANCE
+      ) {
+        debug(
+          'recordResetChildren()',
+          parentInstance.firstChild.data,
+          parentInstance,
+        );
+      }
     }
     // The frontend only really cares about the displayName, key, and children.
     // The first two don't really change, so we are only concerned with the order of children here.
     // This is trickier than a simple comparison though, since certain types of fibers are filtered.
     const nextChildren: Array<number> = [];
 
-    // This is a naive implementation that shallowly recourses children.
-    // We might want to revisit this if it proves to be too inefficient.
-    let child: null | Fiber = childSet;
+    let child: null | DevToolsInstance = parentInstance.firstChild;
     while (child !== null) {
-      findReorderedChildrenRecursively(child, nextChildren);
-      child = child.sibling;
+      nextChildren.push(child.id);
+      child = child.nextSibling;
     }
 
     const numChildren = nextChildren.length;
@@ -2596,38 +2550,6 @@ export function attach(
     pushOperation(numChildren);
     for (let i = 0; i < nextChildren.length; i++) {
       pushOperation(nextChildren[i]);
-    }
-  }
-
-  function findReorderedChildrenRecursively(
-    fiber: Fiber,
-    nextChildren: Array<number>,
-  ) {
-    if (!shouldFilterFiber(fiber)) {
-      nextChildren.push(getFiberIDThrows(fiber));
-    } else {
-      let child = fiber.child;
-      const isTimedOutSuspense =
-        fiber.tag === SuspenseComponent && fiber.memoizedState !== null;
-      if (isTimedOutSuspense) {
-        // Special case: if Suspense mounts in a timed-out state,
-        // get the fallback child from the inner fragment,
-        // and skip over the primary child.
-        const primaryChildFragment = fiber.child;
-        const fallbackChildFragment = primaryChildFragment
-          ? primaryChildFragment.sibling
-          : null;
-        const fallbackChild = fallbackChildFragment
-          ? fallbackChildFragment.child
-          : null;
-        if (fallbackChild !== null) {
-          child = fallbackChild;
-        }
-      }
-      while (child !== null) {
-        findReorderedChildrenRecursively(child, nextChildren);
-        child = child.sibling;
-      }
     }
   }
 
@@ -2843,7 +2765,8 @@ export function attach(
       } else if (!prevDidTimeout && nextDidTimeOut) {
         // Primary -> Fallback:
         // 1. Hide primary set
-        unmountChildrenRecursively(prevFiber.child);
+        // We simply don't re-add the fallback children and let
+        // unmountRemainingChildren() handle it.
         // 2. Mount fallback set
         const nextFiberChild = nextFiber.child;
         const nextFallbackChildSet = nextFiberChild
@@ -2914,17 +2837,8 @@ export function attach(
         // We need to crawl the subtree for closest non-filtered Fibers
         // so that we can display them in a flat children set.
         if (shouldIncludeInTree) {
-          // Normally, search for children from the rendered child.
-          let nextChildSet = nextFiber.child;
-          if (nextDidTimeOut) {
-            // Special case: timed-out Suspense renders the fallback set.
-            const nextFiberChild = nextFiber.child;
-            nextChildSet = nextFiberChild ? nextFiberChild.sibling : null;
-          }
-          if (nextChildSet != null) {
-            if (reconcilingParent !== null) {
-              recordResetChildren(reconcilingParent, nextChildSet);
-            }
+          if (reconcilingParent !== null) {
+            recordResetChildren(reconcilingParent);
           }
           // We've handled the child order change for this Fiber.
           // Since it's included, there's no need to invalidate parent child order.
@@ -3053,19 +2967,19 @@ export function attach(
     const current = root.current;
     const alternate = current.alternate;
 
-    const existingRoot =
+    let rootInstance =
       fiberToFiberInstanceMap.get(current) ||
       (alternate && fiberToFiberInstanceMap.get(alternate));
-    if (!existingRoot) {
-      const newRoot = createFiberInstance(current);
-      idToDevToolsInstanceMap.set(newRoot.id, newRoot);
-      fiberToFiberInstanceMap.set(current, newRoot);
+    if (!rootInstance) {
+      rootInstance = createFiberInstance(current);
+      idToDevToolsInstanceMap.set(rootInstance.id, rootInstance);
+      fiberToFiberInstanceMap.set(current, rootInstance);
       if (alternate) {
-        fiberToFiberInstanceMap.set(alternate, newRoot);
+        fiberToFiberInstanceMap.set(alternate, rootInstance);
       }
-      currentRootID = newRoot.id;
+      currentRootID = rootInstance.id;
     } else {
-      currentRootID = existingRoot.id;
+      currentRootID = rootInstance.id;
     }
 
     // Before the traversals, remember to start tracking
@@ -3123,7 +3037,7 @@ export function attach(
       } else if (wasMounted && !isMounted) {
         // Unmount an existing root.
         removeRootPseudoKey(currentRootID);
-        unmountFiberRecursively(alternate);
+        unmountInstanceRecursively(rootInstance);
       }
     } else {
       // Mount a new root.
