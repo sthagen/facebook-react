@@ -88,6 +88,7 @@ function apply(func: HIRFunction, unifier: Unifier): void {
       }
     }
   }
+  func.returnType = unifier.get(func.returnType);
 }
 
 type TypeEquation = {
@@ -122,6 +123,7 @@ function* generate(
   }
 
   const names = new Map();
+  const returnTypes: Array<Type> = [];
   for (const [_, block] of func.body.blocks) {
     for (const phi of block.phis) {
       yield equation(phi.type, {
@@ -133,6 +135,18 @@ function* generate(
     for (const instr of block.instructions) {
       yield* generateInstructionTypes(func.env, names, instr);
     }
+    const terminal = block.terminal;
+    if (terminal.kind === 'return') {
+      returnTypes.push(terminal.value.identifier.type);
+    }
+  }
+  if (returnTypes.length > 1) {
+    yield equation(func.returnType, {
+      kind: 'Phi',
+      operands: returnTypes,
+    });
+  } else if (returnTypes.length === 1) {
+    yield equation(func.returnType, returnTypes[0]!);
   }
 }
 
@@ -227,7 +241,7 @@ function* generateInstructionTypes(
     }
 
     case 'LoadGlobal': {
-      const globalType = env.getGlobalDeclaration(value.binding);
+      const globalType = env.getGlobalDeclaration(value.binding, value.loc);
       if (globalType) {
         yield equation(left, globalType);
       }
@@ -346,7 +360,11 @@ function* generateInstructionTypes(
 
     case 'FunctionExpression': {
       yield* generate(value.loweredFunc.func);
-      yield equation(left, {kind: 'Object', shapeId: BuiltInFunctionId});
+      yield equation(left, {
+        kind: 'Function',
+        shapeId: BuiltInFunctionId,
+        return: value.loweredFunc.func.returnType,
+      });
       break;
     }
 
