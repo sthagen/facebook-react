@@ -14,6 +14,7 @@ import {
   ComponentFilterElementType,
   ComponentFilterHOC,
   ComponentFilterLocation,
+  ComponentFilterEnvironmentName,
   ElementTypeClass,
   ElementTypeContext,
   ElementTypeFunction,
@@ -721,6 +722,11 @@ export function getInternalReactConstants(version: string): {
   };
 }
 
+// All environment names we've seen so far. This lets us create a list of filters to apply.
+// This should ideally include env of filtered Components too so that you can add those as
+// filters at the same time as removing some other filter.
+const knownEnvironmentNames: Set<string> = new Set();
+
 // Map of one or more Fibers in a pair to their unique id number.
 // We track both Fibers to support Fast Refresh,
 // which may forcefully replace one of the pair as part of hot reloading.
@@ -732,35 +738,93 @@ const fiberToFiberInstanceMap: Map<Fiber, FiberInstance> = new Map();
 // operations that should be the same whether the current and work-in-progress Fiber is used.
 const idToDevToolsInstanceMap: Map<number, DevToolsInstance> = new Map();
 
-// Map of resource DOM nodes to all the Fibers that depend on it.
-const hostResourceToFiberMap: Map<HostInstance, Set<Fiber>> = new Map();
+// Map of canonical HostInstances to the nearest parent DevToolsInstance.
+const publicInstanceToDevToolsInstanceMap: Map<HostInstance, DevToolsInstance> =
+  new Map();
+// Map of resource DOM nodes to all the nearest DevToolsInstances that depend on it.
+const hostResourceToDevToolsInstanceMap: Map<
+  HostInstance,
+  Set<DevToolsInstance>,
+> = new Map();
+
+function getPublicInstance(instance: HostInstance): HostInstance {
+  // Typically the PublicInstance and HostInstance is the same thing but not in Fabric.
+  // So we need to detect this and use that as the public instance.
+  return typeof instance === 'object' &&
+    instance !== null &&
+    typeof instance.canonical === 'object'
+    ? (instance.canonical: any)
+    : typeof instance._nativeTag === 'number'
+      ? instance._nativeTag
+      : instance;
+}
+
+function aquireHostInstance(
+  nearestInstance: DevToolsInstance,
+  hostInstance: HostInstance,
+): void {
+  const publicInstance = getPublicInstance(hostInstance);
+  publicInstanceToDevToolsInstanceMap.set(publicInstance, nearestInstance);
+}
+
+function releaseHostInstance(
+  nearestInstance: DevToolsInstance,
+  hostInstance: HostInstance,
+): void {
+  const publicInstance = getPublicInstance(hostInstance);
+  if (
+    publicInstanceToDevToolsInstanceMap.get(publicInstance) === nearestInstance
+  ) {
+    publicInstanceToDevToolsInstanceMap.delete(publicInstance);
+  }
+}
 
 function aquireHostResource(
-  fiber: Fiber,
+  nearestInstance: DevToolsInstance,
   resource: ?{instance?: HostInstance},
 ): void {
   const hostInstance = resource && resource.instance;
   if (hostInstance) {
-    let resourceFibers = hostResourceToFiberMap.get(hostInstance);
-    if (resourceFibers === undefined) {
-      resourceFibers = new Set();
-      hostResourceToFiberMap.set(hostInstance, resourceFibers);
+    const publicInstance = getPublicInstance(hostInstance);
+    let resourceInstances =
+      hostResourceToDevToolsInstanceMap.get(publicInstance);
+    if (resourceInstances === undefined) {
+      resourceInstances = new Set();
+      hostResourceToDevToolsInstanceMap.set(publicInstance, resourceInstances);
+      // Store the first match in the main map for quick access when selecting DOM node.
+      publicInstanceToDevToolsInstanceMap.set(publicInstance, nearestInstance);
     }
-    resourceFibers.add(fiber);
+    resourceInstances.add(nearestInstance);
   }
 }
 
 function releaseHostResource(
-  fiber: Fiber,
+  nearestInstance: DevToolsInstance,
   resource: ?{instance?: HostInstance},
 ): void {
   const hostInstance = resource && resource.instance;
   if (hostInstance) {
-    const resourceFibers = hostResourceToFiberMap.get(hostInstance);
-    if (resourceFibers !== undefined) {
-      resourceFibers.delete(fiber);
-      if (resourceFibers.size === 0) {
-        hostResourceToFiberMap.delete(hostInstance);
+    const publicInstance = getPublicInstance(hostInstance);
+    const resourceInstances =
+      hostResourceToDevToolsInstanceMap.get(publicInstance);
+    if (resourceInstances !== undefined) {
+      resourceInstances.delete(nearestInstance);
+      if (resourceInstances.size === 0) {
+        hostResourceToDevToolsInstanceMap.delete(publicInstance);
+        publicInstanceToDevToolsInstanceMap.delete(publicInstance);
+      } else if (
+        publicInstanceToDevToolsInstanceMap.get(publicInstance) ===
+        nearestInstance
+      ) {
+        // This was the first one. Store the next first one in the main map for easy access.
+        // eslint-disable-next-line no-for-of-loops/no-for-of-loops
+        for (const firstInstance of resourceInstances) {
+          publicInstanceToDevToolsInstanceMap.set(
+            firstInstance,
+            nearestInstance,
+          );
+          break;
+        }
       }
     }
   }
@@ -1099,6 +1163,7 @@ export function attach(
   const hideElementsWithDisplayNames: Set<RegExp> = new Set();
   const hideElementsWithPaths: Set<RegExp> = new Set();
   const hideElementsWithTypes: Set<ElementType> = new Set();
+  const hideElementsWithEnvs: Set<string> = new Set();
 
   // Highlight updates
   let traceUpdatesEnabled: boolean = false;
@@ -1108,6 +1173,7 @@ export function attach(
     hideElementsWithTypes.clear();
     hideElementsWithDisplayNames.clear();
     hideElementsWithPaths.clear();
+    hideElementsWithEnvs.clear();
 
     componentFilters.forEach(componentFilter => {
       if (!componentFilter.isEnabled) {
@@ -1132,6 +1198,9 @@ export function attach(
           break;
         case ComponentFilterHOC:
           hideElementsWithDisplayNames.add(new RegExp('\\('));
+          break;
+        case ComponentFilterEnvironmentName:
+          hideElementsWithEnvs.add(componentFilter.value);
           break;
         default:
           console.warn(
@@ -1215,7 +1284,14 @@ export function attach(
     flushPendingEvents();
   }
 
-  function shouldFilterVirtual(data: ReactComponentInfo): boolean {
+  function getEnvironmentNames(): Array<string> {
+    return Array.from(knownEnvironmentNames);
+  }
+
+  function shouldFilterVirtual(
+    data: ReactComponentInfo,
+    secondaryEnv: null | string,
+  ): boolean {
     // For purposes of filtering Server Components are always Function Components.
     // Environment will be used to filter Server vs Client.
     // Technically they can be forwardRef and memo too but those filters will go away
@@ -1234,6 +1310,14 @@ export function attach(
           }
         }
       }
+    }
+
+    if (
+      (data.env == null || hideElementsWithEnvs.has(data.env)) &&
+      (secondaryEnv === null || hideElementsWithEnvs.has(secondaryEnv))
+    ) {
+      // If a Component has two environments, you have to filter both for it not to appear.
+      return true;
     }
 
     return false;
@@ -1291,6 +1375,26 @@ export function attach(
             return true;
           }
         }
+      }
+    }
+
+    if (hideElementsWithEnvs.has('Client')) {
+      // If we're filtering out the Client environment we should filter out all
+      // "Client Components". Technically that also includes the built-ins but
+      // since that doesn't actually include any additional code loading it's
+      // useful to not filter out the built-ins. Those can be filtered separately.
+      // There's no other way to filter out just Function components on the Client.
+      // Therefore, this only filters Class and Function components.
+      switch (tag) {
+        case ClassComponent:
+        case IncompleteClassComponent:
+        case IncompleteFunctionComponent:
+        case FunctionComponent:
+        case IndeterminateComponent:
+        case ForwardRef:
+        case MemoComponent:
+        case SimpleMemoComponent:
+          return true;
       }
     }
 
@@ -1421,50 +1525,29 @@ export function attach(
 
   // Removes a Fiber (and its alternate) from the Maps used to track their id.
   // This method should always be called when a Fiber is unmounting.
-  function untrackFiber(fiberInstance: FiberInstance) {
+  function untrackFiber(nearestInstance: DevToolsInstance, fiber: Fiber) {
     if (__DEBUG__) {
-      debug('untrackFiber()', fiberInstance.data, null);
+      debug('untrackFiber()', fiber, null);
+    }
+    // TODO: Consider using a WeakMap instead. The only thing where that doesn't work
+    // is React Native Paper which tracks tags but that support is eventually going away
+    // and can use the old findFiberByHostInstance strategy.
+
+    if (fiber.tag === HostHoistable) {
+      releaseHostResource(nearestInstance, fiber.memoizedState);
+    } else if (
+      fiber.tag === HostComponent ||
+      fiber.tag === HostText ||
+      fiber.tag === HostSingleton
+    ) {
+      releaseHostInstance(nearestInstance, fiber.stateNode);
     }
 
-    idToDevToolsInstanceMap.delete(fiberInstance.id);
-
-    const fiber = fiberInstance.data;
-
-    // Restore any errors/warnings associated with this fiber to the pending
-    // map. I.e. treat it as before we tracked the instances. This lets us
-    // restore them if we remount the same Fibers later. Otherwise we rely
-    // on the GC of the Fibers to clean them up.
-    if (fiberInstance.errors !== null) {
-      pendingFiberToErrorsMap.set(fiber, fiberInstance.errors);
-      fiberInstance.errors = null;
-    }
-    if (fiberInstance.warnings !== null) {
-      pendingFiberToWarningsMap.set(fiber, fiberInstance.warnings);
-      fiberInstance.warnings = null;
-    }
-
-    if (fiberInstance.flags & FORCE_ERROR) {
-      fiberInstance.flags &= ~FORCE_ERROR;
-      forceErrorCount--;
-      if (forceErrorCount === 0 && setErrorHandler != null) {
-        setErrorHandler(shouldErrorFiberAlwaysNull);
-      }
-    }
-    if (fiberInstance.flags & FORCE_SUSPENSE_FALLBACK) {
-      fiberInstance.flags &= ~FORCE_SUSPENSE_FALLBACK;
-      forceFallbackCount--;
-      if (forceFallbackCount === 0 && setSuspenseHandler != null) {
-        setSuspenseHandler(shouldSuspendFiberAlwaysFalse);
-      }
-    }
-
-    if (fiberToFiberInstanceMap.get(fiber) === fiberInstance) {
-      fiberToFiberInstanceMap.delete(fiber);
-    }
-    const {alternate} = fiber;
-    if (alternate !== null) {
-      if (fiberToFiberInstanceMap.get(alternate) === fiberInstance) {
-        fiberToFiberInstanceMap.delete(alternate);
+    // Recursively clean up any filtered Fibers below this one as well since
+    // we won't recordUnmount on those.
+    for (let child = fiber.child; child !== null; child = child.sibling) {
+      if (shouldFilterFiber(child)) {
+        untrackFiber(nearestInstance, child);
       }
     }
   }
@@ -2309,7 +2392,47 @@ export function attach(
       pendingRealUnmountedIDs.push(id);
     }
 
-    untrackFiber(fiberInstance);
+    idToDevToolsInstanceMap.delete(fiberInstance.id);
+
+    // Restore any errors/warnings associated with this fiber to the pending
+    // map. I.e. treat it as before we tracked the instances. This lets us
+    // restore them if we remount the same Fibers later. Otherwise we rely
+    // on the GC of the Fibers to clean them up.
+    if (fiberInstance.errors !== null) {
+      pendingFiberToErrorsMap.set(fiber, fiberInstance.errors);
+      fiberInstance.errors = null;
+    }
+    if (fiberInstance.warnings !== null) {
+      pendingFiberToWarningsMap.set(fiber, fiberInstance.warnings);
+      fiberInstance.warnings = null;
+    }
+
+    if (fiberInstance.flags & FORCE_ERROR) {
+      fiberInstance.flags &= ~FORCE_ERROR;
+      forceErrorCount--;
+      if (forceErrorCount === 0 && setErrorHandler != null) {
+        setErrorHandler(shouldErrorFiberAlwaysNull);
+      }
+    }
+    if (fiberInstance.flags & FORCE_SUSPENSE_FALLBACK) {
+      fiberInstance.flags &= ~FORCE_SUSPENSE_FALLBACK;
+      forceFallbackCount--;
+      if (forceFallbackCount === 0 && setSuspenseHandler != null) {
+        setSuspenseHandler(shouldSuspendFiberAlwaysFalse);
+      }
+    }
+
+    if (fiberToFiberInstanceMap.get(fiber) === fiberInstance) {
+      fiberToFiberInstanceMap.delete(fiber);
+    }
+    const {alternate} = fiber;
+    if (alternate !== null) {
+      if (fiberToFiberInstanceMap.get(alternate) === fiberInstance) {
+        fiberToFiberInstanceMap.delete(alternate);
+      }
+    }
+
+    untrackFiber(fiberInstance, fiber);
   }
 
   // Running state of the remaining children from the previous version of this parent that
@@ -2489,7 +2612,14 @@ export function attach(
           }
           // Scan up until the next Component to see if this component changed environment.
           const componentInfo: ReactComponentInfo = (debugEntry: any);
-          if (shouldFilterVirtual(componentInfo)) {
+          const secondaryEnv = getSecondaryEnvironmentName(fiber._debugInfo, i);
+          if (componentInfo.env != null) {
+            knownEnvironmentNames.add(componentInfo.env);
+          }
+          if (secondaryEnv !== null) {
+            knownEnvironmentNames.add(secondaryEnv);
+          }
+          if (shouldFilterVirtual(componentInfo, secondaryEnv)) {
             // Skip.
             continue;
           }
@@ -2511,10 +2641,6 @@ export function attach(
                 );
               }
               previousVirtualInstance = createVirtualInstance(componentInfo);
-              const secondaryEnv = getSecondaryEnvironmentName(
-                fiber._debugInfo,
-                i,
-              );
               recordVirtualMount(
                 previousVirtualInstance,
                 reconcilingParent,
@@ -2621,7 +2747,21 @@ export function attach(
       }
 
       if (fiber.tag === HostHoistable) {
-        aquireHostResource(fiber, fiber.memoizedState);
+        const nearestInstance = reconcilingParent;
+        if (nearestInstance === null) {
+          throw new Error('Did not expect a host hoistable to be the root');
+        }
+        aquireHostResource(nearestInstance, fiber.memoizedState);
+      } else if (
+        fiber.tag === HostComponent ||
+        fiber.tag === HostText ||
+        fiber.tag === HostSingleton
+      ) {
+        const nearestInstance = reconcilingParent;
+        if (nearestInstance === null) {
+          throw new Error('Did not expect a host hoistable to be the root');
+        }
+        aquireHostInstance(nearestInstance, fiber.stateNode);
       }
 
       if (fiber.tag === SuspenseComponent) {
@@ -2919,7 +3059,17 @@ export function attach(
             continue;
           }
           const componentInfo: ReactComponentInfo = (debugEntry: any);
-          if (shouldFilterVirtual(componentInfo)) {
+          const secondaryEnv = getSecondaryEnvironmentName(
+            nextChild._debugInfo,
+            i,
+          );
+          if (componentInfo.env != null) {
+            knownEnvironmentNames.add(componentInfo.env);
+          }
+          if (secondaryEnv !== null) {
+            knownEnvironmentNames.add(secondaryEnv);
+          }
+          if (shouldFilterVirtual(componentInfo, secondaryEnv)) {
             continue;
           }
           if (level === virtualLevel) {
@@ -2983,10 +3133,6 @@ export function attach(
               } else {
                 // Otherwise we create a new instance.
                 const newVirtualInstance = createVirtualInstance(componentInfo);
-                const secondaryEnv = getSecondaryEnvironmentName(
-                  nextChild._debugInfo,
-                  i,
-                );
                 recordVirtualMount(
                   newVirtualInstance,
                   reconcilingParent,
@@ -3236,8 +3382,12 @@ export function attach(
     }
     try {
       if (nextFiber.tag === HostHoistable) {
-        releaseHostResource(prevFiber, prevFiber.memoizedState);
-        aquireHostResource(nextFiber, nextFiber.memoizedState);
+        const nearestInstance = reconcilingParent;
+        if (nearestInstance === null) {
+          throw new Error('Did not expect a host hoistable to be the root');
+        }
+        releaseHostResource(nearestInstance, prevFiber.memoizedState);
+        aquireHostResource(nearestInstance, nextFiber.memoizedState);
       }
 
       const isSuspense = nextFiber.tag === SuspenseComponent;
@@ -3338,6 +3488,18 @@ export function attach(
             // I.e. we just restore them by undoing what we did above.
             fiberInstance.firstChild = remainingReconcilingChildren;
             remainingReconcilingChildren = null;
+
+            if (traceUpdatesEnabled) {
+              // If we're tracing updates and we've bailed out before reaching a host node,
+              // we should fall back to recursively marking the nearest host descendants for highlight.
+              if (traceNearestHostComponentUpdate) {
+                const hostInstances =
+                  findAllCurrentHostInstances(fiberInstance);
+                hostInstances.forEach(hostInstance => {
+                  traceUpdatesForNodes.add(hostInstance);
+                });
+              }
+            }
           } else {
             // If this fiber is filtered there might be changes to this set elsewhere so we have
             // to visit each child to place it back in the set. We let the child bail out instead.
@@ -3347,19 +3509,6 @@ export function attach(
               throw new Error(
                 'The children should not have changed if we pass in the same set.',
               );
-            }
-          }
-
-          if (traceUpdatesEnabled) {
-            // If we're tracing updates and we've bailed out before reaching a host node,
-            // we should fall back to recursively marking the nearest host descendants for highlight.
-            if (traceNearestHostComponentUpdate) {
-              const hostInstances = findAllCurrentHostInstances(
-                getFiberInstanceThrows(nextFiber),
-              );
-              hostInstances.forEach(hostInstance => {
-                traceUpdatesForNodes.add(hostInstance);
-              });
             }
           }
         }
@@ -3635,15 +3784,31 @@ export function attach(
     return null;
   }
 
-  function findAllCurrentHostInstances(
-    fiberInstance: FiberInstance,
-  ): $ReadOnlyArray<HostInstance> {
-    const hostInstances = [];
-    const fiber = fiberInstance.data;
-    if (!fiber) {
-      return hostInstances;
+  function appendHostInstancesByDevToolsInstance(
+    devtoolsInstance: DevToolsInstance,
+    hostInstances: Array<HostInstance>,
+  ) {
+    if (devtoolsInstance.kind === FIBER_INSTANCE) {
+      const fiber = devtoolsInstance.data;
+      appendHostInstancesByFiber(fiber, hostInstances);
+      return;
     }
+    // Search the tree for the nearest child Fiber and add all its host instances.
+    // TODO: If the true nearest Fiber is filtered, we might skip it and instead include all
+    // the children below it. In the extreme case, searching the whole tree.
+    for (
+      let child = devtoolsInstance.firstChild;
+      child !== null;
+      child = child.nextSibling
+    ) {
+      appendHostInstancesByDevToolsInstance(child, hostInstances);
+    }
+  }
 
+  function appendHostInstancesByFiber(
+    fiber: Fiber,
+    hostInstances: Array<HostInstance>,
+  ): void {
     // Next we'll drill down this component to find all HostComponent/Text.
     let node: Fiber = fiber;
     while (true) {
@@ -3663,19 +3828,24 @@ export function attach(
         continue;
       }
       if (node === fiber) {
-        return hostInstances;
+        return;
       }
       while (!node.sibling) {
         if (!node.return || node.return === fiber) {
-          return hostInstances;
+          return;
         }
         node = node.return;
       }
       node.sibling.return = node.return;
       node = node.sibling;
     }
-    // Flow needs the return here, but ESLint complains about it.
-    // eslint-disable-next-line no-unreachable
+  }
+
+  function findAllCurrentHostInstances(
+    devtoolsInstance: DevToolsInstance,
+  ): $ReadOnlyArray<HostInstance> {
+    const hostInstances: Array<HostInstance> = [];
+    appendHostInstancesByDevToolsInstance(devtoolsInstance, hostInstances);
     return hostInstances;
   }
 
@@ -3686,17 +3856,7 @@ export function attach(
         console.warn(`Could not find DevToolsInstance with id "${id}"`);
         return null;
       }
-      if (devtoolsInstance.kind !== FIBER_INSTANCE) {
-        // TODO: Handle VirtualInstance.
-        return null;
-      }
-      const fiber = devtoolsInstance.data;
-      if (fiber === null) {
-        return null;
-      }
-
-      const hostInstances = findAllCurrentHostInstances(devtoolsInstance);
-      return hostInstances;
+      return findAllCurrentHostInstances(devtoolsInstance);
     } catch (err) {
       // The fiber might have unmounted by now.
       return null;
@@ -3715,82 +3875,21 @@ export function attach(
     }
   }
 
-  function getNearestMountedHostInstance(
-    hostInstance: HostInstance,
-  ): null | HostInstance {
-    const mountedFiber = renderer.findFiberByHostInstance(hostInstance);
-    if (mountedFiber != null) {
-      if (mountedFiber.stateNode !== hostInstance) {
-        // If it's not a perfect match the specific one might be a resource.
-        // We don't need to look at any parents because host resources don't have
-        // children so it won't be in any parent if it's not this one.
-        if (hostResourceToFiberMap.has(hostInstance)) {
-          return hostInstance;
-        }
-      }
-      return mountedFiber.stateNode;
+  function getNearestMountedDOMNode(publicInstance: Element): null | Element {
+    let domNode: null | Element = publicInstance;
+    while (domNode && !publicInstanceToDevToolsInstanceMap.has(domNode)) {
+      // $FlowFixMe: In practice this is either null or Element.
+      domNode = domNode.parentNode;
     }
-    if (hostResourceToFiberMap.has(hostInstance)) {
-      return hostInstance;
-    }
-    return null;
-  }
-
-  function findNearestUnfilteredElementID(searchFiber: Fiber) {
-    let fiber: null | Fiber = searchFiber;
-    while (fiber !== null) {
-      const fiberInstance = getFiberInstanceUnsafe(fiber);
-      if (fiberInstance !== null) {
-        // TODO: Ideally we would not have any filtered FiberInstances which
-        // would make this logic much simpler. Unfortunately, we sometimes
-        // eagerly add to the map and some times don't eagerly clean it up.
-        // TODO: If the fiber is filtered, the FiberInstance wouldn't really
-        // exist which would mean that we also don't have a way to get to the
-        // VirtualInstances.
-        if (!shouldFilterFiber(fiberInstance.data)) {
-          return fiberInstance.id;
-        }
-        // We couldn't use this Fiber but we might have a VirtualInstance
-        // that is the nearest unfiltered instance.
-        const parentInstance = fiberInstance.parent;
-        if (
-          parentInstance !== null &&
-          parentInstance.kind === VIRTUAL_INSTANCE
-        ) {
-          // Virtual Instances only exist if they're unfiltered.
-          return parentInstance.id;
-        }
-        // If we find a parent Fiber, it might not be the nearest parent
-        // so we break out and continue walking the Fiber tree instead.
-      }
-      fiber = fiber.return;
-    }
-    return null;
+    return domNode;
   }
 
   function getElementIDForHostInstance(
-    hostInstance: HostInstance,
-    findNearestUnfilteredAncestor: boolean = false,
+    publicInstance: HostInstance,
   ): number | null {
-    const resourceFibers = hostResourceToFiberMap.get(hostInstance);
-    if (resourceFibers !== undefined) {
-      // This is a resource. Find the first unfiltered instance.
-      // eslint-disable-next-line no-for-of-loops/no-for-of-loops
-      for (const resourceFiber of resourceFibers) {
-        const elementID = findNearestUnfilteredElementID(resourceFiber);
-        if (elementID !== null) {
-          return elementID;
-        }
-      }
-      // If we don't find one, fallthrough to select the parent instead.
-    }
-    const fiber = renderer.findFiberByHostInstance(hostInstance);
-    if (fiber != null) {
-      if (!findNearestUnfilteredAncestor) {
-        // TODO: Remove this option. It's not used.
-        return getFiberIDThrows(fiber);
-      }
-      return findNearestUnfilteredElementID(fiber);
+    const instance = publicInstanceToDevToolsInstanceMap.get(publicInstance);
+    if (instance !== undefined) {
+      return instance.id;
     }
     return null;
   }
@@ -3925,7 +4024,7 @@ export function attach(
         owner = ownerFiber._debugOwner;
       } else {
         const ownerInfo: ReactComponentInfo = (owner: any); // Refined
-        if (!shouldFilterVirtual(ownerInfo)) {
+        if (!shouldFilterVirtual(ownerInfo, null)) {
           return ownerInfo;
         }
         owner = ownerInfo.owner;
@@ -5723,7 +5822,7 @@ export function attach(
     flushInitialOperations,
     getBestMatchForTrackedPath,
     getDisplayNameForElementID,
-    getNearestMountedHostInstance,
+    getNearestMountedDOMNode,
     getElementIDForHostInstance,
     getInstanceAndStyle,
     getOwnersList,
@@ -5750,5 +5849,6 @@ export function attach(
     storeAsGlobal,
     unpatchConsoleForStrictMode,
     updateComponentFilters,
+    getEnvironmentNames,
   };
 }
