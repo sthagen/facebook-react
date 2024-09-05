@@ -114,7 +114,7 @@ import {getStyleXData} from '../StyleX/utils';
 import {createProfilingHooks} from '../profilingHooks';
 
 import type {GetTimelineData, ToggleProfilingStatus} from '../profilingHooks';
-import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
+import type {Fiber, FiberRoot} from 'react-reconciler/src/ReactInternalTypes';
 import type {
   ChangeDescription,
   CommitDataBackend,
@@ -146,6 +146,7 @@ import {formatOwnerStack} from '../shared/DevToolsOwnerStack';
 // Kinds
 const FIBER_INSTANCE = 0;
 const VIRTUAL_INSTANCE = 1;
+const FILTERED_FIBER_INSTANCE = 2;
 
 // Flags
 const FORCE_SUSPENSE_FALLBACK = /*    */ 0b001;
@@ -157,9 +158,9 @@ const FORCE_ERROR_RESET = /*          */ 0b100;
 type FiberInstance = {
   kind: 0,
   id: number,
-  parent: null | DevToolsInstance, // filtered parent, including virtual
-  firstChild: null | DevToolsInstance, // filtered first child, including virtual
-  nextSibling: null | DevToolsInstance, // filtered next sibling, including virtual
+  parent: null | DevToolsInstance,
+  firstChild: null | DevToolsInstance,
+  nextSibling: null | DevToolsInstance,
   flags: number, // Force Error/Suspense
   source: null | string | Error | Source, // source location of this component function, or owned child stack
   errors: null | Map<string, number>, // error messages and count
@@ -184,6 +185,39 @@ function createFiberInstance(fiber: Fiber): FiberInstance {
   };
 }
 
+type FilteredFiberInstance = {
+  kind: 2,
+  // We exclude id from the type to get errors if we try to access it.
+  // However it is still in the object to preserve hidden class.
+  // id: number,
+  parent: null | DevToolsInstance,
+  firstChild: null | DevToolsInstance,
+  nextSibling: null | DevToolsInstance,
+  flags: number, // Force Error/Suspense
+  source: null | string | Error | Source, // always null here.
+  errors: null, // error messages and count
+  warnings: null, // warning messages and count
+  treeBaseDuration: number, // the profiled time of the last render of this subtree
+  data: Fiber, // one of a Fiber pair
+};
+
+// This is used to represent a filtered Fiber but still lets us find its host instance.
+function createFilteredFiberInstance(fiber: Fiber): FilteredFiberInstance {
+  return ({
+    kind: FILTERED_FIBER_INSTANCE,
+    id: 0,
+    parent: null,
+    firstChild: null,
+    nextSibling: null,
+    flags: 0,
+    componentStack: null,
+    errors: null,
+    warnings: null,
+    treeBaseDuration: 0,
+    data: fiber,
+  }: any);
+}
+
 // This type represents a stateful instance of a Server Component or a Component
 // that gets optimized away - e.g. call-through without creating a Fiber.
 // It's basically a virtual Fiber. This is not a semantic concept in React.
@@ -192,9 +226,9 @@ function createFiberInstance(fiber: Fiber): FiberInstance {
 type VirtualInstance = {
   kind: 1,
   id: number,
-  parent: null | DevToolsInstance, // filtered parent, including virtual
-  firstChild: null | DevToolsInstance, // filtered first child, including virtual
-  nextSibling: null | DevToolsInstance, // filtered next sibling, including virtual
+  parent: null | DevToolsInstance,
+  firstChild: null | DevToolsInstance,
+  nextSibling: null | DevToolsInstance,
   flags: number,
   source: null | string | Error | Source, // source location of this server component, or owned child stack
   // Errors and Warnings happen per ReactComponentInfo which can appear in
@@ -226,7 +260,7 @@ function createVirtualInstance(
   };
 }
 
-type DevToolsInstance = FiberInstance | VirtualInstance;
+type DevToolsInstance = FiberInstance | VirtualInstance | FilteredFiberInstance;
 
 type getDisplayNameForFiberType = (fiber: Fiber) => string | null;
 type getTypeSymbolType = (type: any) => symbol | number;
@@ -727,6 +761,9 @@ export function getInternalReactConstants(version: string): {
 // filters at the same time as removing some other filter.
 const knownEnvironmentNames: Set<string> = new Set();
 
+// Map of FiberRoot to their root FiberInstance.
+const rootToFiberInstanceMap: Map<FiberRoot, FiberInstance> = new Map();
+
 // Map of one or more Fibers in a pair to their unique id number.
 // We track both Fibers to support Fast Refresh,
 // which may forcefully replace one of the pair as part of hot reloading.
@@ -736,7 +773,8 @@ const fiberToFiberInstanceMap: Map<Fiber, FiberInstance> = new Map();
 // Map of id to one (arbitrary) Fiber in a pair.
 // This Map is used to e.g. get the display name for a Fiber or schedule an update,
 // operations that should be the same whether the current and work-in-progress Fiber is used.
-const idToDevToolsInstanceMap: Map<number, DevToolsInstance> = new Map();
+const idToDevToolsInstanceMap: Map<number, FiberInstance | VirtualInstance> =
+  new Map();
 
 // Map of canonical HostInstances to the nearest parent DevToolsInstance.
 const publicInstanceToDevToolsInstanceMap: Map<HostInstance, DevToolsInstance> =
@@ -1060,7 +1098,10 @@ export function attach(
     // even if objects are different
     const message = formatConsoleArgumentsToSingleString(...args);
     if (__DEBUG__) {
-      debug('onErrorOrWarning', fiber, null, `${type}: "${message}"`);
+      const fiberInstance = fiberToFiberInstanceMap.get(fiber);
+      if (fiberInstance !== undefined) {
+        debug('onErrorOrWarning', fiberInstance, null, `${type}: "${message}"`);
+      }
     }
 
     // Mark this Fiber as needed its warning/error count updated during the next flush.
@@ -1096,32 +1137,37 @@ export function attach(
   // It relies on the extension to pass the preference through via the global.
   patchConsoleUsingWindowValues();
 
-  const debug = (
+  function debug(
     name: string,
-    fiber: Fiber,
+    instance: DevToolsInstance,
     parentInstance: null | DevToolsInstance,
     extraString: string = '',
-  ): void => {
+  ): void {
     if (__DEBUG__) {
       const displayName =
-        fiber.tag + ':' + (getDisplayNameForFiber(fiber) || 'null');
+        instance.kind === VIRTUAL_INSTANCE
+          ? instance.data.name || 'null'
+          : instance.data.tag +
+            ':' +
+            (getDisplayNameForFiber(instance.data) || 'null');
 
-      const maybeID = getFiberIDUnsafe(fiber) || '<no id>';
+      const maybeID =
+        instance.kind === FILTERED_FIBER_INSTANCE ? '<no id>' : instance.id;
 
-      let parentDisplayName;
-      let maybeParentID;
-      if (parentInstance !== null && parentInstance.kind === FIBER_INSTANCE) {
-        const parentFiber = parentInstance.data;
-        parentDisplayName =
-          parentFiber.tag +
-          ':' +
-          (getDisplayNameForFiber(parentFiber) || 'null');
-        maybeParentID = String(parentInstance.id);
-      } else {
-        // TODO: Handle VirtualInstance
-        parentDisplayName = '';
-        maybeParentID = '<no-id>';
-      }
+      const parentDisplayName =
+        parentInstance === null
+          ? ''
+          : parentInstance.kind === VIRTUAL_INSTANCE
+            ? parentInstance.data.name || 'null'
+            : parentInstance.data.tag +
+              ':' +
+              (getDisplayNameForFiber(parentInstance.data) || 'null');
+
+      const maybeParentID =
+        parentInstance === null ||
+        parentInstance.kind === FILTERED_FIBER_INSTANCE
+          ? '<no id>'
+          : parentInstance.id;
 
       console.groupCollapsed(
         `[renderer] %c${name} %c${displayName} (${maybeID}) %c${
@@ -1135,19 +1181,28 @@ export function attach(
       console.log(new Error().stack.split('\n').slice(1).join('\n'));
       console.groupEnd();
     }
-  };
+  }
 
   // eslint-disable-next-line no-unused-vars
   function debugTree(instance: DevToolsInstance, indent: number = 0) {
     if (__DEBUG__) {
       const name =
-        (instance.kind === FIBER_INSTANCE
+        (instance.kind !== VIRTUAL_INSTANCE
           ? getDisplayNameForFiber(instance.data)
           : instance.data.name) || '';
       console.log(
-        '  '.repeat(indent) + '- ' + instance.id + ' (' + name + ')',
+        '  '.repeat(indent) +
+          '- ' +
+          (instance.kind === FILTERED_FIBER_INSTANCE ? 0 : instance.id) +
+          ' (' +
+          name +
+          ')',
         'parent',
-        instance.parent === null ? ' ' : instance.parent.id,
+        instance.parent === null
+          ? ' '
+          : instance.parent.kind === FILTERED_FIBER_INSTANCE
+            ? 0
+            : instance.parent.id,
         'next',
         instance.nextSibling === null ? ' ' : instance.nextSibling.id,
       );
@@ -1243,9 +1298,15 @@ export function attach(
 
     // Recursively unmount all roots.
     hook.getFiberRoots(rendererID).forEach(root => {
-      const rootInstance = getFiberInstanceThrows(root.current);
+      const rootInstance = rootToFiberInstanceMap.get(root);
+      if (rootInstance === undefined) {
+        throw new Error(
+          'Expected the root instance to already exist when applying filters',
+        );
+      }
       currentRootID = rootInstance.id;
       unmountInstanceRecursively(rootInstance);
+      rootToFiberInstanceMap.delete(root);
       flushPendingEvents(root);
       currentRootID = -1;
     });
@@ -1260,6 +1321,7 @@ export function attach(
       const current = root.current;
       const alternate = current.alternate;
       const newRoot = createFiberInstance(current);
+      rootToFiberInstanceMap.set(root, newRoot);
       idToDevToolsInstanceMap.set(newRoot.id, newRoot);
       fiberToFiberInstanceMap.set(current, newRoot);
       if (alternate) {
@@ -1479,17 +1541,6 @@ export function attach(
   // When a mount or update is in progress, this value tracks the root that is being operated on.
   let currentRootID: number = -1;
 
-  // Returns a FiberInstance if one has already been generated for the Fiber or throws.
-  function getFiberInstanceThrows(fiber: Fiber): FiberInstance {
-    const fiberInstance = getFiberInstanceUnsafe(fiber);
-    if (fiberInstance !== null) {
-      return fiberInstance;
-    }
-    throw Error(
-      `Could not find ID for Fiber "${getDisplayNameForFiber(fiber) || ''}"`,
-    );
-  }
-
   function getFiberIDThrows(fiber: Fiber): number {
     const fiberInstance = getFiberInstanceUnsafe(fiber);
     if (fiberInstance !== null) {
@@ -1526,9 +1577,6 @@ export function attach(
   // Removes a Fiber (and its alternate) from the Maps used to track their id.
   // This method should always be called when a Fiber is unmounting.
   function untrackFiber(nearestInstance: DevToolsInstance, fiber: Fiber) {
-    if (__DEBUG__) {
-      debug('untrackFiber()', fiber, null);
-    }
     // TODO: Consider using a WeakMap instead. The only thing where that doesn't work
     // is React Native Paper which tracks tags but that support is eventually going away
     // and can use the old findFiberByHostInstance strategy.
@@ -2181,7 +2229,7 @@ export function attach(
     const isRoot = fiber.tag === HostRoot;
     let fiberInstance;
     if (isRoot) {
-      const entry = fiberToFiberInstanceMap.get(fiber);
+      const entry = rootToFiberInstanceMap.get(fiber.stateNode);
       if (entry === undefined) {
         throw new Error('The root should have been registered at this point');
       }
@@ -2202,7 +2250,7 @@ export function attach(
     const id = fiberInstance.id;
 
     if (__DEBUG__) {
-      debug('recordMount()', fiber, parentInstance);
+      debug('recordMount()', fiberInstance, parentInstance);
     }
 
     const isProfilingSupported = fiber.hasOwnProperty('treeBaseDuration');
@@ -2264,7 +2312,12 @@ export function attach(
         ownerInstance.source = fiber._debugStack;
       }
       const ownerID = ownerInstance === null ? 0 : ownerInstance.id;
-      const parentID = parentInstance ? parentInstance.id : 0;
+      const parentID = parentInstance
+        ? parentInstance.kind === FILTERED_FIBER_INSTANCE
+          ? // A Filtered Fiber Instance will always have a Virtual Instance as a parent.
+            ((parentInstance.parent: any): VirtualInstance).id
+          : parentInstance.id
+        : 0;
 
       const displayNameStringID = getStringID(displayName);
 
@@ -2348,7 +2401,12 @@ export function attach(
       ownerInstance.source = componentInfo.debugStack;
     }
     const ownerID = ownerInstance === null ? 0 : ownerInstance.id;
-    const parentID = parentInstance ? parentInstance.id : 0;
+    const parentID = parentInstance
+      ? parentInstance.kind === FILTERED_FIBER_INSTANCE
+        ? // A Filtered Fiber Instance will always have a Virtual Instance as a parent.
+          ((parentInstance.parent: any): VirtualInstance).id
+        : parentInstance.id
+      : 0;
 
     const displayNameStringID = getStringID(displayName);
 
@@ -2369,7 +2427,7 @@ export function attach(
   function recordUnmount(fiberInstance: FiberInstance): void {
     const fiber = fiberInstance.data;
     if (__DEBUG__) {
-      debug('recordUnmount()', fiber, null);
+      debug('recordUnmount()', fiberInstance, reconcilingParent);
     }
 
     if (trackedPathMatchInstance === fiberInstance) {
@@ -2704,15 +2762,36 @@ export function attach(
     fiber: Fiber,
     traceNearestHostComponentUpdate: boolean,
   ): void {
-    if (__DEBUG__) {
-      debug('mountFiberRecursively()', fiber, reconcilingParent);
-    }
-
     const shouldIncludeInTree = !shouldFilterFiber(fiber);
     let newInstance = null;
     if (shouldIncludeInTree) {
       newInstance = recordMount(fiber, reconcilingParent);
       insertChild(newInstance);
+      if (__DEBUG__) {
+        debug('mountFiberRecursively()', newInstance, reconcilingParent);
+      }
+    } else if (
+      reconcilingParent !== null &&
+      reconcilingParent.kind === VIRTUAL_INSTANCE
+    ) {
+      // If the parent is a Virtual Instance and we filtered this Fiber we include a
+      // hidden node.
+
+      if (
+        reconcilingParent.data === fiber._debugOwner &&
+        fiber._debugStack != null &&
+        reconcilingParent.source === null
+      ) {
+        // The new Fiber is directly owned by the parent. Therefore somewhere on the
+        // debugStack will be a stack frame inside parent that we can use as its soruce.
+        reconcilingParent.source = fiber._debugStack;
+      }
+
+      newInstance = createFilteredFiberInstance(fiber);
+      insertChild(newInstance);
+      if (__DEBUG__) {
+        debug('mountFiberRecursively()', newInstance, reconcilingParent);
+      }
     }
 
     // If we have the tree selection from previous reload, try to match this Fiber.
@@ -2725,7 +2804,7 @@ export function attach(
     const stashedParent = reconcilingParent;
     const stashedPrevious = previouslyReconciledSibling;
     const stashedRemaining = remainingReconcilingChildren;
-    if (shouldIncludeInTree) {
+    if (newInstance !== null) {
       // Push a new DevTools instance parent while reconciling this subtree.
       reconcilingParent = newInstance;
       previouslyReconciledSibling = null;
@@ -2810,7 +2889,7 @@ export function attach(
         }
       }
     } finally {
-      if (shouldIncludeInTree) {
+      if (newInstance !== null) {
         reconcilingParent = stashedParent;
         previouslyReconciledSibling = stashedPrevious;
         remainingReconcilingChildren = stashedRemaining;
@@ -2826,9 +2905,7 @@ export function attach(
   // when we switch from primary to fallback, or deleting a subtree.
   function unmountInstanceRecursively(instance: DevToolsInstance) {
     if (__DEBUG__) {
-      if (instance.kind === FIBER_INSTANCE) {
-        debug('unmountInstanceRecursively()', instance.data, null);
-      }
+      debug('unmountInstanceRecursively()', instance, reconcilingParent);
     }
 
     const stashedParent = reconcilingParent;
@@ -2850,8 +2927,10 @@ export function attach(
     }
     if (instance.kind === FIBER_INSTANCE) {
       recordUnmount(instance);
-    } else {
+    } else if (instance.kind === VIRTUAL_INSTANCE) {
       recordVirtualUnmount(instance);
+    } else {
+      untrackFiber(instance, instance.data);
     }
     removeChild(instance, null);
   }
@@ -2956,15 +3035,14 @@ export function attach(
     virtualInstance.treeBaseDuration = treeBaseDuration;
   }
 
-  function recordResetChildren(parentInstance: DevToolsInstance) {
+  function recordResetChildren(
+    parentInstance: FiberInstance | VirtualInstance,
+  ) {
     if (__DEBUG__) {
-      if (
-        parentInstance.firstChild !== null &&
-        parentInstance.firstChild.kind === FIBER_INSTANCE
-      ) {
+      if (parentInstance.firstChild !== null) {
         debug(
           'recordResetChildren()',
-          parentInstance.firstChild.data,
+          parentInstance.firstChild,
           parentInstance,
         );
       }
@@ -2976,7 +3054,17 @@ export function attach(
 
     let child: null | DevToolsInstance = parentInstance.firstChild;
     while (child !== null) {
-      nextChildren.push(child.id);
+      if (child.kind === FILTERED_FIBER_INSTANCE) {
+        for (
+          let innerChild: null | DevToolsInstance = parentInstance.firstChild;
+          innerChild !== null;
+          innerChild = innerChild.nextSibling
+        ) {
+          nextChildren.push((innerChild: any).id);
+        }
+      } else {
+        nextChildren.push(child.id);
+      }
       child = child.nextSibling;
     }
 
@@ -3331,7 +3419,9 @@ export function attach(
     traceNearestHostComponentUpdate: boolean,
   ): boolean {
     if (__DEBUG__) {
-      debug('updateFiberRecursively()', nextFiber, reconcilingParent);
+      if (fiberInstance !== null) {
+        debug('updateFiberRecursively()', fiberInstance, reconcilingParent);
+      }
     }
 
     if (traceUpdatesEnabled) {
@@ -3591,6 +3681,7 @@ export function attach(
         const current = root.current;
         const alternate = current.alternate;
         const newRoot = createFiberInstance(current);
+        rootToFiberInstanceMap.set(root, newRoot);
         idToDevToolsInstanceMap.set(newRoot.id, newRoot);
         fiberToFiberInstanceMap.set(current, newRoot);
         if (alternate) {
@@ -3657,15 +3748,17 @@ export function attach(
     }
   }
 
-  function handleCommitFiberRoot(root: any, priorityLevel: void | number) {
+  function handleCommitFiberRoot(
+    root: FiberRoot,
+    priorityLevel: void | number,
+  ) {
     const current = root.current;
     const alternate = current.alternate;
 
-    let rootInstance =
-      fiberToFiberInstanceMap.get(current) ||
-      (alternate && fiberToFiberInstanceMap.get(alternate));
+    let rootInstance = rootToFiberInstanceMap.get(root);
     if (!rootInstance) {
       rootInstance = createFiberInstance(current);
+      rootToFiberInstanceMap.set(root, rootInstance);
       idToDevToolsInstanceMap.set(rootInstance.id, rootInstance);
       fiberToFiberInstanceMap.set(current, rootInstance);
       if (alternate) {
@@ -3730,8 +3823,9 @@ export function attach(
         updateFiberRecursively(rootInstance, current, alternate, false);
       } else if (wasMounted && !isMounted) {
         // Unmount an existing root.
-        removeRootPseudoKey(currentRootID);
         unmountInstanceRecursively(rootInstance);
+        removeRootPseudoKey(currentRootID);
+        rootToFiberInstanceMap.delete(root);
       }
     } else {
       // Mount a new root.
@@ -3788,7 +3882,7 @@ export function attach(
     devtoolsInstance: DevToolsInstance,
     hostInstances: Array<HostInstance>,
   ) {
-    if (devtoolsInstance.kind === FIBER_INSTANCE) {
+    if (devtoolsInstance.kind !== VIRTUAL_INSTANCE) {
       const fiber = devtoolsInstance.data;
       appendHostInstancesByFiber(fiber, hostInstances);
       return;
@@ -3889,6 +3983,10 @@ export function attach(
   ): number | null {
     const instance = publicInstanceToDevToolsInstanceMap.get(publicInstance);
     if (instance !== undefined) {
+      if (instance.kind === FILTERED_FIBER_INSTANCE) {
+        // A Filtered Fiber Instance will always have a Virtual Instance as a parent.
+        return ((instance.parent: any): VirtualInstance).id;
+      }
       return instance.id;
     }
     return null;
@@ -3941,7 +4039,7 @@ export function attach(
   }
 
   function instanceToSerializedElement(
-    instance: DevToolsInstance,
+    instance: FiberInstance | VirtualInstance,
   ): SerializedElement {
     if (instance.kind === FIBER_INSTANCE) {
       const fiber = instance.data;
@@ -4036,7 +4134,7 @@ export function attach(
   function findNearestOwnerInstance(
     parentInstance: null | DevToolsInstance,
     owner: void | null | ReactComponentInfo | Fiber,
-  ): null | DevToolsInstance {
+  ): null | FiberInstance | VirtualInstance {
     if (owner == null) {
       return null;
     }
@@ -4051,6 +4149,9 @@ export function attach(
         // needs a duck type check anyway.
         parentInstance.data === (owner: any).alternate
       ) {
+        if (parentInstance.kind === FILTERED_FIBER_INSTANCE) {
+          return null;
+        }
         return parentInstance;
       }
       parentInstance = parentInstance.parent;
@@ -4128,7 +4229,11 @@ export function attach(
     if (devtoolsInstance.kind === VIRTUAL_INSTANCE) {
       return inspectVirtualInstanceRaw(devtoolsInstance);
     }
-    return inspectFiberInstanceRaw(devtoolsInstance);
+    if (devtoolsInstance.kind === FIBER_INSTANCE) {
+      return inspectFiberInstanceRaw(devtoolsInstance);
+    }
+    (devtoolsInstance: FilteredFiberInstance); // assert exhaustive
+    throw new Error('Unsupported instance kind');
   }
 
   function inspectFiberInstanceRaw(
@@ -4431,7 +4536,7 @@ export function attach(
     let targetErrorBoundaryID = null;
     let parent = virtualInstance.parent;
     while (parent !== null) {
-      if (parent.kind === FIBER_INSTANCE) {
+      if (parent.kind !== VIRTUAL_INSTANCE) {
         targetErrorBoundaryID = getNearestErrorBoundaryID(parent.data);
         let current = parent.data;
         while (current.return !== null) {
@@ -5222,7 +5327,9 @@ export function attach(
   ) {
     // We don't need to convert milliseconds to microseconds in this case,
     // because the profiling summary is JSON serialized.
-    target.push([instance.id, instance.treeBaseDuration]);
+    if (instance.kind !== FILTERED_FIBER_INSTANCE) {
+      target.push([instance.id, instance.treeBaseDuration]);
+    }
     for (
       let child = instance.firstChild;
       child !== null;
@@ -5248,7 +5355,12 @@ export function attach(
     idToContextsMap = new Map();
 
     hook.getFiberRoots(rendererID).forEach(root => {
-      const rootInstance = getFiberInstanceThrows(root.current);
+      const rootInstance = rootToFiberInstanceMap.get(root);
+      if (rootInstance === undefined) {
+        throw new Error(
+          'Expected the root instance to already exist when starting profiling',
+        );
+      }
       const rootID = rootInstance.id;
       ((displayNamesByRootID: any): DisplayNamesByRootID).set(
         rootID,
@@ -5436,7 +5548,7 @@ export function attach(
   // In that case, we'll do some extra checks for matching mounts.
   let trackedPath: Array<PathFrame> | null = null;
   let trackedPathMatchFiber: Fiber | null = null; // This is the deepest unfiltered match of a Fiber.
-  let trackedPathMatchInstance: DevToolsInstance | null = null; // This is the deepest matched filtered Instance.
+  let trackedPathMatchInstance: FiberInstance | VirtualInstance | null = null; // This is the deepest matched filtered Instance.
   let trackedPathMatchDepth = -1;
   let mightBeOnTrackedPath = false;
 
@@ -5455,7 +5567,7 @@ export function attach(
   // The return value signals whether we should keep matching siblings or not.
   function updateTrackedPathStateBeforeMount(
     fiber: Fiber,
-    fiberInstance: null | FiberInstance,
+    fiberInstance: null | FiberInstance | FilteredFiberInstance,
   ): boolean {
     if (trackedPath === null || !mightBeOnTrackedPath) {
       // Fast path: there's nothing to track so do nothing and ignore siblings.
@@ -5484,7 +5596,7 @@ export function attach(
       ) {
         // We have our next match.
         trackedPathMatchFiber = fiber;
-        if (fiberInstance !== null) {
+        if (fiberInstance !== null && fiberInstance.kind === FIBER_INSTANCE) {
           trackedPathMatchInstance = fiberInstance;
         }
         trackedPathMatchDepth++;
@@ -5645,8 +5757,13 @@ export function attach(
       case HostRoot:
         // Roots don't have a real displayName, index, or key.
         // Instead, we'll use the pseudo key (childDisplayName:indexWithThatName).
-        const id = getFiberIDThrows(fiber);
-        const pseudoKey = rootPseudoKeys.get(id);
+        const rootInstance = rootToFiberInstanceMap.get(fiber.stateNode);
+        if (rootInstance === undefined) {
+          throw new Error(
+            'Expected the root instance to exist when computing a path',
+          );
+        }
+        const pseudoKey = rootPseudoKeys.get(rootInstance.id);
         if (pseudoKey === undefined) {
           throw new Error('Expected mounted root to have known pseudo key.');
         }
