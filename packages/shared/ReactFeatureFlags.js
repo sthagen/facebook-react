@@ -101,8 +101,7 @@ export const enableObjectFiber = false;
 
 export const enableTransitionTracing = false;
 
-// Shipped on FB, waiting for next stable release to roll out to OSS
-export const enableLazyContextPropagation = __EXPERIMENTAL__;
+export const enableLazyContextPropagation = true;
 
 // Expose unstable useContext for performance testing
 export const enableContextProfiling = false;
@@ -148,7 +147,7 @@ export const enableOwnerStacks = __EXPERIMENTAL__;
 
 export const enableShallowPropDiffing = false;
 
-export const enableSiblingPrerendering = __EXPERIMENTAL__;
+export const enableSiblingPrerendering = false;
 
 /**
  * Enables an expiration time for retry lanes to avoid starvation.
