@@ -46,9 +46,6 @@ import {getPublicInstance} from './ReactFiberConfig';
 import {
   captureCommitPhaseError,
   setIsRunningInsertionEffect,
-  getExecutionContext,
-  CommitContext,
-  NoContext,
 } from './ReactFiberWorkLoop';
 import {
   NoFlags as NoHookEffect,
@@ -81,8 +78,7 @@ function shouldProfile(current: Fiber): boolean {
   return (
     enableProfilerTimer &&
     enableProfilerCommitHooks &&
-    (current.mode & ProfileMode) !== NoMode &&
-    (getExecutionContext() & CommitContext) !== NoContext
+    (current.mode & ProfileMode) !== NoMode
   );
 }
 
@@ -881,7 +877,7 @@ function commitProfiler(
   commitTime: number,
   effectDuration: number,
 ) {
-  const {onCommit, onRender} = finishedWork.memoizedProps;
+  const {id, onCommit, onRender} = finishedWork.memoizedProps;
 
   let phase = current === null ? 'mount' : 'update';
   if (enableProfilerNestedUpdatePhase) {
@@ -892,7 +888,7 @@ function commitProfiler(
 
   if (typeof onRender === 'function') {
     onRender(
-      finishedWork.memoizedProps.id,
+      id,
       phase,
       finishedWork.actualDuration,
       finishedWork.treeBaseDuration,
@@ -919,7 +915,7 @@ export function commitProfilerUpdate(
   commitTime: number,
   effectDuration: number,
 ) {
-  if (enableProfilerTimer && getExecutionContext() & CommitContext) {
+  if (enableProfilerTimer) {
     try {
       if (__DEV__) {
         runWithFiberInDEV(
@@ -936,5 +932,54 @@ export function commitProfilerUpdate(
     } catch (error) {
       captureCommitPhaseError(finishedWork, finishedWork.return, error);
     }
+  }
+}
+
+function commitProfilerPostCommitImpl(
+  finishedWork: Fiber,
+  current: Fiber | null,
+  commitTime: number,
+  passiveEffectDuration: number,
+): void {
+  const {id, onPostCommit} = finishedWork.memoizedProps;
+
+  let phase = current === null ? 'mount' : 'update';
+  if (enableProfilerNestedUpdatePhase) {
+    if (isCurrentUpdateNested()) {
+      phase = 'nested-update';
+    }
+  }
+
+  if (typeof onPostCommit === 'function') {
+    onPostCommit(id, phase, passiveEffectDuration, commitTime);
+  }
+}
+
+export function commitProfilerPostCommit(
+  finishedWork: Fiber,
+  current: Fiber | null,
+  commitTime: number,
+  passiveEffectDuration: number,
+) {
+  try {
+    if (__DEV__) {
+      runWithFiberInDEV(
+        finishedWork,
+        commitProfilerPostCommitImpl,
+        finishedWork,
+        current,
+        commitTime,
+        passiveEffectDuration,
+      );
+    } else {
+      commitProfilerPostCommitImpl(
+        finishedWork,
+        current,
+        commitTime,
+        passiveEffectDuration,
+      );
+    }
+  } catch (error) {
+    captureCommitPhaseError(finishedWork, finishedWork.return, error);
   }
 }
