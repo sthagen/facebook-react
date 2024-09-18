@@ -14,7 +14,6 @@ import {
   enableProfilerNestedUpdatePhase,
   enableProfilerTimer,
 } from 'shared/ReactFeatureFlags';
-import {HostRoot, Profiler} from './ReactWorkTags';
 
 // Intentionally not named imports because Rollup would use dynamic dispatch for
 // CommonJS interop named imports.
@@ -22,24 +21,77 @@ import * as Scheduler from 'scheduler';
 
 const {unstable_now: now} = Scheduler;
 
-export type ProfilerTimer = {
-  getCommitTime(): number,
-  isCurrentUpdateNested(): boolean,
-  markNestedUpdateScheduled(): void,
-  recordCommitTime(): void,
-  startProfilerTimer(fiber: Fiber): void,
-  stopProfilerTimerIfRunning(fiber: Fiber): void,
-  stopProfilerTimerIfRunningAndRecordDuration(fiber: Fiber): void,
-  stopProfilerTimerIfRunningAndRecordIncompleteDuration(fiber: Fiber): void,
-  syncNestedUpdateFlag(): void,
-  ...
-};
+export let completeTime: number = -0;
+export let commitTime: number = -0;
+export let profilerStartTime: number = -1.1;
+export let profilerEffectDuration: number = -0;
+export let componentEffectDuration: number = -0;
+export let componentEffectStartTime: number = -1.1;
+export let componentEffectEndTime: number = -1.1;
 
-let completeTime: number = 0;
-let commitTime: number = 0;
-let layoutEffectStartTime: number = -1;
-let profilerStartTime: number = -1;
-let passiveEffectStartTime: number = -1;
+export function pushNestedEffectDurations(): number {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return 0;
+  }
+  const prevEffectDuration = profilerEffectDuration;
+  profilerEffectDuration = 0; // Reset counter.
+  return prevEffectDuration;
+}
+
+export function popNestedEffectDurations(prevEffectDuration: number): number {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return 0;
+  }
+  const elapsedTime = profilerEffectDuration;
+  profilerEffectDuration = prevEffectDuration;
+  return elapsedTime;
+}
+
+// Like pop but it also adds the current elapsed time to the parent scope.
+export function bubbleNestedEffectDurations(
+  prevEffectDuration: number,
+): number {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return 0;
+  }
+  const elapsedTime = profilerEffectDuration;
+  profilerEffectDuration += prevEffectDuration;
+  return elapsedTime;
+}
+
+export function resetComponentEffectTimers(): void {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return;
+  }
+  componentEffectStartTime = -1.1;
+  componentEffectEndTime = -1.1;
+}
+
+export function pushComponentEffectStart(): number {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return 0;
+  }
+  const prevEffectStart = componentEffectStartTime;
+  componentEffectStartTime = -1.1; // Track the next start.
+  componentEffectDuration = -0; // Reset component level duration.
+  return prevEffectStart;
+}
+
+export function popComponentEffectStart(prevEffectStart: number): void {
+  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
+    return;
+  }
+  if (prevEffectStart < 0) {
+    // If the parent component didn't have a start time, we use the start
+    // of the child as the parent's start time. We subtrack a minimal amount of
+    // time to ensure that the parent's start time is before the child to ensure
+    // that the performance tracks line up in the right order.
+    componentEffectStartTime -= 0.001;
+  } else {
+    // Otherwise, we restore the previous parent's start time.
+    componentEffectStartTime = prevEffectStart;
+  }
+}
 
 /**
  * Tracks whether the current update was a nested/cascading update (scheduled from a layout effect).
@@ -60,53 +112,45 @@ let passiveEffectStartTime: number = -1;
 let currentUpdateIsNested: boolean = false;
 let nestedUpdateScheduled: boolean = false;
 
-function isCurrentUpdateNested(): boolean {
+export function isCurrentUpdateNested(): boolean {
   return currentUpdateIsNested;
 }
 
-function markNestedUpdateScheduled(): void {
+export function markNestedUpdateScheduled(): void {
   if (enableProfilerNestedUpdatePhase) {
     nestedUpdateScheduled = true;
   }
 }
 
-function resetNestedUpdateFlag(): void {
+export function resetNestedUpdateFlag(): void {
   if (enableProfilerNestedUpdatePhase) {
     currentUpdateIsNested = false;
     nestedUpdateScheduled = false;
   }
 }
 
-function syncNestedUpdateFlag(): void {
+export function syncNestedUpdateFlag(): void {
   if (enableProfilerNestedUpdatePhase) {
     currentUpdateIsNested = nestedUpdateScheduled;
     nestedUpdateScheduled = false;
   }
 }
 
-function getCompleteTime(): number {
-  return completeTime;
-}
-
-function recordCompleteTime(): void {
+export function recordCompleteTime(): void {
   if (!enableProfilerTimer) {
     return;
   }
   completeTime = now();
 }
 
-function getCommitTime(): number {
-  return commitTime;
-}
-
-function recordCommitTime(): void {
+export function recordCommitTime(): void {
   if (!enableProfilerTimer) {
     return;
   }
   commitTime = now();
 }
 
-function startProfilerTimer(fiber: Fiber): void {
+export function startProfilerTimer(fiber: Fiber): void {
   if (!enableProfilerTimer) {
     return;
   }
@@ -118,14 +162,16 @@ function startProfilerTimer(fiber: Fiber): void {
   }
 }
 
-function stopProfilerTimerIfRunning(fiber: Fiber): void {
+export function stopProfilerTimerIfRunning(fiber: Fiber): void {
   if (!enableProfilerTimer) {
     return;
   }
   profilerStartTime = -1;
 }
 
-function stopProfilerTimerIfRunningAndRecordDuration(fiber: Fiber): void {
+export function stopProfilerTimerIfRunningAndRecordDuration(
+  fiber: Fiber,
+): void {
   if (!enableProfilerTimer) {
     return;
   }
@@ -138,7 +184,7 @@ function stopProfilerTimerIfRunningAndRecordDuration(fiber: Fiber): void {
   }
 }
 
-function stopProfilerTimerIfRunningAndRecordIncompleteDuration(
+export function stopProfilerTimerIfRunningAndRecordIncompleteDuration(
   fiber: Fiber,
 ): void {
   if (!enableProfilerTimer) {
@@ -153,86 +199,39 @@ function stopProfilerTimerIfRunningAndRecordIncompleteDuration(
   }
 }
 
-function recordLayoutEffectDuration(fiber: Fiber): void {
+export function recordEffectDuration(fiber: Fiber): void {
   if (!enableProfilerTimer || !enableProfilerCommitHooks) {
     return;
   }
 
-  if (layoutEffectStartTime >= 0) {
-    const elapsedTime = now() - layoutEffectStartTime;
+  if (profilerStartTime >= 0) {
+    const endTime = now();
+    const elapsedTime = endTime - profilerStartTime;
 
-    layoutEffectStartTime = -1;
+    profilerStartTime = -1;
 
     // Store duration on the next nearest Profiler ancestor
     // Or the root (for the DevTools Profiler to read)
-    let parentFiber = fiber.return;
-    while (parentFiber !== null) {
-      switch (parentFiber.tag) {
-        case HostRoot:
-          const root = parentFiber.stateNode;
-          root.effectDuration += elapsedTime;
-          return;
-        case Profiler:
-          const parentStateNode = parentFiber.stateNode;
-          parentStateNode.effectDuration += elapsedTime;
-          return;
-      }
-      parentFiber = parentFiber.return;
-    }
+    profilerEffectDuration += elapsedTime;
+    componentEffectDuration += elapsedTime;
+
+    // Keep track of the last end time of the effects.
+    componentEffectEndTime = endTime;
   }
 }
 
-function recordPassiveEffectDuration(fiber: Fiber): void {
+export function startEffectTimer(): void {
   if (!enableProfilerTimer || !enableProfilerCommitHooks) {
     return;
   }
-
-  if (passiveEffectStartTime >= 0) {
-    const elapsedTime = now() - passiveEffectStartTime;
-
-    passiveEffectStartTime = -1;
-
-    // Store duration on the next nearest Profiler ancestor
-    // Or the root (for the DevTools Profiler to read)
-    let parentFiber = fiber.return;
-    while (parentFiber !== null) {
-      switch (parentFiber.tag) {
-        case HostRoot:
-          const root = parentFiber.stateNode;
-          if (root !== null) {
-            root.passiveEffectDuration += elapsedTime;
-          }
-          return;
-        case Profiler:
-          const parentStateNode = parentFiber.stateNode;
-          if (parentStateNode !== null) {
-            // Detached fibers have their state node cleared out.
-            // In this case, the return pointer is also cleared out,
-            // so we won't be able to report the time spent in this Profiler's subtree.
-            parentStateNode.passiveEffectDuration += elapsedTime;
-          }
-          return;
-      }
-      parentFiber = parentFiber.return;
-    }
+  profilerStartTime = now();
+  if (componentEffectStartTime < 0) {
+    // Keep track of the first time we start an effect as the component's effect start time.
+    componentEffectStartTime = profilerStartTime;
   }
 }
 
-function startLayoutEffectTimer(): void {
-  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
-    return;
-  }
-  layoutEffectStartTime = now();
-}
-
-function startPassiveEffectTimer(): void {
-  if (!enableProfilerTimer || !enableProfilerCommitHooks) {
-    return;
-  }
-  passiveEffectStartTime = now();
-}
-
-function transferActualDuration(fiber: Fiber): void {
+export function transferActualDuration(fiber: Fiber): void {
   // Transfer time spent rendering these children so we don't lose it
   // after we rerender. This is used as a helper in special cases
   // where we should count the work of multiple passes.
@@ -243,23 +242,3 @@ function transferActualDuration(fiber: Fiber): void {
     child = child.sibling;
   }
 }
-
-export {
-  getCompleteTime,
-  recordCompleteTime,
-  getCommitTime,
-  recordCommitTime,
-  isCurrentUpdateNested,
-  markNestedUpdateScheduled,
-  recordLayoutEffectDuration,
-  recordPassiveEffectDuration,
-  resetNestedUpdateFlag,
-  startLayoutEffectTimer,
-  startPassiveEffectTimer,
-  startProfilerTimer,
-  stopProfilerTimerIfRunning,
-  stopProfilerTimerIfRunningAndRecordDuration,
-  stopProfilerTimerIfRunningAndRecordIncompleteDuration,
-  syncNestedUpdateFlag,
-  transferActualDuration,
-};
