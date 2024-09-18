@@ -31,7 +31,6 @@ import type {
 } from 'react-devtools-shared/src/backend/NativeStyleEditor/setupNativeStyleEditor';
 import type {InitBackend} from 'react-devtools-shared/src/backend';
 import type {TimelineDataExport} from 'react-devtools-timeline/src/types';
-import type {BrowserTheme} from 'react-devtools-shared/src/frontend/types';
 import type {BackendBridge} from 'react-devtools-shared/src/bridge';
 import type {Source} from 'react-devtools-shared/src/shared/types';
 import type Agent from './agent';
@@ -405,7 +404,6 @@ export type RendererInterface = {
     path: Array<string | number>,
     value: any,
   ) => void,
-  patchConsoleForStrictMode: () => void,
   getElementAttributeByPath: (
     id: number,
     path: Array<string | number>,
@@ -428,7 +426,6 @@ export type RendererInterface = {
     path: Array<string | number>,
     count: number,
   ) => void,
-  unpatchConsoleForStrictMode: () => void,
   updateComponentFilters: (componentFilters: Array<ComponentFilter>) => void,
   getEnvironmentNames: () => Array<string>,
 
@@ -527,13 +524,13 @@ export type DevToolsHook = {
   // Testing
   dangerous_setTargetConsoleForTesting?: (fakeConsole: Object) => void,
 
+  settings?: $ReadOnly<DevToolsHookSettings>,
   ...
 };
 
-export type ConsolePatchSettings = {
+export type DevToolsHookSettings = {
   appendComponentStack: boolean,
   breakOnConsoleErrors: boolean,
   showInlineWarningsAndErrors: boolean,
   hideConsoleLogsInStrictMode: boolean,
-  browserTheme: BrowserTheme,
 };

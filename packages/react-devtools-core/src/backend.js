@@ -11,15 +11,9 @@ import Agent from 'react-devtools-shared/src/backend/agent';
 import Bridge from 'react-devtools-shared/src/bridge';
 import {installHook} from 'react-devtools-shared/src/hook';
 import {initBackend} from 'react-devtools-shared/src/backend';
-import {installConsoleFunctionsToWindow} from 'react-devtools-shared/src/backend/console';
 import {__DEBUG__} from 'react-devtools-shared/src/constants';
 import setupNativeStyleEditor from 'react-devtools-shared/src/backend/NativeStyleEditor/setupNativeStyleEditor';
 import {getDefaultComponentFilters} from 'react-devtools-shared/src/utils';
-import {
-  initializeUsingCachedSettings,
-  cacheConsolePatchSettings,
-  type DevToolsSettingsManager,
-} from './cachedSettings';
 
 import type {BackendBridge} from 'react-devtools-shared/src/bridge';
 import type {
@@ -38,12 +32,8 @@ type ConnectOptions = {
   retryConnectionDelay?: number,
   isAppActive?: () => boolean,
   websocket?: ?WebSocket,
-  devToolsSettingsManager: ?DevToolsSettingsManager,
 };
 
-// Install a global variable to allow patching console early (during injection).
-// This provides React Native developers with components stacks even if they don't run DevTools.
-installConsoleFunctionsToWindow();
 installHook(window);
 
 const hook: ?DevToolsHook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -76,7 +66,6 @@ export function connectToDevTools(options: ?ConnectOptions) {
     resolveRNStyle = (null: $FlowFixMe),
     retryConnectionDelay = 2000,
     isAppActive = () => true,
-    devToolsSettingsManager,
   } = options || {};
 
   const protocol = useHttps ? 'wss' : 'ws';
@@ -89,16 +78,6 @@ export function connectToDevTools(options: ?ConnectOptions) {
         () => connectToDevTools(options),
         retryConnectionDelay,
       );
-    }
-  }
-
-  if (devToolsSettingsManager != null) {
-    try {
-      initializeUsingCachedSettings(devToolsSettingsManager);
-    } catch (e) {
-      // If we call a method on devToolsSettingsManager that throws, or if
-      // is invalid data read out, don't throw and don't interrupt initialization
-      console.error(e);
     }
   }
 
@@ -164,15 +143,6 @@ export function connectToDevTools(options: ?ConnectOptions) {
         savedComponentFilters = componentFilters;
       },
     );
-
-    if (devToolsSettingsManager != null && bridge != null) {
-      bridge.addListener('updateConsolePatchSettings', consolePatchSettings =>
-        cacheConsolePatchSettings(
-          devToolsSettingsManager,
-          consolePatchSettings,
-        ),
-      );
-    }
 
     // The renderer interface doesn't read saved component filters directly,
     // because they are generally stored in localStorage within the context of the extension.
@@ -318,7 +288,6 @@ type ConnectWithCustomMessagingOptions = {
   onSubscribe: (cb: Function) => void,
   onUnsubscribe: (cb: Function) => void,
   onMessage: (event: string, payload: any) => void,
-  settingsManager: ?DevToolsSettingsManager,
   nativeStyleEditorValidAttributes?: $ReadOnlyArray<string>,
   resolveRNStyle?: ResolveNativeStyle,
 };
@@ -327,23 +296,12 @@ export function connectWithCustomMessagingProtocol({
   onSubscribe,
   onUnsubscribe,
   onMessage,
-  settingsManager,
   nativeStyleEditorValidAttributes,
   resolveRNStyle,
 }: ConnectWithCustomMessagingOptions): Function {
   if (hook == null) {
     // DevTools didn't get injected into this page (maybe b'c of the contentType).
     return;
-  }
-
-  if (settingsManager != null) {
-    try {
-      initializeUsingCachedSettings(settingsManager);
-    } catch (e) {
-      // If we call a method on devToolsSettingsManager that throws, or if
-      // is invalid data read out, don't throw and don't interrupt initialization
-      console.error(e);
-    }
   }
 
   const wall: Wall = {
@@ -370,12 +328,6 @@ export function connectWithCustomMessagingProtocol({
       savedComponentFilters = componentFilters;
     },
   );
-
-  if (settingsManager != null) {
-    bridge.addListener('updateConsolePatchSettings', consolePatchSettings =>
-      cacheConsolePatchSettings(settingsManager, consolePatchSettings),
-    );
-  }
 
   if (window.__REACT_DEVTOOLS_COMPONENT_FILTERS__ == null) {
     bridge.send('overrideComponentFilters', savedComponentFilters);

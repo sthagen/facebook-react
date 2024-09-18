@@ -54,6 +54,7 @@ export function initBackend(
     hook.sub('fastRefreshScheduled', agent.onFastRefreshScheduled),
     hook.sub('operations', agent.onHookOperations),
     hook.sub('traceUpdates', agent.onTraceUpdates),
+    hook.sub('settingsInitialized', agent.onHookSettings),
 
     // TODO Add additional subscriptions required for profiling mode
   ];
@@ -81,6 +82,16 @@ export function initBackend(
   agent.addListener('shutdown', onAgentShutdown);
   subs.push(() => {
     agent.removeListener('shutdown', onAgentShutdown);
+  });
+
+  agent.addListener('updateHookSettings', settings => {
+    hook.settings = settings;
+  });
+
+  agent.addListener('getHookSettings', () => {
+    if (hook.settings != null) {
+      agent.onHookSettings(hook.settings);
+    }
   });
 
   return () => {

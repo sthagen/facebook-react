@@ -24,7 +24,6 @@ import {
   initialize as setupTraceUpdates,
   toggleEnabled as setTraceUpdatesEnabled,
 } from './views/TraceUpdates';
-import {patch as patchConsole} from './console';
 import {currentBridgeProtocol} from 'react-devtools-shared/src/bridge';
 
 import type {BackendBridge} from 'react-devtools-shared/src/bridge';
@@ -36,12 +35,9 @@ import type {
   PathMatch,
   RendererID,
   RendererInterface,
-  ConsolePatchSettings,
+  DevToolsHookSettings,
 } from './types';
-import type {
-  ComponentFilter,
-  BrowserTheme,
-} from 'react-devtools-shared/src/frontend/types';
+import type {ComponentFilter} from 'react-devtools-shared/src/frontend/types';
 import {isSynchronousXHRSupported, isReactNativeEnvironment} from './utils';
 
 const debug = (methodName: string, ...args: Array<string>) => {
@@ -153,6 +149,8 @@ export default class Agent extends EventEmitter<{
   drawTraceUpdates: [Array<HostInstance>],
   disableTraceUpdates: [],
   getIfHasUnsupportedRendererVersion: [],
+  updateHookSettings: [$ReadOnly<DevToolsHookSettings>],
+  getHookSettings: [],
 }> {
   _bridge: BackendBridge;
   _isProfiling: boolean = false;
@@ -216,10 +214,10 @@ export default class Agent extends EventEmitter<{
       this.syncSelectionFromBuiltinElementsPanel,
     );
     bridge.addListener('shutdown', this.shutdown);
-    bridge.addListener(
-      'updateConsolePatchSettings',
-      this.updateConsolePatchSettings,
-    );
+
+    bridge.addListener('updateHookSettings', this.updateHookSettings);
+    bridge.addListener('getHookSettings', this.getHookSettings);
+
     bridge.addListener('updateComponentFilters', this.updateComponentFilters);
     bridge.addListener('getEnvironmentNames', this.getEnvironmentNames);
     bridge.addListener(
@@ -805,31 +803,20 @@ export default class Agent extends EventEmitter<{
     }
   };
 
-  updateConsolePatchSettings: ({
-    appendComponentStack: boolean,
-    breakOnConsoleErrors: boolean,
-    browserTheme: BrowserTheme,
-    hideConsoleLogsInStrictMode: boolean,
-    showInlineWarningsAndErrors: boolean,
-  }) => void = ({
-    appendComponentStack,
-    breakOnConsoleErrors,
-    showInlineWarningsAndErrors,
-    hideConsoleLogsInStrictMode,
-    browserTheme,
-  }: ConsolePatchSettings) => {
-    // If the frontend preferences have changed,
-    // or in the case of React Native- if the backend is just finding out the preferences-
-    // then reinstall the console overrides.
-    // It's safe to call `patchConsole` multiple times.
-    patchConsole({
-      appendComponentStack,
-      breakOnConsoleErrors,
-      showInlineWarningsAndErrors,
-      hideConsoleLogsInStrictMode,
-      browserTheme,
-    });
+  updateHookSettings: (settings: $ReadOnly<DevToolsHookSettings>) => void =
+    settings => {
+      // Propagate the settings, so Backend can subscribe to it and modify hook
+      this.emit('updateHookSettings', settings);
+    };
+
+  getHookSettings: () => void = () => {
+    this.emit('getHookSettings');
   };
+
+  onHookSettings: (settings: $ReadOnly<DevToolsHookSettings>) => void =
+    settings => {
+      this._bridge.send('hookSettings', settings);
+    };
 
   updateComponentFilters: (componentFilters: Array<ComponentFilter>) => void =
     componentFilters => {
