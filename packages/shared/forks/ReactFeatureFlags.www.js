@@ -53,13 +53,10 @@ export const enableFabricCompleteRootInCommitPhase = false;
 export const enableSuspenseAvoidThisFallback = true;
 export const enableSuspenseAvoidThisFallbackFizz = false;
 
-export const disableIEWorkarounds = true;
 export const enableCPUSuspense = true;
 export const enableUseMemoCacheHook = true;
 export const enableUseEffectEventHook = true;
-export const enableFilterEmptyStringAttributesDOM = true;
 export const enableMoveBefore = false;
-export const enableAsyncActions = true;
 export const disableInputAttributeSyncing = false;
 export const enableLegacyFBSupport = true;
 export const enableLazyContextPropagation = true;
@@ -78,8 +75,6 @@ export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableCache = true;
 export const enableLegacyCache = true;
 
-export const enableBinaryFlight = true;
-export const enableFlightReadableStream = true;
 export const enableAsyncIterableChildren = false;
 
 export const enableTaint = false;
@@ -102,11 +97,7 @@ export const enableSuspenseCallback = true;
 
 export const enableLegacyHidden = true;
 
-export const enableComponentStackLocations = true;
-
 export const disableTextareaChildren = __EXPERIMENTAL__;
-
-export const consoleManagedByDevToolsDuringStrictMode = true;
 
 export const enableFizzExternalRuntime = true;
 
