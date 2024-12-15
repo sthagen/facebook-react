@@ -22,6 +22,8 @@
 // when it rolls out to prod. We should remove these as soon as possible.
 // -----------------------------------------------------------------------------
 
+export const enableHydrationLaneScheduling = true;
+
 // -----------------------------------------------------------------------------
 // Land or remove (moderate effort)
 //
@@ -108,16 +110,9 @@ export const enableLegacyHidden = false;
 
 // Enables unstable_avoidThisFallback feature in Fiber
 export const enableSuspenseAvoidThisFallback = false;
-// Enables unstable_avoidThisFallback feature in Fizz
-export const enableSuspenseAvoidThisFallbackFizz = false;
 
 export const enableCPUSuspense = __EXPERIMENTAL__;
 
-export const enableHydrationLaneScheduling = true;
-
-// Enables useMemoCache hook, intended as a compilation target for
-// auto-memoization.
-export const enableUseMemoCacheHook = true;
 // Test this at Meta before enabling.
 export const enableNoCloningMemoCache = false;
 
