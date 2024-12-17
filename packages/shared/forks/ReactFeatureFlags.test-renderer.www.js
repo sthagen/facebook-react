@@ -10,7 +10,7 @@
 import typeof * as FeatureFlagsType from 'shared/ReactFeatureFlags';
 import typeof * as ExportsType from './ReactFeatureFlags.test-renderer.www';
 
-export const debugRenderPhaseSideEffectsForStrictMode = false;
+export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 export const enableAsyncDebugInfo = false;
 export const enableSchedulingProfiler = false;
 export const enableProfilerTimer = __PROFILE__;
@@ -50,12 +50,11 @@ export const syncLaneExpirationMs = 250;
 export const transitionLaneExpirationMs = 5000;
 
 export const disableSchedulerTimeoutInWorkLoop = false;
-export const enableLazyContextPropagation = true;
 export const enableLegacyHidden = false;
 
 export const enableTransitionTracing = false;
 
-export const useModernStrictMode = false;
+export const useModernStrictMode = true;
 export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
 export const enableFizzExternalRuntime = false;
 export const enableDeferRootSchedulingToMicrotask = true;
@@ -72,7 +71,7 @@ export const enableInfiniteRenderLoopDetection = false;
 export const enableReactTestRendererWarning = false;
 export const disableLegacyMode = true;
 
-export const disableDefaultPropsExceptForClasses = false;
+export const disableDefaultPropsExceptForClasses = true;
 
 export const renameElementSymbol = false;
 

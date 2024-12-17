@@ -11,7 +11,7 @@ import typeof * as FeatureFlagsType from 'shared/ReactFeatureFlags';
 import typeof * as ExportsType from './ReactFeatureFlags.test-renderer';
 
 export const alwaysThrottleRetries = false;
-export const debugRenderPhaseSideEffectsForStrictMode = false;
+export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 export const disableClientCache = true;
 export const disableCommentsAsDOMContainers = true;
 export const disableDefaultPropsExceptForClasses = true;
@@ -32,8 +32,6 @@ export const enableFizzExternalRuntime = true;
 export const enableGetInspectorDataForInstanceInProduction = false;
 export const enableHalt = false;
 export const enableInfiniteRenderLoopDetection = false;
-export const enableLazyContextPropagation = true;
-export const enableContextProfiling = false;
 export const enableHiddenSubtreeInsertionEffectCleanup = true;
 export const enableLegacyCache = false;
 export const enableLegacyFBSupport = false;
