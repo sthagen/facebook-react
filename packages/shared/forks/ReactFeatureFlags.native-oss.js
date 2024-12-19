@@ -12,12 +12,8 @@ import typeof * as ExportsType from './ReactFeatureFlags.native-oss';
 
 // TODO: Align these flags with canary and delete this file once RN ships from Canary.
 
-// DEV-only but enabled in the next RN Major.
-// Not supported by flag script to avoid the special case.
-export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
-
 // -----------------------------------------------------------------------------
-// All other flags
+// All flags
 // -----------------------------------------------------------------------------
 export const alwaysThrottleRetries = false;
 export const disableClientCache = true;
@@ -70,7 +66,6 @@ export const renameElementSymbol = true;
 export const retryLaneExpirationMs = 5000;
 export const syncLaneExpirationMs = 250;
 export const transitionLaneExpirationMs = 5000;
-export const useModernStrictMode = true;
 export const enableSiblingPrerendering = true;
 export const enableUseResourceEffectHook = false;
 

@@ -42,7 +42,6 @@ export const {
 // On WWW, __EXPERIMENTAL__ is used for a new modern build.
 // It's not used anywhere in production yet.
 
-export const debugRenderPhaseSideEffectsForStrictMode = __DEV__;
 export const enableProfilerTimer = __PROFILE__;
 export const enableProfilerCommitHooks = __PROFILE__;
 export const enableProfilerNestedUpdatePhase = __PROFILE__;
@@ -106,7 +105,6 @@ export const disableClientCache = true;
 export const enableServerComponentLogs = true;
 
 export const enableReactTestRendererWarning = false;
-export const useModernStrictMode = true;
 
 export const disableLegacyMode = true;
 
