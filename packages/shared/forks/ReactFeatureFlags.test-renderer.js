@@ -53,7 +53,6 @@ export const enableTransitionTracing = false;
 
 export const enableDO_NOT_USE_disableStrictPassiveEffect = false;
 export const enableFizzExternalRuntime = true;
-export const enableDeferRootSchedulingToMicrotask = true;
 
 export const alwaysThrottleRetries = true;
 
@@ -72,6 +71,7 @@ export const enableUseResourceEffectHook = false;
 export const enableYieldingBeforePassive = true;
 
 export const enableThrottledScheduling = false;
+export const enableViewTransition = false;
 
 // TODO: This must be in sync with the main ReactFeatureFlags file because
 // the Test Renderer's value must be the same as the one used by the

@@ -19,7 +19,6 @@ export const {
   disableDefaultPropsExceptForClasses,
   disableLegacyContextForFunctionComponents,
   disableSchedulerTimeoutInWorkLoop,
-  enableDeferRootSchedulingToMicrotask,
   enableDO_NOT_USE_disableStrictPassiveEffect,
   enableHiddenSubtreeInsertionEffectCleanup,
   enableInfiniteRenderLoopDetection,
@@ -59,6 +58,7 @@ export const enableLegacyFBSupport = true;
 export const enableYieldingBeforePassive = false;
 
 export const enableThrottledScheduling = false;
+export const enableViewTransition = false;
 
 export const enableHydrationLaneScheduling = true;
 
