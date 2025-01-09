@@ -1198,30 +1198,94 @@ export function hasInstanceAffectedParent(
   return oldRect.height !== newRect.height || oldRect.width !== newRect.width;
 }
 
+// How long to wait for new fonts to load before just committing anyway.
+// This freezes the screen. It needs to be short enough that it doesn't cause too much of
+// an issue when it's a new load and slow, yet long enough that you have a chance to load
+// it. Otherwise we wait for no reason. The assumption here is that you likely have
+// either cached the font or preloaded it earlier.
+const SUSPENSEY_FONT_TIMEOUT = 500;
+
 export function startViewTransition(
   rootContainer: Container,
   mutationCallback: () => void,
-  afterMutationCallback: () => void,
   layoutCallback: () => void,
+  afterMutationCallback: () => void,
+  spawnedWorkCallback: () => void,
   passiveCallback: () => mixed,
 ): boolean {
-  const ownerDocument =
+  const ownerDocument: Document =
     rootContainer.nodeType === DOCUMENT_NODE
-      ? rootContainer
+      ? (rootContainer: any)
       : rootContainer.ownerDocument;
   try {
     // $FlowFixMe[prop-missing]
     const transition = ownerDocument.startViewTransition({
       update() {
+        // Note: We read the existence of a pending navigation before we apply the
+        // mutations. That way we're not waiting on a navigation that we spawned
+        // from this update. Only navigations that started before this commit.
+        const ownerWindow = ownerDocument.defaultView;
+        const pendingNavigation =
+          ownerWindow.navigation && ownerWindow.navigation.transition;
+        // $FlowFixMe[prop-missing]
+        const previousFontLoadingStatus = ownerDocument.fonts.status;
         mutationCallback();
-        // TODO: Wait for fonts.
-        afterMutationCallback();
+        if (previousFontLoadingStatus === 'loaded') {
+          // Force layout calculation to trigger font loading.
+          // eslint-disable-next-line ft-flow/no-unused-expressions
+          (ownerDocument.documentElement: any).clientHeight;
+          if (
+            // $FlowFixMe[prop-missing]
+            ownerDocument.fonts.status === 'loading'
+          ) {
+            // The mutation lead to new fonts being loaded. We should wait on them before continuing.
+            // This avoids waiting for potentially unrelated fonts that were already loading before.
+            // Either in an earlier transition or as part of a sync optimistic state. This doesn't
+            // include preloads that happened earlier.
+            const fontsReady = Promise.race([
+              // $FlowFixMe[prop-missing]
+              ownerDocument.fonts.ready,
+              new Promise(resolve =>
+                setTimeout(resolve, SUSPENSEY_FONT_TIMEOUT),
+              ),
+            ]).then(layoutCallback, layoutCallback);
+            const allReady = pendingNavigation
+              ? Promise.allSettled([pendingNavigation.finished, fontsReady])
+              : fontsReady;
+            return allReady.then(afterMutationCallback, afterMutationCallback);
+          }
+        }
+        layoutCallback();
+        if (pendingNavigation) {
+          return pendingNavigation.finished.then(
+            afterMutationCallback,
+            afterMutationCallback,
+          );
+        } else {
+          afterMutationCallback();
+        }
       },
       types: null, // TODO: Provide types.
     });
     // $FlowFixMe[prop-missing]
     ownerDocument.__reactViewTransition = transition;
-    transition.ready.then(layoutCallback, layoutCallback);
+    if (__DEV__) {
+      transition.ready.then(undefined, (reason: mixed) => {
+        if (
+          typeof reason === 'object' &&
+          reason !== null &&
+          reason.name === 'TimeoutError'
+        ) {
+          console.error(
+            'A ViewTransition timed out because a Navigation stalled. ' +
+              'This can happen if a Navigation is blocked on React itself. ' +
+              "Such as if it's resolved inside useEffect. " +
+              'This can be solved by moving the resolution to useLayoutEffect.',
+          );
+        }
+      });
+    }
+    transition.ready.then(spawnedWorkCallback, spawnedWorkCallback);
     transition.finished.then(() => {
       // $FlowFixMe[prop-missing]
       ownerDocument.__reactViewTransition = null;
