@@ -92,6 +92,8 @@ export const enableHalt = __EXPERIMENTAL__;
 
 export const enableViewTransition = __EXPERIMENTAL__;
 
+export const enableSwipeTransition = __EXPERIMENTAL__;
+
 /**
  * Switches Fiber creation to a simple object instead of a constructor.
  */
@@ -127,7 +129,7 @@ export const passChildrenWhenCloningPersistedNodes = false;
  */
 export const enablePersistedModeClonedFlag = false;
 
-export const enableOwnerStacks = __EXPERIMENTAL__;
+export const enableOwnerStacks = true;
 
 export const enableShallowPropDiffing = false;
 
