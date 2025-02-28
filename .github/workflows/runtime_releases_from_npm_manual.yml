@@ -50,7 +50,7 @@ jobs:
           embed-author-name: ${{ github.event.sender.login }}
           embed-author-url: ${{ github.event.sender.html_url }}
           embed-author-icon-url: ${{ github.event.sender.avatar_url }}
-          embed-title: "⚠️ Publishing release from NPM${{ inputs.dry && ' (dry run)' }}"
+          embed-title: "⚠️ Publishing release from NPM${{ (inputs.dry && ' (dry run)') || '' }}"
           embed-description: |
             ```json
             ${{ toJson(inputs) }}
@@ -117,3 +117,9 @@ jobs:
             --publishVersion=${{ inputs.version_to_publish }} \
             --skipPackages=${{ inputs.skip_packages }} ${{ (inputs.dry && '') || '\'}}
             ${{ inputs.dry && '--dry'}}
+      - name: Archive released package for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            ./build/node_modules
