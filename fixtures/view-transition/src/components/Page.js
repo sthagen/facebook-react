@@ -4,6 +4,7 @@ import React, {
   unstable_useSwipeTransition as useSwipeTransition,
   useEffect,
   useState,
+  useId,
 } from 'react';
 
 import SwipeRecognizer from './SwipeRecognizer';
@@ -39,6 +40,11 @@ function Component() {
   );
 }
 
+function Id() {
+  // This is just testing that Id inside a ViewTransition can hydrate correctly.
+  return <span id={useId()} />;
+}
+
 export default function Page({url, navigate}) {
   const [renderedUrl, startGesture] = useSwipeTransition('/?a', url, '/?b');
   const show = renderedUrl === '/?b';
@@ -71,14 +77,18 @@ export default function Page({url, navigate}) {
     <div>
       <button
         onClick={() => {
-          navigate(show ? '/?a' : '/?b');
+          navigate(url === '/?b' ? '/?a' : '/?b');
         }}>
-        {show ? 'A' : 'B'}
+        {url === '/?b' ? 'A' : 'B'}
       </button>
       <ViewTransition className="none">
         <div>
-          <ViewTransition className={transitions['slide-on-nav']}>
-            <h1>{!show ? 'A' : 'B'}</h1>
+          <ViewTransition>
+            <div>
+              <ViewTransition className={transitions['slide-on-nav']}>
+                <h1>{!show ? 'A' : 'B'}</h1>
+              </ViewTransition>
+            </div>
           </ViewTransition>
           <ViewTransition
             className={{
@@ -102,7 +112,9 @@ export default function Page({url, navigate}) {
             {show ? <div>hello{exclamation}</div> : <section>Loading</section>}
           </ViewTransition>
           <p>scroll me</p>
-          <p></p>
+          <p>
+            <Id />
+          </p>
           <p></p>
           <p></p>
           <p></p>
