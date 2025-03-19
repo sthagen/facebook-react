@@ -17,7 +17,12 @@ let Fragment;
 let Activity;
 let mockIntersectionObserver;
 let simulateIntersection;
+let setClientRects;
 let assertConsoleErrorDev;
+
+function Wrapper({children}) {
+  return children;
+}
 
 describe('FragmentRefs', () => {
   beforeEach(() => {
@@ -30,6 +35,7 @@ describe('FragmentRefs', () => {
     const IntersectionMocks = require('./utils/IntersectionMocks');
     mockIntersectionObserver = IntersectionMocks.mockIntersectionObserver;
     simulateIntersection = IntersectionMocks.simulateIntersection;
+    setClientRects = IntersectionMocks.setClientRects;
     assertConsoleErrorDev =
       require('internal-test-utils').assertConsoleErrorDev;
 
@@ -99,82 +105,192 @@ describe('FragmentRefs', () => {
     await act(() => root.render(<Test />));
   });
 
-  describe('focus()', () => {
-    // @gate enableFragmentRefs
-    it('focuses the first focusable child', async () => {
-      const fragmentRef = React.createRef();
-      const root = ReactDOMClient.createRoot(container);
+  describe('focus methods', () => {
+    describe('focus()', () => {
+      // @gate enableFragmentRefs
+      it('focuses the first focusable child', async () => {
+        const fragmentRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
 
-      function Test() {
-        return (
-          <div>
+        function Test() {
+          return (
+            <div>
+              <Fragment ref={fragmentRef}>
+                <div id="child-a" />
+                <style>{`#child-c {}`}</style>
+                <a id="child-b" href="/">
+                  B
+                </a>
+                <a id="child-c" href="/">
+                  C
+                </a>
+              </Fragment>
+            </div>
+          );
+        }
+
+        await act(() => {
+          root.render(<Test />);
+        });
+
+        await act(() => {
+          fragmentRef.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-b');
+        document.activeElement.blur();
+      });
+
+      // @gate enableFragmentRefs
+      it('preserves document order when adding and removing children', async () => {
+        const fragmentRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+
+        function Test({showA, showB}) {
+          return (
             <Fragment ref={fragmentRef}>
-              <div id="child-a" />
-              <style>{`#child-c {}`}</style>
-              <a id="child-b" href="/">
-                B
-              </a>
-              <a id="child-c" href="/">
-                C
-              </a>
+              {showA && <a href="/" id="child-a" />}
+              {showB && <a href="/" id="child-b" />}
             </Fragment>
-          </div>
-        );
-      }
+          );
+        }
 
-      await act(() => {
-        root.render(<Test />);
-      });
+        // Render with A as the first focusable child
+        await act(() => {
+          root.render(<Test showA={true} showB={false} />);
+        });
+        await act(() => {
+          fragmentRef.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-a');
+        document.activeElement.blur();
+        // A is still the first focusable child, but B is also tracked
+        await act(() => {
+          root.render(<Test showA={true} showB={true} />);
+        });
+        await act(() => {
+          fragmentRef.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-a');
+        document.activeElement.blur();
 
-      await act(() => {
-        fragmentRef.current.focus();
+        // B is now the first focusable child
+        await act(() => {
+          root.render(<Test showA={false} showB={true} />);
+        });
+        await act(() => {
+          fragmentRef.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-b');
+        document.activeElement.blur();
       });
-      expect(document.activeElement.id).toEqual('child-b');
-      document.activeElement.blur();
     });
 
-    // @gate enableFragmentRefs
-    it('preserves document order when adding and removing children', async () => {
-      const fragmentRef = React.createRef();
-      const root = ReactDOMClient.createRoot(container);
+    describe('focusLast()', () => {
+      // @gate enableFragmentRefs
+      it('focuses the last focusable child', async () => {
+        const fragmentRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
 
-      function Test({showA, showB}) {
-        return (
-          <Fragment ref={fragmentRef}>
-            {showA && <a href="/" id="child-a" />}
-            {showB && <a href="/" id="child-b" />}
-          </Fragment>
-        );
-      }
+        function Test() {
+          return (
+            <div>
+              <Fragment ref={fragmentRef}>
+                <a id="child-a" href="/">
+                  A
+                </a>
+                <a id="child-b" href="/">
+                  B
+                </a>
+                <Wrapper>
+                  <a id="child-c" href="/">
+                    C
+                  </a>
+                </Wrapper>
+                <div id="child-d" />
+                <style id="child-e">{`#child-d {}`}</style>
+              </Fragment>
+            </div>
+          );
+        }
 
-      // Render with A as the first focusable child
-      await act(() => {
-        root.render(<Test showA={true} showB={false} />);
-      });
-      await act(() => {
-        fragmentRef.current.focus();
-      });
-      expect(document.activeElement.id).toEqual('child-a');
-      document.activeElement.blur();
-      // A is still the first focusable child, but B is also tracked
-      await act(() => {
-        root.render(<Test showA={true} showB={true} />);
-      });
-      await act(() => {
-        fragmentRef.current.focus();
-      });
-      expect(document.activeElement.id).toEqual('child-a');
-      document.activeElement.blur();
+        await act(() => {
+          root.render(<Test />);
+        });
 
-      // B is now the first focusable child
-      await act(() => {
-        root.render(<Test showA={false} showB={true} />);
+        await act(() => {
+          fragmentRef.current.focusLast();
+        });
+        expect(document.activeElement.id).toEqual('child-c');
+        document.activeElement.blur();
       });
-      await act(() => {
-        fragmentRef.current.focus();
+    });
+
+    describe('blur()', () => {
+      // @gate enableFragmentRefs
+      it('removes focus from an element inside of the Fragment', async () => {
+        const fragmentRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+
+        function Test() {
+          return (
+            <Fragment ref={fragmentRef}>
+              <a id="child-a" href="/">
+                A
+              </a>
+            </Fragment>
+          );
+        }
+
+        await act(() => {
+          root.render(<Test />);
+        });
+
+        await act(() => {
+          fragmentRef.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-a');
+
+        await act(() => {
+          fragmentRef.current.blur();
+        });
+        expect(document.activeElement).toEqual(document.body);
       });
-      expect(document.activeElement.id).toEqual('child-b');
-      document.activeElement.blur();
+
+      // @gate enableFragmentRefs
+      it('does not remove focus from elements outside of the Fragment', async () => {
+        const fragmentRefA = React.createRef();
+        const fragmentRefB = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+
+        function Test() {
+          return (
+            <Fragment ref={fragmentRefA}>
+              <a id="child-a" href="/">
+                A
+              </a>
+              <Fragment ref={fragmentRefB}>
+                <a id="child-b" href="/">
+                  B
+                </a>
+              </Fragment>
+            </Fragment>
+          );
+        }
+
+        await act(() => {
+          root.render(<Test />);
+        });
+
+        await act(() => {
+          fragmentRefA.current.focus();
+        });
+        expect(document.activeElement.id).toEqual('child-a');
+
+        await act(() => {
+          fragmentRefB.current.blur();
+        });
+        expect(document.activeElement.id).toEqual('child-a');
+      });
     });
   });
 
@@ -388,10 +504,6 @@ describe('FragmentRefs', () => {
       const childRef = React.createRef();
       const nestedChildRef = React.createRef();
       const root = ReactDOMClient.createRoot(container);
-
-      function Wrapper({children}) {
-        return children;
-      }
 
       await act(() => {
         root.render(
@@ -729,6 +841,47 @@ describe('FragmentRefs', () => {
         ],
         {withoutStack: true},
       );
+    });
+  });
+
+  describe('getClientRects', () => {
+    // @gate enableFragmentRefs
+    it('returns the bounding client recs of all children', async () => {
+      const fragmentRef = React.createRef();
+      const childARef = React.createRef();
+      const childBRef = React.createRef();
+      const root = ReactDOMClient.createRoot(container);
+
+      function Test() {
+        return (
+          <React.Fragment ref={fragmentRef}>
+            <div ref={childARef} />
+            <div ref={childBRef} />
+          </React.Fragment>
+        );
+      }
+
+      await act(() => root.render(<Test />));
+      setClientRects(childARef.current, [
+        {
+          x: 1,
+          y: 2,
+          width: 3,
+          height: 4,
+        },
+        {
+          x: 5,
+          y: 6,
+          width: 7,
+          height: 8,
+        },
+      ]);
+      setClientRects(childBRef.current, [{x: 9, y: 10, width: 11, height: 12}]);
+      const clientRects = fragmentRef.current.getClientRects();
+      expect(clientRects.length).toBe(3);
+      expect(clientRects[0].left).toBe(1);
+      expect(clientRects[1].left).toBe(5);
+      expect(clientRects[2].left).toBe(9);
     });
   });
 });
