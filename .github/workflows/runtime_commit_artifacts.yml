@@ -151,9 +151,9 @@ jobs:
           ls -R ./compiled-rn
       - name: Add REVISION files
         run: |
-          echo ${{ github.sha }} >> ./compiled/facebook-www/REVISION
+          echo ${{ inputs.commit_sha || github.event.workflow_run.head_sha || github.sha }} >> ./compiled/facebook-www/REVISION
           cp ./compiled/facebook-www/REVISION ./compiled/facebook-www/REVISION_TRANSFORMS
-          echo ${{ github.sha}} >> ./compiled-rn/facebook-fbsource/xplat/js/react-native-github/Libraries/Renderer/REVISION
+          echo ${{ inputs.commit_sha || github.event.workflow_run.head_sha || github.sha }} >> ./compiled-rn/facebook-fbsource/xplat/js/react-native-github/Libraries/Renderer/REVISION
       - name: "Get current version string"
         id: get_current_version
         run: |
@@ -170,10 +170,12 @@ jobs:
         with:
           name: compiled
           path: compiled/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: compiled-rn
           path: compiled-rn/
+          if-no-files-found: error
 
   commit_www_artifacts:
     needs: download_artifacts
@@ -244,8 +246,8 @@ jobs:
       - name: Will commit these changes
         if: inputs.force == true || steps.check_should_commit.outputs.should_commit == 'true'
         run: |
-          echo ":"
-          git status -u
+          git add .
+          git status
       - name: Check commit message
         if: inputs.dry_run
         run: |
