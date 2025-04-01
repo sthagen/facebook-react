@@ -1,12 +1,15 @@
 import React, {
   unstable_ViewTransition as ViewTransition,
   unstable_Activity as Activity,
-  unstable_useSwipeTransition as useSwipeTransition,
   useLayoutEffect,
   useEffect,
   useState,
   useId,
+  useOptimistic,
+  startTransition,
 } from 'react';
+
+import {createPortal} from 'react-dom';
 
 import SwipeRecognizer from './SwipeRecognizer';
 
@@ -47,7 +50,12 @@ function Id() {
 }
 
 export default function Page({url, navigate}) {
-  const [renderedUrl, startGesture] = useSwipeTransition('/?a', url, '/?b');
+  const [renderedUrl, optimisticNavigate] = useOptimistic(
+    url,
+    (state, direction) => {
+      return direction === 'left' ? '/?a' : '/?b';
+    }
+  );
   const show = renderedUrl === '/?b';
   function onTransition(viewTransition, types) {
     const keyframes = [
@@ -79,6 +87,23 @@ export default function Page({url, navigate}) {
     // });
   }, [show]);
 
+  const [showModal, setShowModal] = useState(false);
+  const portal = showModal ? (
+    createPortal(
+      <div className="portal">
+        Portal: {!show ? 'A' : 'B'}
+        <ViewTransition>
+          <div>{!show ? 'A' : 'B'}</div>
+        </ViewTransition>
+      </div>,
+      document.body
+    )
+  ) : (
+    <button onClick={() => startTransition(() => setShowModal(true))}>
+      Show Modal
+    </button>
+  );
+
   const exclamation = (
     <ViewTransition name="exclamation" onShare={onTransition}>
       <span>!</span>
@@ -88,7 +113,7 @@ export default function Page({url, navigate}) {
     <div className="swipe-recognizer">
       <SwipeRecognizer
         action={swipeAction}
-        gesture={startGesture}
+        gesture={optimisticNavigate}
         direction={show ? 'left' : 'right'}>
         <button
           className="button"
@@ -153,6 +178,7 @@ export default function Page({url, navigate}) {
             <p>content</p>
             <p>out</p>
             <p>of</p>
+            {portal}
             <p>the</p>
             <p>viewport</p>
             {show ? <Component /> : null}
