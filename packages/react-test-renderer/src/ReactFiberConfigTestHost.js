@@ -8,7 +8,7 @@
  */
 
 import type {ReactContext} from 'shared/ReactTypes';
-import type {TransitionTypes} from 'react/src/ReactTransitionType.js';
+import type {TransitionTypes} from 'react/src/ReactTransitionType';
 
 import isArray from 'shared/isArray';
 import {REACT_CONTEXT_TYPE} from 'shared/ReactSymbols';
@@ -499,14 +499,6 @@ export type GestureTimeline = null;
 
 export function getCurrentGestureOffset(provider: GestureTimeline): number {
   return 0;
-}
-
-export function subscribeToGestureDirection(
-  provider: GestureTimeline,
-  currentOffset: number,
-  directionCallback: (direction: boolean) => void,
-): () => void {
-  return () => {};
 }
 
 export function beforeActiveInstanceBlur(internalInstanceHandle: Object) {

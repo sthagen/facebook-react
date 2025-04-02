@@ -25,11 +25,12 @@ import type {
   PreinitScriptOptions,
   PreinitModuleScriptOptions,
 } from 'react-dom/src/shared/ReactDOMTypes';
-import type {TransitionTypes} from 'react/src/ReactTransitionType.js';
+import type {TransitionTypes} from 'react/src/ReactTransitionType';
 
 import {NotPending} from '../shared/ReactDOMFormActions';
 
 import {getCurrentRootHostContainer} from 'react-reconciler/src/ReactFiberHostContext';
+import {runWithFiberInDEV} from 'react-reconciler/src/ReactCurrentFiber';
 
 import hasOwnProperty from 'shared/hasOwnProperty';
 import {checkAttributeStringCoercion} from 'shared/CheckStringCoercion';
@@ -43,6 +44,8 @@ export {
 import {
   precacheFiberNode,
   updateFiberProps,
+  getFiberCurrentPropsFromNode,
+  getInstanceFromNode,
   getClosestInstanceFromNode,
   getFiberFromScopeInstance,
   getInstanceFromNode as getInstanceFromNodeDOMTree,
@@ -821,10 +824,51 @@ export function appendChild(
   }
 }
 
+function warnForReactChildrenConflict(container: Container): void {
+  if (__DEV__) {
+    if ((container: any).__reactWarnedAboutChildrenConflict) {
+      return;
+    }
+    const props = getFiberCurrentPropsFromNode(container);
+    if (props !== null) {
+      const fiber = getInstanceFromNode(container);
+      if (fiber !== null) {
+        if (
+          typeof props.children === 'string' ||
+          typeof props.children === 'number'
+        ) {
+          (container: any).__reactWarnedAboutChildrenConflict = true;
+          // Run the warning with the Fiber of the container for context of where the children are specified.
+          // We could also maybe use the Portal. The current execution context is the child being added.
+          runWithFiberInDEV(fiber, () => {
+            console.error(
+              'Cannot use a ref on a React element as a container to `createRoot` or `createPortal` ' +
+                'if that element also sets "children" text content using React. It should be a leaf with no children. ' +
+                "Otherwise it's ambiguous which children should be used.",
+            );
+          });
+        } else if (props.dangerouslySetInnerHTML != null) {
+          (container: any).__reactWarnedAboutChildrenConflict = true;
+          runWithFiberInDEV(fiber, () => {
+            console.error(
+              'Cannot use a ref on a React element as a container to `createRoot` or `createPortal` ' +
+                'if that element also sets "dangerouslySetInnerHTML" using React. It should be a leaf with no children. ' +
+                "Otherwise it's ambiguous which children should be used.",
+            );
+          });
+        }
+      }
+    }
+  }
+}
+
 export function appendChildToContainer(
   container: Container,
   child: Instance | TextInstance,
 ): void {
+  if (__DEV__) {
+    warnForReactChildrenConflict(container);
+  }
   let parentNode: DocumentFragment | Element;
   if (container.nodeType === DOCUMENT_NODE) {
     parentNode = (container: any).body;
@@ -888,6 +932,9 @@ export function insertInContainerBefore(
   child: Instance | TextInstance,
   beforeChild: Instance | TextInstance | SuspenseInstance,
 ): void {
+  if (__DEV__) {
+    warnForReactChildrenConflict(container);
+  }
   let parentNode: DocumentFragment | Element;
   if (container.nodeType === DOCUMENT_NODE) {
     parentNode = (container: any).body;
@@ -1358,7 +1405,9 @@ export function cloneRootViewTransitionContainer(
 
   const containerParent = containerInstance.parentNode;
   if (containerParent === null) {
-    throw new Error('Cannot use a useSwipeTransition() in a detached root.');
+    throw new Error(
+      'Cannot use a startGestureTransition() on a detached root.',
+    );
   }
 
   const clone: HTMLElement = containerInstance.cloneNode(false);
@@ -1464,7 +1513,9 @@ export function removeRootViewTransitionClone(
   }
   const containerParent = containerInstance.parentNode;
   if (containerParent === null) {
-    throw new Error('Cannot use a useSwipeTransition() in a detached root.');
+    throw new Error(
+      'Cannot use a startGestureTransition() on a detached root.',
+    );
   }
   // We assume that the clone is still within the same parent.
   containerParent.removeChild(clone);
@@ -1876,6 +1927,7 @@ function animateGesture(
     // keyframe. Otherwise it applies to every keyframe.
     moveOldFrameIntoViewport(keyframes[0]);
   }
+  // TODO: Reverse the reverse if the original direction is reverse.
   const reverse = rangeStart > rangeEnd;
   targetElement.animate(keyframes, {
     pseudoElement: pseudoElement,
@@ -1886,7 +1938,7 @@ function animateGesture(
     // from scroll bouncing.
     easing: 'linear',
     // We fill in both direction for overscroll.
-    fill: 'both',
+    fill: 'both', // TODO: Should we preserve the fill instead?
     // We play all gestures in reverse, except if we're in reverse direction
     // in which case we need to play it in reverse of the reverse.
     direction: reverse ? 'normal' : 'reverse',
@@ -1931,18 +1983,33 @@ export function startGestureTransition(
       // up if they exist later.
       const foundGroups: Set<string> = new Set();
       const foundNews: Set<string> = new Set();
+      // Collect the longest duration of any view-transition animation including delay.
+      let longestDuration = 0;
       for (let i = 0; i < animations.length; i++) {
+        const effect: KeyframeEffect = (animations[i].effect: any);
         // $FlowFixMe
-        const pseudoElement: ?string = animations[i].effect.pseudoElement;
+        const pseudoElement: ?string = effect.pseudoElement;
         if (pseudoElement == null) {
-        } else if (pseudoElement.startsWith('::view-transition-group')) {
-          foundGroups.add(pseudoElement.slice(23));
-        } else if (pseudoElement.startsWith('::view-transition-new')) {
-          // TODO: This is not really a sufficient detection because if the new
-          // pseudo element might exist but have animations disabled on it.
-          foundNews.add(pseudoElement.slice(21));
+        } else if (pseudoElement.startsWith('::view-transition')) {
+          const timing = effect.getTiming();
+          const duration =
+            typeof timing.duration === 'number' ? timing.duration : 0;
+          // TODO: Consider interation count higher than 1.
+          const durationWithDelay = timing.delay + duration;
+          if (durationWithDelay > longestDuration) {
+            longestDuration = durationWithDelay;
+          }
+          if (pseudoElement.startsWith('::view-transition-group')) {
+            foundGroups.add(pseudoElement.slice(23));
+          } else if (pseudoElement.startsWith('::view-transition-new')) {
+            // TODO: This is not really a sufficient detection because if the new
+            // pseudo element might exist but have animations disabled on it.
+            foundNews.add(pseudoElement.slice(21));
+          }
         }
       }
+      const durationToRangeMultipler =
+        (rangeEnd - rangeStart) / longestDuration;
       for (let i = 0; i < animations.length; i++) {
         const anim = animations[i];
         if (anim.playState !== 'running') {
@@ -1982,14 +2049,33 @@ export function startGestureTransition(
             }
             // TODO: If this has only an old state and no new state,
           }
+          // Adjust the range based on how long the animation would've ran as time based.
+          // Since we're running animations in reverse from how they normally would run,
+          // therefore the timing is from the rangeEnd to the start.
+          const timing = effect.getTiming();
+          const duration =
+            typeof timing.duration === 'number' ? timing.duration : 0;
+          let adjustedRangeStart =
+            rangeEnd - (duration + timing.delay) * durationToRangeMultipler;
+          let adjustedRangeEnd =
+            rangeEnd - timing.delay * durationToRangeMultipler;
+          if (
+            timing.direction === 'reverse' ||
+            timing.direction === 'alternate-reverse'
+          ) {
+            // This animation was originally in reverse so we have to play it in flipped range.
+            const temp = adjustedRangeStart;
+            adjustedRangeStart = adjustedRangeEnd;
+            adjustedRangeEnd = temp;
+          }
           animateGesture(
             effect.getKeyframes(),
             // $FlowFixMe: Always documentElement atm.
             effect.target,
             pseudoElement,
             timeline,
-            rangeStart,
-            rangeEnd,
+            adjustedRangeStart,
+            adjustedRangeEnd,
             isGeneratedGroupAnim,
             isExitGroupAnim,
           );
@@ -2172,69 +2258,10 @@ export function getCurrentGestureOffset(provider: GestureTimeline): number {
   return typeof time === 'number' ? time : time.value;
 }
 
-export function subscribeToGestureDirection(
-  provider: GestureTimeline,
-  currentOffset: number,
-  directionCallback: (direction: boolean) => void,
-): () => void {
-  if (
-    typeof ScrollTimeline === 'function' &&
-    provider instanceof ScrollTimeline
-  ) {
-    // For ScrollTimeline we optimize to only update the current time on scroll events.
-    const element = provider.source;
-    const scrollCallback = () => {
-      const newTime = provider.currentTime;
-      if (newTime !== null) {
-        const newValue = typeof newTime === 'number' ? newTime : newTime.value;
-        if (newValue !== currentOffset) {
-          directionCallback(newValue > currentOffset);
-        }
-      }
-    };
-    element.addEventListener('scroll', scrollCallback, false);
-    return () => {
-      element.removeEventListener('scroll', scrollCallback, false);
-    };
-  } else {
-    // For other AnimationTimelines, such as DocumentTimeline, we just update every rAF.
-    // TODO: Optimize ViewTimeline using an IntersectionObserver if it becomes common.
-    const rafCallback = () => {
-      const newTime = provider.currentTime;
-      if (newTime !== null) {
-        const newValue = typeof newTime === 'number' ? newTime : newTime.value;
-        if (newValue !== currentOffset) {
-          directionCallback(newValue > currentOffset);
-        }
-      }
-      callbackID = requestAnimationFrame(rafCallback);
-    };
-    let callbackID = requestAnimationFrame(rafCallback);
-    return () => {
-      cancelAnimationFrame(callbackID);
-    };
-  }
-}
-
-type EventListenerOptionsOrUseCapture =
-  | boolean
-  | {
-      capture?: boolean,
-      once?: boolean,
-      passive?: boolean,
-      signal?: AbortSignal,
-      ...
-    };
-
 type StoredEventListener = {
   type: string,
   listener: EventListener,
   optionsOrUseCapture: void | EventListenerOptionsOrUseCapture,
-};
-
-type FocusOptions = {
-  preventScroll?: boolean,
-  focusVisible?: boolean,
 };
 
 export type FragmentInstanceType = {
