@@ -11,6 +11,12 @@ import type {
   ReactConsumerType,
   ReactContext,
   ReactNodeList,
+  ViewTransitionProps,
+  ActivityProps,
+  SuspenseProps,
+  TracingMarkerProps,
+  CacheProps,
+  ProfilerProps,
 } from 'shared/ReactTypes';
 import type {LazyComponent as LazyComponentType} from 'react/src/ReactLazy';
 import type {Fiber, FiberRoot} from './ReactInternalTypes';
@@ -23,15 +29,13 @@ import type {
 } from './ReactFiberSuspenseComponent';
 import type {SuspenseContext} from './ReactFiberSuspenseContext';
 import type {
+  LegacyHiddenProps,
   OffscreenProps,
   OffscreenState,
   OffscreenQueue,
   OffscreenInstance,
-} from './ReactFiberActivityComponent';
-import type {
-  ViewTransitionProps,
-  ViewTransitionState,
-} from './ReactFiberViewTransitionComponent';
+} from './ReactFiberOffscreenComponent';
+import type {ViewTransitionState} from './ReactFiberViewTransitionComponent';
 import {assignViewTransitionAutoName} from './ReactFiberViewTransitionComponent';
 import type {
   Cache,
@@ -645,8 +649,8 @@ function updateOffscreenComponent(
   current: Fiber | null,
   workInProgress: Fiber,
   renderLanes: Lanes,
+  nextProps: OffscreenProps,
 ) {
-  const nextProps: OffscreenProps = workInProgress.pendingProps;
   const nextChildren = nextProps.children;
 
   const prevState: OffscreenState | null =
@@ -858,17 +862,30 @@ function deferHiddenOffscreenComponent(
   return null;
 }
 
-// Note: These happen to have identical begin phases, for now. We shouldn't hold
-// ourselves to this constraint, though. If the behavior diverges, we should
-// fork the function.
-const updateLegacyHiddenComponent = updateOffscreenComponent;
+function updateLegacyHiddenComponent(
+  current: null | Fiber,
+  workInProgress: Fiber,
+  renderLanes: Lanes,
+) {
+  const nextProps: LegacyHiddenProps = workInProgress.pendingProps;
+  // Note: These happen to have identical begin phases, for now. We shouldn't hold
+  // ourselves to this constraint, though. If the behavior diverges, we should
+  // fork the function.
+  // This just works today because it has the same Props.
+  return updateOffscreenComponent(
+    current,
+    workInProgress,
+    renderLanes,
+    nextProps,
+  );
+}
 
 function updateActivityComponent(
   current: null | Fiber,
   workInProgress: Fiber,
   renderLanes: Lanes,
 ) {
-  const nextProps = workInProgress.pendingProps;
+  const nextProps: ActivityProps = workInProgress.pendingProps;
   const nextChildren = nextProps.children;
   const nextMode = nextProps.mode;
   const mode = workInProgress.mode;
@@ -962,7 +979,9 @@ function updateCacheComponent(
     }
   }
 
-  const nextChildren = workInProgress.pendingProps.children;
+  const nextProps: CacheProps = workInProgress.pendingProps;
+
+  const nextChildren = nextProps.children;
   reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   return workInProgress.child;
 }
@@ -977,6 +996,8 @@ function updateTracingMarkerComponent(
     return null;
   }
 
+  const nextProps: TracingMarkerProps = workInProgress.pendingProps;
+
   // TODO: (luna) Only update the tracing marker if it's newly rendered or it's name changed.
   // A tracing marker is only associated with the transitions that rendered
   // or updated it, so we can create a new set of transitions each time
@@ -987,7 +1008,7 @@ function updateTracingMarkerComponent(
         tag: TransitionTracingMarker,
         transitions: new Set(currentTransitions),
         pendingBoundaries: null,
-        name: workInProgress.pendingProps.name,
+        name: nextProps.name,
         aborts: null,
       };
       workInProgress.stateNode = markerInstance;
@@ -1000,7 +1021,7 @@ function updateTracingMarkerComponent(
     }
   } else {
     if (__DEV__) {
-      if (current.memoizedProps.name !== workInProgress.pendingProps.name) {
+      if (current.memoizedProps.name !== nextProps.name) {
         console.error(
           'Changing the name of a tracing marker after mount is not supported. ' +
             'To remount the tracing marker, pass it a new key.',
@@ -1013,7 +1034,7 @@ function updateTracingMarkerComponent(
   if (instance !== null) {
     pushMarkerInstance(workInProgress, instance);
   }
-  const nextChildren = workInProgress.pendingProps.children;
+  const nextChildren = nextProps.children;
   reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   return workInProgress.child;
 }
@@ -1061,7 +1082,7 @@ function updateProfiler(
       stateNode.passiveEffectDuration = -0;
     }
   }
-  const nextProps = workInProgress.pendingProps;
+  const nextProps: ProfilerProps = workInProgress.pendingProps;
   const nextChildren = nextProps.children;
   reconcileChildren(current, workInProgress, nextChildren, renderLanes);
   return workInProgress.child;
@@ -2069,7 +2090,7 @@ function updateSuspenseComponent(
   workInProgress: Fiber,
   renderLanes: Lanes,
 ) {
-  const nextProps = workInProgress.pendingProps;
+  const nextProps: SuspenseProps = workInProgress.pendingProps;
 
   // This is used by DevTools to force a boundary to suspend.
   if (__DEV__) {
@@ -2662,7 +2683,7 @@ function updateDehydratedSuspenseComponent(
   workInProgress: Fiber,
   didSuspend: boolean,
   didPrimaryChildrenDefer: boolean,
-  nextProps: any,
+  nextProps: SuspenseProps,
   suspenseInstance: SuspenseInstance,
   suspenseState: SuspenseState,
   renderLanes: Lanes,
@@ -3797,8 +3818,7 @@ function attemptEarlyBailoutIfNoScheduledUpdate(
         return null;
       }
     }
-    case OffscreenComponent:
-    case LegacyHiddenComponent: {
+    case OffscreenComponent: {
       // Need to check if the tree still needs to be deferred. This is
       // almost identical to the logic used in the normal update path,
       // so we'll just enter that. The only difference is we'll bail out
@@ -3808,7 +3828,12 @@ function attemptEarlyBailoutIfNoScheduledUpdate(
       // path from the normal path. I'm tempted to do a labeled break here
       // but I won't :)
       workInProgress.lanes = NoLanes;
-      return updateOffscreenComponent(current, workInProgress, renderLanes);
+      return updateOffscreenComponent(
+        current,
+        workInProgress,
+        renderLanes,
+        workInProgress.pendingProps,
+      );
     }
     case CacheComponent: {
       const cache: Cache = current.memoizedState.cache;
@@ -3821,7 +3846,20 @@ function attemptEarlyBailoutIfNoScheduledUpdate(
         if (instance !== null) {
           pushMarkerInstance(workInProgress, instance);
         }
+        break;
       }
+      // Fallthrough
+    }
+    case LegacyHiddenComponent: {
+      if (enableLegacyHidden) {
+        workInProgress.lanes = NoLanes;
+        return updateLegacyHiddenComponent(
+          current,
+          workInProgress,
+          renderLanes,
+        );
+      }
+      // Fallthrough
     }
   }
   return bailoutOnAlreadyFinishedWork(current, workInProgress, renderLanes);
@@ -4087,7 +4125,12 @@ function beginWork(
       return updateActivityComponent(current, workInProgress, renderLanes);
     }
     case OffscreenComponent: {
-      return updateOffscreenComponent(current, workInProgress, renderLanes);
+      return updateOffscreenComponent(
+        current,
+        workInProgress,
+        renderLanes,
+        workInProgress.pendingProps,
+      );
     }
     case LegacyHiddenComponent: {
       if (enableLegacyHidden) {
