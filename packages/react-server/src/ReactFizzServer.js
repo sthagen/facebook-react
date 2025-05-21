@@ -1783,6 +1783,8 @@ function renderSuspenseListRows(
 ): void {
   // This is a fork of renderChildrenArray that's aware of tracking rows.
   const prevKeyPath = task.keyPath;
+  const prevTreeContext = task.treeContext;
+  const prevRow = task.row;
   const previousComponentStack = task.componentStack;
   let previousDebugTask = null;
   if (__DEV__) {
@@ -1792,10 +1794,9 @@ function renderSuspenseListRows(
     pushServerComponentStack(task, (task.node: any).props.children._debugInfo);
   }
 
-  const prevTreeContext = task.treeContext;
-  const prevRow = task.row;
-  const totalChildren = rows.length;
+  task.keyPath = keyPath;
 
+  const totalChildren = rows.length;
   let previousSuspenseListRow: null | SuspenseListRow = null;
   if (task.replay !== null) {
     // Replay
@@ -4392,6 +4393,14 @@ function erroredTask(
       encodeErrorForBoundary(boundary, errorDigest, error, errorInfo, false);
       untrackBoundary(request, boundary);
 
+      const boundaryRow = boundary.row;
+      if (boundaryRow !== null) {
+        // Unblock the SuspenseListRow that was blocked by this boundary.
+        if (--boundaryRow.pendingTasks === 0) {
+          finishSuspenseListRow(request, boundaryRow);
+        }
+      }
+
       // Regardless of what happens next, this boundary won't be displayed,
       // so we can flush it, if the parent already flushed.
       if (boundary.parentFlushed) {
@@ -4544,13 +4553,6 @@ function abortTask(task: Task, request: Request, error: mixed): void {
     segment.status = ABORTED;
   }
 
-  const row = task.row;
-  if (row !== null) {
-    if (--row.pendingTasks === 0) {
-      finishSuspenseListRow(request, row);
-    }
-  }
-
   const errorInfo = getThrownInfo(task.componentStack);
 
   if (boundary === null) {
@@ -4573,7 +4575,7 @@ function abortTask(task: Task, request: Request, error: mixed): void {
             // we just need to mark it as postponed.
             logPostpone(request, postponeInstance.message, errorInfo, null);
             trackPostpone(request, trackedPostpones, task, segment);
-            finishedTask(request, null, row, segment);
+            finishedTask(request, null, task.row, segment);
           } else {
             const fatal = new Error(
               'The render was aborted with postpone when the shell is incomplete. Reason: ' +
@@ -4592,7 +4594,7 @@ function abortTask(task: Task, request: Request, error: mixed): void {
           // We log the error but we still resolve the prerender
           logRecoverableError(request, error, errorInfo, null);
           trackPostpone(request, trackedPostpones, task, segment);
-          finishedTask(request, null, row, segment);
+          finishedTask(request, null, task.row, segment);
         } else {
           logRecoverableError(request, error, errorInfo, null);
           fatalError(request, error, errorInfo, null);
@@ -4636,7 +4638,6 @@ function abortTask(task: Task, request: Request, error: mixed): void {
       }
     }
   } else {
-    boundary.pendingTasks--;
     // We construct an errorInfo from the boundary's componentStack so the error in dev will indicate which
     // boundary the message is referring to
     const trackedPostpones = request.trackedPostpones;
@@ -4664,7 +4665,7 @@ function abortTask(task: Task, request: Request, error: mixed): void {
             abortTask(fallbackTask, request, error),
           );
           boundary.fallbackAbortableTasks.clear();
-          return finishedTask(request, boundary, row, segment);
+          return finishedTask(request, boundary, task.row, segment);
         }
       }
       boundary.status = CLIENT_RENDERED;
@@ -4681,7 +4682,7 @@ function abortTask(task: Task, request: Request, error: mixed): void {
         logPostpone(request, postponeInstance.message, errorInfo, null);
         if (request.trackedPostpones !== null && segment !== null) {
           trackPostpone(request, request.trackedPostpones, task, segment);
-          finishedTask(request, task.blockedBoundary, row, segment);
+          finishedTask(request, task.blockedBoundary, task.row, segment);
 
           // If this boundary was still pending then we haven't already cancelled its fallbacks.
           // We'll need to abort the fallbacks, which will also error that parent boundary.
@@ -4706,12 +4707,29 @@ function abortTask(task: Task, request: Request, error: mixed): void {
       }
     }
 
+    boundary.pendingTasks--;
+
+    const boundaryRow = boundary.row;
+    if (boundaryRow !== null) {
+      // Unblock the SuspenseListRow that was blocked by this boundary.
+      if (--boundaryRow.pendingTasks === 0) {
+        finishSuspenseListRow(request, boundaryRow);
+      }
+    }
+
     // If this boundary was still pending then we haven't already cancelled its fallbacks.
     // We'll need to abort the fallbacks, which will also error that parent boundary.
     boundary.fallbackAbortableTasks.forEach(fallbackTask =>
       abortTask(fallbackTask, request, error),
     );
     boundary.fallbackAbortableTasks.clear();
+  }
+
+  const row = task.row;
+  if (row !== null) {
+    if (--row.pendingTasks === 0) {
+      finishSuspenseListRow(request, row);
+    }
   }
 
   request.allPendingTasks--;
