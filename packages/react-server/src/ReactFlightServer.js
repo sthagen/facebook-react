@@ -89,6 +89,7 @@ import {
   requestStorage,
   createHints,
   initAsyncDebugInfo,
+  markAsyncSequenceRootTask,
   getCurrentAsyncSequence,
   parseStackTrace,
   supportsComponentStorage,
@@ -149,7 +150,13 @@ import binaryToComparableString from 'shared/binaryToComparableString';
 
 import {SuspenseException, getSuspendedThenable} from './ReactFlightThenable';
 
-import {IO_NODE, PROMISE_NODE, AWAIT_NODE} from './ReactFlightAsyncSequence';
+import {
+  IO_NODE,
+  PROMISE_NODE,
+  AWAIT_NODE,
+  UNRESOLVED_AWAIT_NODE,
+  UNRESOLVED_PROMISE_NODE,
+} from './ReactFlightAsyncSequence';
 
 // DEV-only set containing internal objects that should not be limited and turned into getters.
 const doNotLimit: WeakSet<Reference> = __DEV__ ? new WeakSet() : (null: any);
@@ -1879,6 +1886,9 @@ function visitAsyncNode(
     case IO_NODE: {
       return node;
     }
+    case UNRESOLVED_PROMISE_NODE: {
+      return null;
+    }
     case PROMISE_NODE: {
       if (node.end < cutOff) {
         // This was already resolved when we started this sequence. It must have been
@@ -1888,6 +1898,7 @@ function visitAsyncNode(
         return null;
       }
       const awaited = node.awaited;
+      let match = null;
       if (awaited !== null) {
         const ioNode = visitAsyncNode(request, task, awaited, cutOff, visited);
         if (ioNode !== null) {
@@ -1907,39 +1918,104 @@ function visitAsyncNode(
               // If we haven't defined an end time, use the resolve of the outer Promise.
               ioNode.end = node.end;
             }
-            return ioNode;
+            match = ioNode;
+          } else {
+            match = node;
           }
-          return node;
         }
       }
-      return null;
+      // We need to forward after we visit awaited nodes because what ever I/O we requested that's
+      // the thing that generated this node and its virtual children.
+      const debugInfo = node.debugInfo;
+      if (debugInfo !== null) {
+        forwardDebugInfo(request, task.id, debugInfo);
+      }
+      return match;
     }
+    case UNRESOLVED_AWAIT_NODE:
+    // We could be inside the .then() which is about to resolve this node.
+    // TODO: We could call emitAsyncSequence in a microtask to avoid this issue.
+    // Fallthrough to the resolved path.
     case AWAIT_NODE: {
       const awaited = node.awaited;
+      let match = null;
       if (awaited !== null) {
         const ioNode = visitAsyncNode(request, task, awaited, cutOff, visited);
         if (ioNode !== null) {
-          const stack = filterStackTrace(
-            request,
-            parseStackTrace(node.stack, 1),
-          );
-          if (stack.length === 0) {
-            // If this await was fully filtered out, then it was inside third party code
-            // such as in an external library. We return the I/O node and try another await.
-            return ioNode;
+          let endTime: number;
+          if (node.tag === UNRESOLVED_AWAIT_NODE) {
+            // If we haven't defined an end time, use the resolve of the inner Promise.
+            // This can happen because the ping gets invoked before the await gets resolved.
+            if (ioNode.end < node.start) {
+              // If we're awaiting a resolved Promise it could have finished before we started.
+              endTime = node.start;
+            } else {
+              endTime = ioNode.end;
+            }
+          } else {
+            endTime = node.end;
           }
-          // Outline the IO node.
-          serializeIONode(request, ioNode);
-          // Then emit a reference to us awaiting it in the current task.
-          request.pendingChunks++;
-          emitDebugChunk(request, task.id, {
-            awaited: ((ioNode: any): ReactIOInfo), // This is deduped by this reference.
-            stack: stack,
-          });
+          if (endTime < cutOff) {
+            // This was already resolved when we started this sequence. It must have been
+            // part of a different component.
+            // TODO: Think of some other way to exclude irrelevant data since if we awaited
+            // a cached promise, we should still log this component as being dependent on that data.
+          } else {
+            const stack = filterStackTrace(
+              request,
+              parseStackTrace(node.stack, 1),
+            );
+            if (stack.length === 0) {
+              // If this await was fully filtered out, then it was inside third party code
+              // such as in an external library. We return the I/O node and try another await.
+              match = ioNode;
+            } else {
+              // Outline the IO node.
+              if (ioNode.end < 0) {
+                ioNode.end = endTime;
+              }
+              serializeIONode(request, ioNode);
+              // We log the environment at the time when the last promise pigned ping which may
+              // be later than what the environment was when we actually started awaiting.
+              const env = (0, request.environmentName)();
+              if (node.start <= cutOff) {
+                // If this was an await that started before this sequence but finished after,
+                // then we clamp it to the start of this sequence. We don't need to emit a time
+                // TODO: Typically we'll already have a previous time stamp with the cutOff time
+                // so we shouldn't need to emit another one. But not always.
+                emitTimingChunk(request, task.id, cutOff);
+              } else {
+                emitTimingChunk(request, task.id, node.start);
+              }
+              // Then emit a reference to us awaiting it in the current task.
+              request.pendingChunks++;
+              emitDebugChunk(request, task.id, {
+                awaited: ((ioNode: any): ReactIOInfo), // This is deduped by this reference.
+                env: env,
+                owner: node.owner,
+                stack: stack,
+              });
+              emitTimingChunk(request, task.id, node.end);
+            }
+          }
         }
       }
-      // If we had awaited anything we would have written it now.
-      return null;
+      // We need to forward after we visit awaited nodes because what ever I/O we requested that's
+      // the thing that generated this node and its virtual children.
+      let debugInfo: null | ReactDebugInfo;
+      if (node.tag === UNRESOLVED_AWAIT_NODE) {
+        const promise = node.debugInfo.deref();
+        debugInfo =
+          promise === undefined || promise._debugInfo === undefined
+            ? null
+            : promise._debugInfo;
+      } else {
+        debugInfo = node.debugInfo;
+      }
+      if (debugInfo !== null) {
+        forwardDebugInfo(request, task.id, debugInfo);
+      }
+      return match;
     }
     default: {
       // eslint-disable-next-line react-internal/prod-error-codes
@@ -1968,9 +2044,17 @@ function emitAsyncSequence(
     }
     serializeIONode(request, awaitedNode);
     request.pendingChunks++;
+    // We log the environment at the time when we ping which may be later than what the
+    // environment was when we actually started awaiting.
+    const env = (0, request.environmentName)();
+    // If we don't have any thing awaited, the time we started awaiting was internal
+    // when we yielded after rendering. The cutOff time is basically that.
+    emitTimingChunk(request, task.id, cutOff);
     emitDebugChunk(request, task.id, {
       awaited: ((awaitedNode: any): ReactIOInfo), // This is deduped by this reference.
+      env: env,
     });
+    emitTimingChunk(request, task.id, awaitedNode.end);
   }
 }
 
@@ -3523,6 +3607,8 @@ function emitIOInfoChunk(
   name: string,
   start: number,
   end: number,
+  env: ?string,
+  owner: ?ReactComponentInfo,
   stack: ?ReactStackTrace,
 ): void {
   if (!__DEV__) {
@@ -3560,8 +3646,19 @@ function emitIOInfoChunk(
     name: name,
     start: relativeStartTimestamp,
     end: relativeEndTimestamp,
-    stack: stack,
   };
+  if (env != null) {
+    // $FlowFixMe[cannot-write]
+    debugIOInfo.env = env;
+  }
+  if (stack != null) {
+    // $FlowFixMe[cannot-write]
+    debugIOInfo.stack = stack;
+  }
+  if (owner != null) {
+    // $FlowFixMe[cannot-write]
+    debugIOInfo.owner = owner;
+  }
   // $FlowFixMe[incompatible-type] stringify can return null
   const json: string = stringify(debugIOInfo, replacer);
   const row = id.toString(16) + ':J' + json + '\n';
@@ -3577,12 +3674,19 @@ function outlineIOInfo(request: Request, ioInfo: ReactIOInfo): void {
   // We can't serialize the ConsoleTask/Error objects so we need to omit them before serializing.
   request.pendingChunks++;
   const id = request.nextChunkId++;
+  const owner = ioInfo.owner;
+  // Ensure the owner is already outlined.
+  if (owner != null) {
+    outlineComponentInfo(request, owner);
+  }
   emitIOInfoChunk(
     request,
     id,
     ioInfo.name,
     ioInfo.start,
     ioInfo.end,
+    ioInfo.env,
+    owner,
     ioInfo.stack,
   );
   request.writtenObjects.set(ioInfo, serializeByValueID(id));
@@ -3612,10 +3716,28 @@ function serializeIONode(
       name = name.slice(7);
     }
   }
+  const owner = ioNode.owner;
+  // Ensure the owner is already outlined.
+  if (owner != null) {
+    outlineComponentInfo(request, owner);
+  }
+
+  // We log the environment at the time when we serialize the I/O node.
+  // The environment name may have changed from when the I/O was actually started.
+  const env = (0, request.environmentName)();
 
   request.pendingChunks++;
   const id = request.nextChunkId++;
-  emitIOInfoChunk(request, id, name, ioNode.start, ioNode.end, stack);
+  emitIOInfoChunk(
+    request,
+    id,
+    name,
+    ioNode.start,
+    ioNode.end,
+    env,
+    owner,
+    stack,
+  );
   const ref = serializeByValueID(id);
   request.writtenObjects.set(ioNode, ref);
   return ref;
@@ -4141,6 +4263,8 @@ function forwardDebugInfo(
         const debugAsyncInfo: Omit<ReactAsyncInfo, 'debugTask' | 'debugStack'> =
           {
             awaited: ioInfo,
+            env: debugInfo[i].env,
+            owner: debugInfo[i].owner,
             stack: debugInfo[i].stack,
           };
         emitDebugChunk(request, id, debugAsyncInfo);
@@ -4432,6 +4556,8 @@ function tryStreamTask(request: Request, task: Task): void {
 }
 
 function performWork(request: Request): void {
+  markAsyncSequenceRootTask();
+
   const prevDispatcher = ReactSharedInternals.H;
   ReactSharedInternals.H = HooksDispatcher;
   const prevRequest = currentRequest;
