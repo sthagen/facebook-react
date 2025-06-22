@@ -1940,10 +1940,7 @@ function visitAsyncNode(
             // If the ioNode was a Promise, then that means we found one in user space since otherwise
             // we would've returned an IO node. We assume this has the best stack.
             match = ioNode;
-          } else if (
-            filterStackTrace(request, parseStackTrace(node.stack, 1)).length ===
-            0
-          ) {
+          } else if (filterStackTrace(request, node.stack).length === 0) {
             // If this Promise was created inside only third party code, then try to use
             // the inner I/O node instead. This could happen if third party calls into first
             // party to perform some I/O.
@@ -1986,10 +1983,7 @@ function visitAsyncNode(
             // just part of a previous component's rendering.
             match = ioNode;
           } else {
-            const stack = filterStackTrace(
-              request,
-              parseStackTrace(node.stack, 1),
-            );
+            const stack = filterStackTrace(request, node.stack);
             if (stack.length === 0) {
               // If this await was fully filtered out, then it was inside third party code
               // such as in an external library. We return the I/O node and try another await.
@@ -2435,7 +2429,7 @@ function serializeSet(request: Request, set: Set<ReactClientValue>): string {
   return '$W' + id.toString(16);
 }
 
-function serializeConsoleMap(
+function serializeDebugMap(
   request: Request,
   counter: {objectLimit: number},
   map: Map<ReactClientValue, ReactClientValue>,
@@ -2462,7 +2456,7 @@ function serializeConsoleMap(
   return '$Q' + id.toString(16);
 }
 
-function serializeConsoleSet(
+function serializeDebugSet(
   request: Request,
   counter: {objectLimit: number},
   set: Set<ReactClientValue>,
@@ -3711,7 +3705,7 @@ function serializeIONode(
   let stack = null;
   let name = '';
   if (ioNode.stack !== null) {
-    const fullStack = parseStackTrace(ioNode.stack, 1);
+    const fullStack = ioNode.stack;
     stack = filterStackTrace(request, fullStack);
     name = findCalledFunctionNameFromStackTrace(request, fullStack);
     // The name can include the object that this was called on but sometimes that's
@@ -3993,10 +3987,10 @@ function renderDebugModel(
     }
 
     if (value instanceof Map) {
-      return serializeConsoleMap(request, counter, value);
+      return serializeDebugMap(request, counter, value);
     }
     if (value instanceof Set) {
-      return serializeConsoleSet(request, counter, value);
+      return serializeDebugSet(request, counter, value);
     }
     // TODO: FormData is not available in old Node. Remove the typeof later.
     if (typeof FormData === 'function' && value instanceof FormData) {
