@@ -205,7 +205,7 @@ type FilteredFiberInstance = {
   source: null | string | Error | ReactFunctionLocation, // always null here.
   logCount: number, // total number of errors/warnings last seen
   treeBaseDuration: number, // the profiled time of the last render of this subtree
-  suspendedBy: null | Array<ReactAsyncInfo>, // not used
+  suspendedBy: null | Array<ReactAsyncInfo>, // only used at the root
   suspenseNode: null | SuspenseNode,
   data: Fiber, // one of a Fiber pair
 };
@@ -275,7 +275,7 @@ type SuspenseNode = {
   parent: null | SuspenseNode,
   firstChild: null | SuspenseNode,
   nextSibling: null | SuspenseNode,
-  suspendedBy: Map<ReactIOInfo, Set<DevToolsInstance | null>>, // Tracks which data we're suspended by and the children that suspend it.
+  suspendedBy: Map<ReactIOInfo, Set<DevToolsInstance>>, // Tracks which data we're suspended by and the children that suspend it.
   // Track whether any of the items in suspendedBy are unique this this Suspense boundaries or if they're all
   // also in the parent sets. This determine whether this could contribute in the loading sequence.
   hasUniqueSuspenders: boolean,
@@ -2236,13 +2236,17 @@ export function attach(
         // the debugStack will be a stack frame inside the ownerInstance's source.
         ownerInstance.source = fiber._debugStack;
       }
+
+      let unfilteredParent = parentInstance;
+      while (
+        unfilteredParent !== null &&
+        unfilteredParent.kind === FILTERED_FIBER_INSTANCE
+      ) {
+        unfilteredParent = unfilteredParent.parent;
+      }
+
       const ownerID = ownerInstance === null ? 0 : ownerInstance.id;
-      const parentID = parentInstance
-        ? parentInstance.kind === FILTERED_FIBER_INSTANCE
-          ? // A Filtered Fiber Instance will always have a Virtual Instance as a parent.
-            ((parentInstance.parent: any): VirtualInstance).id
-          : parentInstance.id
-        : 0;
+      const parentID = unfilteredParent === null ? 0 : unfilteredParent.id;
 
       const displayNameStringID = getStringID(displayName);
 
@@ -2331,13 +2335,17 @@ export function attach(
       // the debugStack will be a stack frame inside the ownerInstance's source.
       ownerInstance.source = componentInfo.debugStack;
     }
+
+    let unfilteredParent = parentInstance;
+    while (
+      unfilteredParent !== null &&
+      unfilteredParent.kind === FILTERED_FIBER_INSTANCE
+    ) {
+      unfilteredParent = unfilteredParent.parent;
+    }
+
     const ownerID = ownerInstance === null ? 0 : ownerInstance.id;
-    const parentID = parentInstance
-      ? parentInstance.kind === FILTERED_FIBER_INSTANCE
-        ? // A Filtered Fiber Instance will always have a Virtual Instance as a parent.
-          ((parentInstance.parent: any): VirtualInstance).id
-        : parentInstance.id
-      : 0;
+    const parentID = unfilteredParent === null ? 0 : unfilteredParent.id;
 
     const displayNameStringID = getStringID(displayName);
 
@@ -2436,37 +2444,49 @@ export function attach(
       // we bubble that up to the nearest parent Suspense boundary that isn't in fallback mode.
       parentSuspenseNode = parentSuspenseNode.parent;
     }
-    const parentInstance = reconcilingParent;
-    if (parentSuspenseNode !== null) {
-      const suspendedBy = parentSuspenseNode.suspendedBy;
-      const ioInfo = asyncInfo.awaited;
-      let suspendedBySet = suspendedBy.get(ioInfo);
-      if (suspendedBySet === undefined) {
-        suspendedBySet = new Set();
-        suspendedBy.set(asyncInfo.awaited, suspendedBySet);
-      }
-      // The child of the Suspense boundary that was suspended on this, or null if suspended at the root.
-      // This is used to keep track of how many dependents are still alive and also to get information
-      // like owner instances to link down into the tree.
-      if (!suspendedBySet.has(parentInstance)) {
-        suspendedBySet.add(parentInstance);
-        if (
-          !parentSuspenseNode.hasUniqueSuspenders &&
-          !ioExistsInSuspenseAncestor(parentSuspenseNode, ioInfo)
-        ) {
-          // This didn't exist in the parent before, so let's mark this boundary as having a unique suspender.
-          parentSuspenseNode.hasUniqueSuspenders = true;
-        }
+    if (reconcilingParent === null || parentSuspenseNode === null) {
+      throw new Error(
+        'It should not be possible to have suspended data outside the root. ' +
+          'Even suspending at the first position is still a child of the root.',
+      );
+    }
+    // Use the nearest unfiltered parent so that there's always some component that has
+    // the entry on it even if you filter, or the root if all are filtered.
+    let parentInstance = reconcilingParent;
+    while (
+      parentInstance.kind === FILTERED_FIBER_INSTANCE &&
+      parentInstance.parent !== null
+    ) {
+      parentInstance = parentInstance.parent;
+    }
+
+    const suspenseNodeSuspendedBy = parentSuspenseNode.suspendedBy;
+    const ioInfo = asyncInfo.awaited;
+    let suspendedBySet = suspenseNodeSuspendedBy.get(ioInfo);
+    if (suspendedBySet === undefined) {
+      suspendedBySet = new Set();
+      suspenseNodeSuspendedBy.set(asyncInfo.awaited, suspendedBySet);
+    }
+    // The child of the Suspense boundary that was suspended on this, or null if suspended at the root.
+    // This is used to keep track of how many dependents are still alive and also to get information
+    // like owner instances to link down into the tree.
+    if (!suspendedBySet.has(parentInstance)) {
+      suspendedBySet.add(parentInstance);
+      if (
+        !parentSuspenseNode.hasUniqueSuspenders &&
+        !ioExistsInSuspenseAncestor(parentSuspenseNode, ioInfo)
+      ) {
+        // This didn't exist in the parent before, so let's mark this boundary as having a unique suspender.
+        parentSuspenseNode.hasUniqueSuspenders = true;
       }
     }
-    if (parentInstance !== null) {
-      // Suspending at the root is not attributed to any particular component other than the SuspenseNode.
-      const suspendedBy = parentInstance.suspendedBy;
-      if (suspendedBy === null) {
-        parentInstance.suspendedBy = [asyncInfo];
-      } else if (suspendedBy.indexOf(asyncInfo) === -1) {
-        suspendedBy.push(asyncInfo);
-      }
+    // Suspending right below the root is not attributed to any particular component in UI
+    // other than the SuspenseNode and the HostRoot's FiberInstance.
+    const suspendedBy = parentInstance.suspendedBy;
+    if (suspendedBy === null) {
+      parentInstance.suspendedBy = [asyncInfo];
+    } else if (suspendedBy.indexOf(asyncInfo) === -1) {
+      suspendedBy.push(asyncInfo);
     }
   }
 
@@ -2729,6 +2749,8 @@ export function attach(
 
     const id = instance.id;
     pendingRealUnmountedIDs.push(id);
+
+    idToDevToolsInstanceMap.delete(instance.id);
   }
 
   function getSecondaryEnvironmentName(
@@ -2775,7 +2797,7 @@ export function attach(
               // so we assume insertSuspendedBy dedupes.
               insertSuspendedBy(asyncInfo);
             }
-            if (previousVirtualInstance) continue;
+            continue;
           }
           if (typeof debugEntry.name !== 'string') {
             // Not a Component. Some other Debug Info.
@@ -2890,7 +2912,8 @@ export function attach(
     } else if (
       (reconcilingParent !== null &&
         reconcilingParent.kind === VIRTUAL_INSTANCE) ||
-      fiber.tag === SuspenseComponent
+      fiber.tag === SuspenseComponent ||
+      fiber.tag === OffscreenComponent // Use to keep resuspended instances alive inside a SuspenseComponent.
     ) {
       // If the parent is a Virtual Instance and we filtered this Fiber we include a
       // hidden node. We also include this if it's a Suspense boundary so we can track those
@@ -2974,7 +2997,11 @@ export function attach(
         aquireHostInstance(nearestInstance, fiber.stateNode);
       }
 
-      if (fiber.tag === SuspenseComponent) {
+      if (fiber.tag === OffscreenComponent && fiber.memoizedState !== null) {
+        // If an Offscreen component is hidden, don't mount its children yet.
+      } else if (fiber.tag === SuspenseComponent && OffscreenComponent === -1) {
+        // Legacy Suspense without the Offscreen wrapper. For the modern Suspense we just handle the
+        // Offscreen wrapper itself specially.
         const isTimedOut = fiber.memoizedState !== null;
         if (isTimedOut) {
           // Special case: if Suspense mounts in a timed-out state,
@@ -2996,15 +3023,7 @@ export function attach(
           }
           // TODO: Track SuspenseNode in resuspended trees.
         } else {
-          let primaryChild: Fiber | null = null;
-          const areSuspenseChildrenConditionallyWrapped =
-            OffscreenComponent === -1;
-          if (areSuspenseChildrenConditionallyWrapped) {
-            primaryChild = fiber.child;
-          } else if (fiber.child !== null) {
-            primaryChild = fiber.child.child;
-            updateTrackedPathStateBeforeMount(fiber.child, null);
-          }
+          const primaryChild: Fiber | null = fiber.child;
           if (primaryChild !== null) {
             mountChildrenRecursively(
               primaryChild,
@@ -3206,6 +3225,21 @@ export function attach(
     virtualInstance.treeBaseDuration = treeBaseDuration;
   }
 
+  function addUnfilteredChildrenIDs(
+    parentInstance: DevToolsInstance,
+    nextChildren: Array<number>,
+  ): void {
+    let child: null | DevToolsInstance = parentInstance.firstChild;
+    while (child !== null) {
+      if (child.kind === FILTERED_FIBER_INSTANCE) {
+        addUnfilteredChildrenIDs(child, nextChildren);
+      } else {
+        nextChildren.push(child.id);
+      }
+      child = child.nextSibling;
+    }
+  }
+
   function recordResetChildren(
     parentInstance: FiberInstance | VirtualInstance,
   ) {
@@ -3223,21 +3257,7 @@ export function attach(
     // This is trickier than a simple comparison though, since certain types of fibers are filtered.
     const nextChildren: Array<number> = [];
 
-    let child: null | DevToolsInstance = parentInstance.firstChild;
-    while (child !== null) {
-      if (child.kind === FILTERED_FIBER_INSTANCE) {
-        for (
-          let innerChild: null | DevToolsInstance = parentInstance.firstChild;
-          innerChild !== null;
-          innerChild = innerChild.nextSibling
-        ) {
-          nextChildren.push((innerChild: any).id);
-        }
-      } else {
-        nextChildren.push(child.id);
-      }
-      child = child.nextSibling;
-    }
+    addUnfilteredChildrenIDs(parentInstance, nextChildren);
 
     const numChildren = nextChildren.length;
     if (numChildren < 2) {
@@ -3333,7 +3353,7 @@ export function attach(
               // so we assume insertSuspendedBy dedupes.
               insertSuspendedBy(asyncInfo);
             }
-            if (previousVirtualInstance) continue;
+            continue;
           }
           if (typeof debugEntry.name !== 'string') {
             // Not a Component. Some other Debug Info.
@@ -3493,7 +3513,8 @@ export function attach(
         }
         if (existingInstance !== null) {
           // Common case. Match in the same parent.
-          const fiberInstance: FiberInstance = (existingInstance: any); // Only matches if it's a Fiber.
+          const fiberInstance: FiberInstance | FilteredFiberInstance =
+            (existingInstance: any); // Only matches if it's a Fiber.
 
           // We keep track if the order of the children matches the previous order.
           // They are always different referentially, but if the instances line up
@@ -3601,7 +3622,7 @@ export function attach(
 
   // Returns whether closest unfiltered fiber parent needs to reset its child list.
   function updateFiberRecursively(
-    fiberInstance: null | FiberInstance, // null if this should be filtered
+    fiberInstance: null | FiberInstance | FilteredFiberInstance, // null if this should be filtered
     nextFiber: Fiber,
     prevFiber: Fiber,
     traceNearestHostComponentUpdate: boolean,
@@ -3700,9 +3721,9 @@ export function attach(
         aquireHostInstance(nearestInstance, nextFiber.stateNode);
       }
 
-      const isSuspense = nextFiber.tag === SuspenseComponent;
       let shouldResetChildren = false;
-      // The behavior of timed-out Suspense trees is unique.
+
+      // The behavior of timed-out legacy Suspense trees is unique. Without the Offscreen wrapper.
       // Rather than unmount the timed out content (and possibly lose important state),
       // React re-parents this content within a hidden Fragment while the fallback is showing.
       // This behavior doesn't need to be observable in the DevTools though.
@@ -3710,8 +3731,17 @@ export function attach(
       // The easiest fix is to strip out the intermediate Fragment fibers,
       // so the Elements panel and Profiler don't need to special case them.
       // Suspense components only have a non-null memoizedState if they're timed-out.
-      const prevDidTimeout = isSuspense && prevFiber.memoizedState !== null;
-      const nextDidTimeOut = isSuspense && nextFiber.memoizedState !== null;
+      const isLegacySuspense =
+        nextFiber.tag === SuspenseComponent && OffscreenComponent === -1;
+      const prevDidTimeout =
+        isLegacySuspense && prevFiber.memoizedState !== null;
+      const nextDidTimeOut =
+        isLegacySuspense && nextFiber.memoizedState !== null;
+
+      const isOffscreen = nextFiber.tag === OffscreenComponent;
+      const prevWasHidden = isOffscreen && prevFiber.memoizedState !== null;
+      const nextIsHidden = isOffscreen && nextFiber.memoizedState !== null;
+
       // The logic below is inspired by the code paths in updateSuspenseComponent()
       // inside ReactFiberBeginWork in the React source code.
       if (prevDidTimeout && nextDidTimeOut) {
@@ -3778,6 +3808,25 @@ export function attach(
           );
           shouldResetChildren = true;
         }
+      } else if (prevWasHidden && nextIsHidden) {
+        // We don't update any children while they're still hidden.
+      } else if (prevWasHidden && !nextIsHidden) {
+        // We're revealing the hidden children. We now need to update them to the latest state.
+        if (nextFiber.child !== null) {
+          mountChildrenRecursively(
+            nextFiber.child,
+            traceNearestHostComponentUpdate,
+          );
+          shouldResetChildren = true;
+        }
+      } else if (!prevWasHidden && nextIsHidden) {
+        // We're hiding the children. We really just unmount them for now.
+        updateChildrenRecursively(
+          null,
+          prevFiber.child,
+          traceNearestHostComponentUpdate,
+        );
+        shouldResetChildren = true;
       } else {
         // Common case: Primary -> Primary.
         // This is the same code path as for non-Suspense fibers.
@@ -3827,26 +3876,31 @@ export function attach(
       if (fiberInstance !== null) {
         removePreviousSuspendedBy(fiberInstance, previousSuspendedBy);
 
-        let componentLogsEntry = fiberToComponentLogsMap.get(
-          fiberInstance.data,
-        );
-        if (componentLogsEntry === undefined && fiberInstance.data.alternate) {
-          componentLogsEntry = fiberToComponentLogsMap.get(
-            fiberInstance.data.alternate,
+        if (fiberInstance.kind === FIBER_INSTANCE) {
+          let componentLogsEntry = fiberToComponentLogsMap.get(
+            fiberInstance.data,
           );
-        }
-        recordConsoleLogs(fiberInstance, componentLogsEntry);
+          if (
+            componentLogsEntry === undefined &&
+            fiberInstance.data.alternate
+          ) {
+            componentLogsEntry = fiberToComponentLogsMap.get(
+              fiberInstance.data.alternate,
+            );
+          }
+          recordConsoleLogs(fiberInstance, componentLogsEntry);
 
-        const isProfilingSupported =
-          nextFiber.hasOwnProperty('treeBaseDuration');
-        if (isProfilingSupported) {
-          recordProfilingDurations(fiberInstance, prevFiber);
+          const isProfilingSupported =
+            nextFiber.hasOwnProperty('treeBaseDuration');
+          if (isProfilingSupported) {
+            recordProfilingDurations(fiberInstance, prevFiber);
+          }
         }
       }
       if (shouldResetChildren) {
         // We need to crawl the subtree for closest non-filtered Fibers
         // so that we can display them in a flat children set.
-        if (fiberInstance !== null) {
+        if (fiberInstance !== null && fiberInstance.kind === FIBER_INSTANCE) {
           recordResetChildren(fiberInstance);
           // We've handled the child order change for this Fiber.
           // Since it's included, there's no need to invalidate parent child order.
