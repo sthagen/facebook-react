@@ -104,6 +104,7 @@ import {
   MEMO_NUMBER,
   MEMO_SYMBOL_STRING,
   SERVER_CONTEXT_SYMBOL_STRING,
+  LAZY_SYMBOL_STRING,
 } from '../shared/ReactSymbols';
 import {enableStyleXFeatures} from 'react-devtools-feature-flags';
 
@@ -2369,6 +2370,15 @@ export function attach(
       const keyString = key === null ? null : String(key);
       const keyStringID = getStringID(keyString);
 
+      const nameProp =
+        fiber.tag === SuspenseComponent
+          ? fiber.memoizedProps.name
+          : fiber.tag === ActivityComponent
+            ? fiber.memoizedProps.name
+            : null;
+      const namePropString = nameProp == null ? null : String(nameProp);
+      const namePropStringID = getStringID(namePropString);
+
       pushOperation(TREE_OPERATION_ADD);
       pushOperation(id);
       pushOperation(elementType);
@@ -2376,6 +2386,7 @@ export function attach(
       pushOperation(ownerID);
       pushOperation(displayNameStringID);
       pushOperation(keyStringID);
+      pushOperation(namePropStringID);
 
       // If this subtree has a new mode, let the frontend know.
       if ((fiber.mode & StrictModeBits) !== 0) {
@@ -2478,6 +2489,7 @@ export function attach(
     // in such a way as to bypass the default stringification of the "key" property.
     const keyString = key === null ? null : String(key);
     const keyStringID = getStringID(keyString);
+    const namePropStringID = getStringID(null);
 
     const id = instance.id;
 
@@ -2488,6 +2500,7 @@ export function attach(
     pushOperation(ownerID);
     pushOperation(displayNameStringID);
     pushOperation(keyStringID);
+    pushOperation(namePropStringID);
 
     const componentLogsEntry =
       componentInfoToComponentLogsMap.get(componentInfo);
@@ -3149,6 +3162,25 @@ export function attach(
     return null;
   }
 
+  function trackDebugInfoFromLazyType(fiber: Fiber): void {
+    // The debugInfo from a Lazy isn't propagated onto _debugInfo of the parent Fiber the way
+    // it is when used in child position. So we need to pick it up explicitly.
+    const type = fiber.elementType;
+    const typeSymbol = getTypeSymbol(type); // The elementType might be have been a LazyComponent.
+    if (typeSymbol === LAZY_SYMBOL_STRING) {
+      const debugInfo: ?ReactDebugInfo = type._debugInfo;
+      if (debugInfo) {
+        for (let i = 0; i < debugInfo.length; i++) {
+          const debugEntry = debugInfo[i];
+          if (debugEntry.awaited) {
+            const asyncInfo: ReactAsyncInfo = (debugEntry: any);
+            insertSuspendedBy(asyncInfo);
+          }
+        }
+      }
+    }
+  }
+
   function mountVirtualChildrenRecursively(
     firstChild: Fiber,
     lastChild: null | Fiber, // non-inclusive
@@ -3366,6 +3398,8 @@ export function attach(
         // We intentionally do not re-enable the traceNearestHostComponentUpdate flag in this branch,
         // because we don't want to highlight every host node inside of a newly mounted subtree.
       }
+
+      trackDebugInfoFromLazyType(fiber);
 
       if (fiber.tag === HostHoistable) {
         const nearestInstance = reconcilingParent;
@@ -4162,7 +4196,7 @@ export function attach(
     const stashedSuspenseParent = reconcilingParentSuspenseNode;
     const stashedSuspensePrevious = previouslyReconciledSiblingSuspenseNode;
     const stashedSuspenseRemaining = remainingReconcilingChildrenSuspenseNodes;
-    let shouldPopSuspenseNode = false;
+    let shouldMeasureSuspenseNode = false;
     let previousSuspendedBy = null;
     if (fiberInstance !== null) {
       previousSuspendedBy = fiberInstance.suspendedBy;
@@ -4192,10 +4226,12 @@ export function attach(
         previouslyReconciledSiblingSuspenseNode = null;
         remainingReconcilingChildrenSuspenseNodes = suspenseNode.firstChild;
         suspenseNode.firstChild = null;
-        shouldPopSuspenseNode = true;
+        shouldMeasureSuspenseNode = true;
       }
     }
     try {
+      trackDebugInfoFromLazyType(nextFiber);
+
       if (
         nextFiber.tag === HostHoistable &&
         prevFiber.memoizedState !== nextFiber.memoizedState
@@ -4379,38 +4415,40 @@ export function attach(
           0,
         );
 
-        // Next, we'll pop back out of the SuspenseNode that we added above and now we'll
-        // reconcile the fallback, reconciling anything by inserting into the parent SuspenseNode.
-        // Since the fallback conceptually blocks the parent.
-        reconcilingParentSuspenseNode = stashedSuspenseParent;
-        previouslyReconciledSiblingSuspenseNode = stashedSuspensePrevious;
-        remainingReconcilingChildrenSuspenseNodes = stashedSuspenseRemaining;
-        shouldPopSuspenseNode = false;
+        shouldMeasureSuspenseNode = false;
         if (nextFallbackFiber !== null) {
-          updateFlags |= updateVirtualChildrenRecursively(
-            nextFallbackFiber,
-            null,
-            prevFallbackFiber,
-            traceNearestHostComponentUpdate,
-            0,
-          );
-        } else if (
-          nextFiber.memoizedState === null &&
-          fiberInstance.suspenseNode !== null
-        ) {
-          if (!isInDisconnectedSubtree) {
-            // Measure this Suspense node in case it changed. We don't update the rect while
-            // we're inside a disconnected subtree nor if we are the Suspense boundary that
-            // is suspended. This lets us keep the rectangle of the displayed content while
-            // we're suspended to visualize the resulting state.
-            const suspenseNode = fiberInstance.suspenseNode;
-            const prevRects = suspenseNode.rects;
-            const nextRects = measureInstance(fiberInstance);
-            if (!areEqualRects(prevRects, nextRects)) {
-              suspenseNode.rects = nextRects;
-              recordSuspenseResize(suspenseNode);
-            }
+          const fallbackStashedSuspenseParent = reconcilingParentSuspenseNode;
+          const fallbackStashedSuspensePrevious =
+            previouslyReconciledSiblingSuspenseNode;
+          const fallbackStashedSuspenseRemaining =
+            remainingReconcilingChildrenSuspenseNodes;
+          // Next, we'll pop back out of the SuspenseNode that we added above and now we'll
+          // reconcile the fallback, reconciling anything by inserting into the parent SuspenseNode.
+          // Since the fallback conceptually blocks the parent.
+          reconcilingParentSuspenseNode = stashedSuspenseParent;
+          previouslyReconciledSiblingSuspenseNode = stashedSuspensePrevious;
+          remainingReconcilingChildrenSuspenseNodes = stashedSuspenseRemaining;
+          try {
+            updateFlags |= updateVirtualChildrenRecursively(
+              nextFallbackFiber,
+              null,
+              prevFallbackFiber,
+              traceNearestHostComponentUpdate,
+              0,
+            );
+          } finally {
+            reconcilingParentSuspenseNode = fallbackStashedSuspenseParent;
+            previouslyReconciledSiblingSuspenseNode =
+              fallbackStashedSuspensePrevious;
+            remainingReconcilingChildrenSuspenseNodes =
+              fallbackStashedSuspenseRemaining;
           }
+        } else if (nextFiber.memoizedState === null) {
+          // Measure this Suspense node in case it changed. We don't update the rect while
+          // we're inside a disconnected subtree nor if we are the Suspense boundary that
+          // is suspended. This lets us keep the rectangle of the displayed content while
+          // we're suspended to visualize the resulting state.
+          shouldMeasureSuspenseNode = !isInDisconnectedSubtree;
         }
       } else {
         // Common case: Primary -> Primary.
@@ -4519,7 +4557,7 @@ export function attach(
         reconcilingParent = stashedParent;
         previouslyReconciledSibling = stashedPrevious;
         remainingReconcilingChildren = stashedRemaining;
-        if (shouldPopSuspenseNode) {
+        if (shouldMeasureSuspenseNode) {
           if (
             !isInDisconnectedSubtree &&
             reconcilingParentSuspenseNode !== null
@@ -4535,6 +4573,8 @@ export function attach(
               recordSuspenseResize(suspenseNode);
             }
           }
+        }
+        if (fiberInstance.suspenseNode !== null) {
           reconcilingParentSuspenseNode = stashedSuspenseParent;
           previouslyReconciledSiblingSuspenseNode = stashedSuspensePrevious;
           remainingReconcilingChildrenSuspenseNodes = stashedSuspenseRemaining;
@@ -4987,6 +5027,10 @@ export function attach(
         id: instance.id,
         key: fiber.key,
         env: null,
+        stack:
+          fiber._debugOwner == null || fiber._debugStack == null
+            ? null
+            : parseStackTrace(fiber._debugStack, 1),
         type: getElementTypeForFiber(fiber),
       };
     } else {
@@ -4996,6 +5040,10 @@ export function attach(
         id: instance.id,
         key: componentInfo.key == null ? null : componentInfo.key,
         env: componentInfo.env == null ? null : componentInfo.env,
+        stack:
+          componentInfo.owner == null || componentInfo.debugStack == null
+            ? null
+            : parseStackTrace(componentInfo.debugStack, 1),
         type: ElementTypeVirtual,
       };
     }
@@ -5594,6 +5642,11 @@ export function attach(
 
       source,
 
+      stack:
+        fiber._debugOwner == null || fiber._debugStack == null
+          ? null
+          : parseStackTrace(fiber._debugStack, 1),
+
       // Does the component have legacy context attached to it.
       hasLegacyContext,
 
@@ -5693,6 +5746,11 @@ export function attach(
       canToggleSuspense: supportsTogglingSuspense && hasSuspenseBoundary,
 
       source,
+
+      stack:
+        componentInfo.owner == null || componentInfo.debugStack == null
+          ? null
+          : parseStackTrace(componentInfo.debugStack, 1),
 
       // Does the component have legacy context attached to it.
       hasLegacyContext: false,
