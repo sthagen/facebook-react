@@ -4310,7 +4310,9 @@ export function attach(
         virtualLevel + 1,
       );
       if ((updateFlags & ShouldResetChildren) !== NoUpdate) {
-        recordResetChildren(virtualInstance);
+        if (!isInDisconnectedSubtree) {
+          recordResetChildren(virtualInstance);
+        }
         updateFlags &= ~ShouldResetChildren;
       }
       removePreviousSuspendedBy(
@@ -5097,7 +5099,9 @@ export function attach(
         // We need to crawl the subtree for closest non-filtered Fibers
         // so that we can display them in a flat children set.
         if (fiberInstance !== null && fiberInstance.kind === FIBER_INSTANCE) {
-          recordResetChildren(fiberInstance);
+          if (!nextIsHidden && !isInDisconnectedSubtree) {
+            recordResetChildren(fiberInstance);
+          }
 
           // We've handled the child order change for this Fiber.
           // Since it's included, there's no need to invalidate parent child order.
@@ -5318,12 +5322,12 @@ export function attach(
     root: FiberRoot,
     priorityLevel: void | number,
   ) {
-    const current = root.current;
+    const nextFiber = root.current;
 
     let prevFiber: null | Fiber = null;
     let rootInstance = rootToFiberInstanceMap.get(root);
     if (!rootInstance) {
-      rootInstance = createFiberInstance(current);
+      rootInstance = createFiberInstance(nextFiber);
       rootToFiberInstanceMap.set(root, rootInstance);
       idToDevToolsInstanceMap.set(rootInstance.id, rootInstance);
     } else {
@@ -5362,30 +5366,25 @@ export function attach(
       };
     }
 
-    if (prevFiber !== null) {
-      // TODO: relying on this seems a bit fishy.
-      const wasMounted =
-        prevFiber.memoizedState != null &&
-        prevFiber.memoizedState.element != null;
-      const isMounted =
-        current.memoizedState != null && current.memoizedState.element != null;
-      if (!wasMounted && isMounted) {
-        // Mount a new root.
-        setRootPseudoKey(currentRoot.id, current);
-        mountFiberRecursively(current, false);
-      } else if (wasMounted && isMounted) {
-        // Update an existing root.
-        updateFiberRecursively(rootInstance, current, prevFiber, false);
-      } else if (wasMounted && !isMounted) {
-        // Unmount an existing root.
-        unmountInstanceRecursively(rootInstance);
-        removeRootPseudoKey(currentRoot.id);
-        rootToFiberInstanceMap.delete(root);
-      }
-    } else {
+    const nextIsMounted = nextFiber.child !== null;
+    const prevWasMounted = prevFiber !== null && prevFiber.child !== null;
+    if (!prevWasMounted && nextIsMounted) {
       // Mount a new root.
-      setRootPseudoKey(currentRoot.id, current);
-      mountFiberRecursively(current, false);
+      setRootPseudoKey(currentRoot.id, nextFiber);
+      mountFiberRecursively(nextFiber, false);
+    } else if (prevWasMounted && nextIsMounted) {
+      if (prevFiber === null) {
+        throw new Error(
+          'Expected a previous Fiber when updating an existing root.',
+        );
+      }
+      // Update an existing root.
+      updateFiberRecursively(rootInstance, nextFiber, prevFiber, false);
+    } else if (prevWasMounted && !nextIsMounted) {
+      // Unmount an existing root.
+      unmountInstanceRecursively(rootInstance);
+      removeRootPseudoKey(currentRoot.id);
+      rootToFiberInstanceMap.delete(root);
     }
 
     if (isProfiling && isProfilingSupported) {
