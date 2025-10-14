@@ -2325,9 +2325,15 @@ function visitAsyncNode(
     return null;
   }
   visited.add(node);
+  if (node.end >= 0 && node.end <= request.timeOrigin) {
+    // This was already resolved when we started this render. It must have been either something
+    // that's part of a start up sequence or externally cached data. We exclude that information.
+    // The technique for debugging the effects of uncached data on the render is to simply uncache it.
+    return null;
+  }
   let previousIONode = null;
   // First visit anything that blocked this sequence to start in the first place.
-  if (node.previous !== null && node.end > request.timeOrigin) {
+  if (node.previous !== null) {
     previousIONode = visitAsyncNode(
       request,
       task,
@@ -2349,12 +2355,6 @@ function visitAsyncNode(
       return previousIONode;
     }
     case PROMISE_NODE: {
-      if (node.end <= request.timeOrigin) {
-        // This was already resolved when we started this render. It must have been either something
-        // that's part of a start up sequence or externally cached data. We exclude that information.
-        // The technique for debugging the effects of uncached data on the render is to simply uncache it.
-        return previousIONode;
-      }
       const awaited = node.awaited;
       let match: void | null | PromiseNode | IONode = previousIONode;
       const promise = node.promise.deref();
@@ -2437,11 +2437,7 @@ function visitAsyncNode(
         } else if (ioNode !== null) {
           const startTime: number = node.start;
           const endTime: number = node.end;
-          if (endTime <= request.timeOrigin) {
-            // This was already resolved when we started this render. It must have been either something
-            // that's part of a start up sequence or externally cached data. We exclude that information.
-            return null;
-          } else if (startTime < cutOff) {
+          if (startTime < cutOff) {
             // We started awaiting this node before we started rendering this sequence.
             // This means that this particular await was never part of the current sequence.
             // If we have another await higher up in the chain it might have a more actionable stack
@@ -4493,6 +4489,12 @@ function outlineIOInfo(request: Request, ioInfo: ReactIOInfo): void {
   } else {
     debugStack = ioInfo.stack;
   }
+  let env = ioInfo.env;
+  if (env == null) {
+    // If we're forwarding IO info from this environment, an empty env is effectively the "client" side.
+    // The "client" from the perspective of our client will be this current environment.
+    env = (0, request.environmentName)();
+  }
   emitIOInfoChunk(
     request,
     id,
@@ -4500,7 +4502,7 @@ function outlineIOInfo(request: Request, ioInfo: ReactIOInfo): void {
     ioInfo.start,
     ioInfo.end,
     ioInfo.value,
-    ioInfo.env,
+    env,
     owner,
     debugStack,
   );
@@ -5388,6 +5390,11 @@ function forwardDebugInfo(
           if (info.env != null) {
             // $FlowFixMe[cannot-write]
             debugAsyncInfo.env = info.env;
+          } else {
+            // If we're forwarding IO info from this environment, an empty env is effectively the "client" side.
+            // The "client" from the perspective of our client will be this current environment.
+            // $FlowFixMe[cannot-write]
+            debugAsyncInfo.env = (0, request.environmentName)();
           }
           if (info.owner != null) {
             // $FlowFixMe[cannot-write]
