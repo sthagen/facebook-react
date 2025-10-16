@@ -14,6 +14,7 @@ import {
   useLayoutEffect,
   useReducer,
   useRef,
+  Fragment,
 } from 'react';
 
 import {
@@ -21,6 +22,7 @@ import {
   localStorageSetItem,
 } from 'react-devtools-shared/src/storage';
 import ButtonIcon, {type IconType} from '../ButtonIcon';
+import InspectHostNodesToggle from '../Components/InspectHostNodesToggle';
 import InspectedElementErrorBoundary from '../Components/InspectedElementErrorBoundary';
 import InspectedElement from '../Components/InspectedElement';
 import portaledContent from '../portaledContent';
@@ -85,7 +87,9 @@ function ToggleUniqueSuspenders() {
     <Toggle
       isChecked={uniqueSuspendersOnly}
       onChange={handleToggleUniqueSuspenders}
-      title={'Only include boundaries with unique suspenders'}>
+      title={
+        'Filter Suspense which does not suspend, or if the parent also suspend on the same.'
+      }>
       <ButtonIcon type={uniqueSuspendersOnly ? 'filter-on' : 'filter-off'} />
     </Toggle>
   );
@@ -154,6 +158,7 @@ function ToggleInspectedElement({
 }
 
 function SuspenseTab(_: {}) {
+  const store = useContext(StoreContext);
   const {hideSettings} = useContext(OptionsContext);
   const [state, dispatch] = useReducer<LayoutState, null, LayoutAction>(
     layoutReducer,
@@ -364,6 +369,12 @@ function SuspenseTab(_: {}) {
                 <div />
               ) : (
                 <ToggleTreeList dispatch={dispatch} state={state} />
+              )}
+              {store.supportsClickToInspect && (
+                <Fragment>
+                  <InspectHostNodesToggle onlySuspenseNodes={true} />
+                  <div className={styles.VRule} />
+                </Fragment>
               )}
               <div className={styles.SuspenseBreadcrumbs}>
                 <SuspenseBreadcrumbs />

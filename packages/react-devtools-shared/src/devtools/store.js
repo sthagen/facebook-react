@@ -1552,7 +1552,8 @@ export default class Store extends EventEmitter<{
           const id = operations[i + 1];
           const parentID = operations[i + 2];
           const nameStringID = operations[i + 3];
-          const numRects = ((operations[i + 4]: any): number);
+          const isSuspended = operations[i + 4] === 1;
+          const numRects = ((operations[i + 5]: any): number);
           let name = stringTable[nameStringID];
 
           if (this._idToSuspense.has(id)) {
@@ -1579,17 +1580,17 @@ export default class Store extends EventEmitter<{
             }
           }
 
-          i += 5;
+          i += 6;
           let rects: SuspenseNode['rects'];
           if (numRects === -1) {
             rects = null;
           } else {
             rects = [];
             for (let rectIndex = 0; rectIndex < numRects; rectIndex++) {
-              const x = operations[i + 0];
-              const y = operations[i + 1];
-              const width = operations[i + 2];
-              const height = operations[i + 3];
+              const x = operations[i + 0] / 1000;
+              const y = operations[i + 1] / 1000;
+              const width = operations[i + 2] / 1000;
+              const height = operations[i + 3] / 1000;
               rects.push({x, y, width, height});
               i += 4;
             }
@@ -1625,6 +1626,7 @@ export default class Store extends EventEmitter<{
             name,
             rects,
             hasUniqueSuspenders: false,
+            isSuspended: isSuspended,
           });
 
           hasSuspenseTreeChanged = true;
@@ -1761,10 +1763,10 @@ export default class Store extends EventEmitter<{
           } else {
             nextRects = [];
             for (let rectIndex = 0; rectIndex < numRects; rectIndex++) {
-              const x = operations[i + 0];
-              const y = operations[i + 1];
-              const width = operations[i + 2];
-              const height = operations[i + 3];
+              const x = operations[i + 0] / 1000;
+              const y = operations[i + 1] / 1000;
+              const width = operations[i + 2] / 1000;
+              const height = operations[i + 3] / 1000;
 
               nextRects.push({x, y, width, height});
 
@@ -1801,6 +1803,7 @@ export default class Store extends EventEmitter<{
           for (let changeIndex = 0; changeIndex < changeLength; changeIndex++) {
             const id = operations[i++];
             const hasUniqueSuspenders = operations[i++] === 1;
+            const isSuspended = operations[i++] === 1;
             const environmentNamesLength = operations[i++];
             const environmentNames = [];
             for (
@@ -1832,6 +1835,7 @@ export default class Store extends EventEmitter<{
             }
 
             suspense.hasUniqueSuspenders = hasUniqueSuspenders;
+            suspense.isSuspended = isSuspended;
             // TODO: Recompute the environment names.
           }
 
