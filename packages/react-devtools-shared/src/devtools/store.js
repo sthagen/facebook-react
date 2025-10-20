@@ -34,6 +34,7 @@ import {
   shallowDiffers,
   utfDecodeStringWithRanges,
   parseElementDisplayNameFromBackend,
+  unionOfTwoArrays,
 } from '../utils';
 import {localStorageGetItem, localStorageSetItem} from '../storage';
 import {__DEBUG__} from '../constants';
@@ -51,6 +52,7 @@ import type {
   ComponentFilter,
   ElementType,
   SuspenseNode,
+  SuspenseTimelineStep,
   Rect,
 } from 'react-devtools-shared/src/frontend/types';
 import type {
@@ -59,6 +61,31 @@ import type {
 } from 'react-devtools-shared/src/bridge';
 import UnsupportedBridgeOperationError from 'react-devtools-shared/src/UnsupportedBridgeOperationError';
 import type {DevToolsHookSettings} from '../backend/types';
+
+import RBush from 'rbush';
+
+// Custom version which works with our Rect data structure.
+class RectRBush extends RBush<Rect> {
+  toBBox(rect: Rect): {
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  } {
+    return {
+      minX: rect.x,
+      minY: rect.y,
+      maxX: rect.x + rect.width,
+      maxY: rect.y + rect.height,
+    };
+  }
+  compareMinX(a: Rect, b: Rect): number {
+    return a.x - b.x;
+  }
+  compareMinY(a: Rect, b: Rect): number {
+    return a.y - b.y;
+  }
+}
 
 const debug = (methodName: string, ...args: Array<string>) => {
   if (__DEBUG__) {
@@ -191,6 +218,9 @@ export default class Store extends EventEmitter<{
 
   // Renderer ID is needed to support inspection fiber props, state, and hooks.
   _rootIDToRendererID: Map<Element['id'], number> = new Map();
+
+  // Stores all the SuspenseNode rects in an R-tree to make it fast to find overlaps.
+  _rtree: RBush<Rect> = new RectRBush();
 
   // These options may be initially set by a configuration option when constructing the Store.
   _supportsInspectMatchingDOMElement: boolean = false;
@@ -895,13 +925,10 @@ export default class Store extends EventEmitter<{
    */
   getSuspendableDocumentOrderSuspense(
     uniqueSuspendersOnly: boolean,
-  ): $ReadOnlyArray<SuspenseNode['id']> {
+  ): $ReadOnlyArray<SuspenseTimelineStep> {
+    const target: Array<SuspenseTimelineStep> = [];
     const roots = this.roots;
-    if (roots.length === 0) {
-      return [];
-    }
-
-    const list: SuspenseNode['id'][] = [];
+    let rootStep: null | SuspenseTimelineStep = null;
     for (let i = 0; i < roots.length; i++) {
       const rootID = roots[i];
       const root = this.getElementByID(rootID);
@@ -912,44 +939,76 @@ export default class Store extends EventEmitter<{
 
       const suspense = this.getSuspenseByID(rootID);
       if (suspense !== null) {
-        if (list.length === 0) {
-          // start with an arbitrary root that will allow inspection of the Screen
-          list.push(suspense.id);
+        const environments = suspense.environments;
+        const environmentName =
+          environments.length > 0
+            ? environments[environments.length - 1]
+            : null;
+        if (rootStep === null) {
+          // Arbitrarily use the first root as the root step id.
+          rootStep = {
+            id: suspense.id,
+            environment: environmentName,
+          };
+          target.push(rootStep);
+        } else if (rootStep.environment === null) {
+          // If any root has an environment name, then let's use it.
+          rootStep.environment = environmentName;
         }
-
-        const stack = [suspense];
-        while (stack.length > 0) {
-          const current = stack.pop();
-          if (current === undefined) {
-            continue;
-          }
-          // Ignore any suspense boundaries that has no visual representation as this is not
-          // part of the visible loading sequence.
-          // TODO: Consider making visible meta data and other side-effects get virtual rects.
-          const hasRects =
-            current.rects !== null &&
-            current.rects.length > 0 &&
-            current.rects.some(isNonZeroRect);
-          if (
-            hasRects &&
-            (!uniqueSuspendersOnly || current.hasUniqueSuspenders) &&
-            // Roots are already included as part of the Screen
-            current.id !== rootID
-          ) {
-            list.push(current.id);
-          }
-          // Add children in reverse order to maintain document order
-          for (let j = current.children.length - 1; j >= 0; j--) {
-            const childSuspense = this.getSuspenseByID(current.children[j]);
-            if (childSuspense !== null) {
-              stack.push(childSuspense);
-            }
-          }
-        }
+        this.pushTimelineStepsInDocumentOrder(
+          suspense.children,
+          target,
+          uniqueSuspendersOnly,
+          environments,
+        );
       }
     }
 
-    return list;
+    return target;
+  }
+
+  pushTimelineStepsInDocumentOrder(
+    children: Array<SuspenseNode['id']>,
+    target: Array<SuspenseTimelineStep>,
+    uniqueSuspendersOnly: boolean,
+    parentEnvironments: Array<string>,
+  ): void {
+    for (let i = 0; i < children.length; i++) {
+      const child = this.getSuspenseByID(children[i]);
+      if (child === null) {
+        continue;
+      }
+      // Ignore any suspense boundaries that has no visual representation as this is not
+      // part of the visible loading sequence.
+      // TODO: Consider making visible meta data and other side-effects get virtual rects.
+      const hasRects =
+        child.rects !== null &&
+        child.rects.length > 0 &&
+        child.rects.some(isNonZeroRect);
+      const childEnvironments = child.environments;
+      // Since children are blocked on the parent, they're also blocked by the parent environments.
+      // Only if we discover a novel environment do we add that and it becomes the name we use.
+      const unionEnvironments = unionOfTwoArrays(
+        parentEnvironments,
+        childEnvironments,
+      );
+      const environmentName =
+        unionEnvironments.length > 0
+          ? unionEnvironments[unionEnvironments.length - 1]
+          : null;
+      if (hasRects && (!uniqueSuspendersOnly || child.hasUniqueSuspenders)) {
+        target.push({
+          id: child.id,
+          environment: environmentName,
+        });
+      }
+      this.pushTimelineStepsInDocumentOrder(
+        child.children,
+        target,
+        uniqueSuspendersOnly,
+        unionEnvironments,
+      );
+    }
   }
 
   getRendererIDForElement(id: number): number | null {
@@ -1591,7 +1650,12 @@ export default class Store extends EventEmitter<{
               const y = operations[i + 1] / 1000;
               const width = operations[i + 2] / 1000;
               const height = operations[i + 3] / 1000;
-              rects.push({x, y, width, height});
+              const rect = {x, y, width, height};
+              if (parentID !== 0) {
+                // Track all rects except the root.
+                this._rtree.insert(rect);
+              }
+              rects.push(rect);
               i += 4;
             }
           }
@@ -1615,10 +1679,6 @@ export default class Store extends EventEmitter<{
             parentSuspense.children.push(id);
           }
 
-          if (name === null) {
-            name = 'Unknown';
-          }
-
           this._idToSuspense.set(id, {
             id,
             parentID,
@@ -1627,6 +1687,7 @@ export default class Store extends EventEmitter<{
             rects,
             hasUniqueSuspenders: false,
             isSuspended: isSuspended,
+            environments: [],
           });
 
           hasSuspenseTreeChanged = true;
@@ -1652,11 +1713,18 @@ export default class Store extends EventEmitter<{
 
             i += 1;
 
-            const {children, parentID} = suspense;
+            const {children, parentID, rects} = suspense;
             if (children.length > 0) {
               this._throwAndEmitError(
                 Error(`Suspense node "${id}" was removed before its children.`),
               );
+            }
+
+            if (rects !== null && parentID !== 0) {
+              // Delete all the existing rects from the R-tree
+              for (let j = 0; j < rects.length; j++) {
+                this._rtree.remove(rects[j]);
+              }
             }
 
             this._idToSuspense.delete(id);
@@ -1757,6 +1825,14 @@ export default class Store extends EventEmitter<{
             break;
           }
 
+          const prevRects = suspense.rects;
+          if (prevRects !== null && suspense.parentID !== 0) {
+            // Delete all the existing rects from the R-tree
+            for (let j = 0; j < prevRects.length; j++) {
+              this._rtree.remove(prevRects[j]);
+            }
+          }
+
           let nextRects: SuspenseNode['rects'];
           if (numRects === -1) {
             nextRects = null;
@@ -1768,7 +1844,12 @@ export default class Store extends EventEmitter<{
               const width = operations[i + 2] / 1000;
               const height = operations[i + 3] / 1000;
 
-              nextRects.push({x, y, width, height});
+              const rect = {x, y, width, height};
+              if (suspense.parentID !== 0) {
+                // Track all rects except the root.
+                this._rtree.insert(rect);
+              }
+              nextRects.push(rect);
 
               i += 4;
             }
@@ -1812,7 +1893,10 @@ export default class Store extends EventEmitter<{
               envIndex++
             ) {
               const environmentNameStringID = operations[i++];
-              environmentNames.push(stringTable[environmentNameStringID]);
+              const environmentName = stringTable[environmentNameStringID];
+              if (environmentName != null) {
+                environmentNames.push(environmentName);
+              }
             }
             const suspense = this._idToSuspense.get(id);
 
@@ -1836,7 +1920,7 @@ export default class Store extends EventEmitter<{
 
             suspense.hasUniqueSuspenders = hasUniqueSuspenders;
             suspense.isSuspended = isSuspended;
-            // TODO: Recompute the environment names.
+            suspense.environments = environmentNames;
           }
 
           hasSuspenseTreeChanged = true;
@@ -2135,13 +2219,12 @@ export default class Store extends EventEmitter<{
     throw error;
   }
 
-  _guessSuspenseName(element: Element): string {
+  _guessSuspenseName(element: Element): string | null {
     const owner = this._idToElement.get(element.ownerID);
-    let name = 'Unknown';
     if (owner !== undefined && owner.displayName !== null) {
-      name = owner.displayName;
+      return owner.displayName;
     }
 
-    return name;
+    return null;
   }
 }

@@ -83,21 +83,11 @@ export type ExternalFunction = z.infer<typeof ExternalFunctionSchema>;
 export const USE_FIRE_FUNCTION_NAME = 'useFire';
 export const EMIT_FREEZE_GLOBAL_GATING = '__DEV__';
 
-export const MacroMethodSchema = z.union([
-  z.object({type: z.literal('wildcard')}),
-  z.object({type: z.literal('name'), name: z.string()}),
-]);
-
-// Would like to change this to drop the string option, but breaks compatibility with existing configs
-export const MacroSchema = z.union([
-  z.string(),
-  z.tuple([z.string(), z.array(MacroMethodSchema)]),
-]);
+export const MacroSchema = z.string();
 
 export type CompilerMode = 'all_features' | 'no_inferred_memo';
 
 export type Macro = z.infer<typeof MacroSchema>;
-export type MacroMethod = z.infer<typeof MacroMethodSchema>;
 
 const HookSchema = z.object({
   /*
@@ -659,7 +649,7 @@ export const EnvironmentConfigSchema = z.object({
    * Invalid:
    *   useMemo(() => { ... }, [...]);
    */
-  validateNoVoidUseMemo: z.boolean().default(false),
+  validateNoVoidUseMemo: z.boolean().default(true),
 
   /**
    * Validates that Components/Hooks are always defined at module level. This prevents scope
