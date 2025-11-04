@@ -16,6 +16,7 @@ export const enableProfilerTimer: boolean = __PROFILE__;
 export const enableProfilerCommitHooks: boolean = __PROFILE__;
 export const enableProfilerNestedUpdatePhase: boolean = __PROFILE__;
 export const enableComponentPerformanceTrack: boolean = true;
+export const enablePerformanceIssueReporting: boolean = false;
 export const enableUpdaterTracking: boolean = false;
 export const enableLegacyCache: boolean = __EXPERIMENTAL__;
 export const enableAsyncIterableChildren: boolean = false;
@@ -75,6 +76,7 @@ export const ownerStackLimit = 1e4;
 
 export const enableFragmentRefs: boolean = true;
 export const enableFragmentRefsScrollIntoView: boolean = true;
+export const enableFragmentRefsInstanceHandles: boolean = false;
 
 // TODO: This must be in sync with the main ReactFeatureFlags file because
 // the Test Renderer's value must be the same as the one used by the
