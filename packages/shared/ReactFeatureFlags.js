@@ -78,8 +78,6 @@ export const enableAsyncIterableChildren = __EXPERIMENTAL__;
 
 export const enableTaint = __EXPERIMENTAL__;
 
-export const enableHalt: boolean = true;
-
 export const enableViewTransition: boolean = true;
 
 export const enableGestureTransition = __EXPERIMENTAL__;
@@ -220,7 +218,7 @@ export const disableInputAttributeSyncing: boolean = false;
 export const disableTextareaChildren: boolean = false;
 
 // Disables children for <textarea> elements
-export const enableParallelTransitions: boolean = true;
+export const enableParallelTransitions: boolean = false;
 
 // -----------------------------------------------------------------------------
 // Debugging and DevTools
