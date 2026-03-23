@@ -65,7 +65,8 @@ export const enableEffectEventMutationPhase: boolean = false;
 export const enableYieldingBeforePassive: boolean = false;
 
 export const enableThrottledScheduling: boolean = false;
-export const enableViewTransition: boolean = false;
+export const enableViewTransition: boolean = true;
+export const enableViewTransitionForPersistenceMode: boolean = false;
 export const enableGestureTransition: boolean = false;
 export const enableScrollEndPolyfill: boolean = true;
 export const enableSuspenseyImages: boolean = false;
