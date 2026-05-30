@@ -88,6 +88,7 @@ import {
   hoistHoistables,
   createHoistableState,
   createPreambleState,
+  isWorkLoopExternallyDriven,
   supportsRequestStorage,
   requestStorage,
   pushFormStateMarkerIsMatching,
@@ -527,7 +528,7 @@ function RequestInstance(
     progressiveChunkSize === undefined
       ? DEFAULT_PROGRESSIVE_CHUNK_SIZE
       : progressiveChunkSize;
-  this.status = OPENING;
+  this.status = isWorkLoopExternallyDriven ? OPEN : OPENING;
   this.fatalError = null;
   this.nextSegmentId = 0;
   this.allPendingTasks = 0;
@@ -790,12 +791,16 @@ export function resolveRequest(): null | Request {
 function pingTask(request: Request, task: Task): void {
   const pingedTasks = request.pingedTasks;
   pingedTasks.push(task);
-  if (request.pingedTasks.length === 1) {
-    request.flushScheduled = request.destination !== null;
-    if (request.trackedPostpones !== null || request.status === OPENING) {
-      scheduleMicrotask(() => performWork(request));
-    } else {
-      scheduleWork(() => performWork(request));
+  if (isWorkLoopExternallyDriven) {
+    return;
+  } else {
+    if (request.pingedTasks.length === 1) {
+      request.flushScheduled = request.destination !== null;
+      if (request.trackedPostpones !== null || request.status === OPENING) {
+        scheduleMicrotask(() => performWork(request));
+      } else {
+        scheduleWork(() => performWork(request));
+      }
     }
   }
 }
@@ -4643,50 +4648,51 @@ function abortTask(task: Task, request: Request, error: mixed): void {
   }
 
   if (boundary === null) {
-    if (request.status !== CLOSING && request.status !== CLOSED) {
-      const replay: null | ReplaySet = task.replay;
-      if (replay === null) {
-        // We didn't complete the root so we have nothing to show. We can close
-        // the request;
-        if (request.trackedPostpones !== null && segment !== null) {
-          const trackedPostpones = request.trackedPostpones;
-          // We are aborting a prerender and must treat the shell as halted
-          // We log the error but we still resolve the prerender
-          logRecoverableError(request, error, errorInfo, task.debugTask);
-          trackPostpone(request, trackedPostpones, task, segment);
-          finishedTask(request, null, task.row, segment);
-        } else {
-          logRecoverableError(request, error, errorInfo, task.debugTask);
+    const replay: null | ReplaySet = task.replay;
+    if (replay === null) {
+      // We didn't complete the root so we have nothing to show. We can close
+      // the request;
+      if (request.trackedPostpones !== null && segment !== null) {
+        const trackedPostpones = request.trackedPostpones;
+        // We are aborting a prerender and must treat the shell as halted
+        // We log the error but we still resolve the prerender
+        logRecoverableError(request, error, errorInfo, task.debugTask);
+        trackPostpone(request, trackedPostpones, task, segment);
+        finishedTask(request, null, task.row, segment);
+      } else {
+        logRecoverableError(request, error, errorInfo, task.debugTask);
+        if (request.status !== CLOSING && request.status !== CLOSED) {
           fatalError(request, error, errorInfo, task.debugTask);
         }
-        return;
-      } else {
-        // If the shell aborts during a replay, that's not a fatal error. Instead
-        // we should be able to recover by client rendering all the root boundaries in
-        // the ReplaySet.
-        replay.pendingTasks--;
-        if (replay.pendingTasks === 0 && replay.nodes.length > 0) {
-          const errorDigest = logRecoverableError(
-            request,
-            error,
-            errorInfo,
-            null,
-          );
-          abortRemainingReplayNodes(
-            request,
-            null,
-            replay.nodes,
-            replay.slots,
-            error,
-            errorDigest,
-            errorInfo,
-            true,
-          );
-        }
-        request.pendingRootTasks--;
-        if (request.pendingRootTasks === 0) {
-          completeShell(request);
-        }
+      }
+      return;
+    }
+    if (request.status !== CLOSING && request.status !== CLOSED) {
+      // If the shell aborts during a replay, that's not a fatal error. Instead
+      // we should be able to recover by client rendering all the root boundaries in
+      // the ReplaySet.
+      replay.pendingTasks--;
+      if (replay.pendingTasks === 0 && replay.nodes.length > 0) {
+        const errorDigest = logRecoverableError(
+          request,
+          error,
+          errorInfo,
+          null,
+        );
+        abortRemainingReplayNodes(
+          request,
+          null,
+          replay.nodes,
+          replay.slots,
+          error,
+          errorDigest,
+          errorInfo,
+          true,
+        );
+      }
+      request.pendingRootTasks--;
+      if (request.pendingRootTasks === 0) {
+        completeShell(request);
       }
     }
   } else {
@@ -6029,39 +6035,45 @@ function flushCompletedQueues(
 }
 
 export function startWork(request: Request): void {
-  request.flushScheduled = request.destination !== null;
-  // When prerendering we use microtasks for pinging work
-  if (supportsRequestStorage) {
-    scheduleMicrotask(() => requestStorage.run(request, performWork, request));
+  if (isWorkLoopExternallyDriven) {
+    return;
   } else {
-    scheduleMicrotask(() => performWork(request));
-  }
-  scheduleWork(() => {
-    if (request.status === OPENING) {
-      request.status = OPEN;
+    request.flushScheduled = request.destination !== null;
+    // When prerendering we use microtasks for pinging work
+    if (supportsRequestStorage) {
+      scheduleMicrotask(() =>
+        requestStorage.run(request, performWork, request),
+      );
+    } else {
+      scheduleMicrotask(() => performWork(request));
     }
-
-    if (request.trackedPostpones === null) {
-      // this is either a regular render or a resume. For regular render we want
-      // to call emitEarlyPreloads after the first performWork because we want
-      // are responding to a live request and need to balance sending something early
-      // (i.e. don't want for the shell to finish) but we need something to send.
-      // The only implementation of this is for DOM at the moment and during resumes nothing
-      // actually emits but the code paths here are the same.
-      // During a prerender we don't want to be too aggressive in emitting early preloads
-      // because we aren't responding to a live request and we can wait for the prerender to
-      // postpone before we emit anything.
-      if (supportsRequestStorage) {
-        requestStorage.run(
-          request,
-          enqueueEarlyPreloadsAfterInitialWork,
-          request,
-        );
-      } else {
-        enqueueEarlyPreloadsAfterInitialWork(request);
+    scheduleWork(() => {
+      if (request.status === OPENING) {
+        request.status = OPEN;
       }
-    }
-  });
+
+      if (request.trackedPostpones === null) {
+        // this is either a regular render or a resume. For regular render we want
+        // to call emitEarlyPreloads after the first performWork because we want
+        // are responding to a live request and need to balance sending something early
+        // (i.e. don't want for the shell to finish) but we need something to send.
+        // The only implementation of this is for DOM at the moment and during resumes nothing
+        // actually emits but the code paths here are the same.
+        // During a prerender we don't want to be too aggressive in emitting early preloads
+        // because we aren't responding to a live request and we can wait for the prerender to
+        // postpone before we emit anything.
+        if (supportsRequestStorage) {
+          requestStorage.run(
+            request,
+            enqueueEarlyPreloadsAfterInitialWork,
+            request,
+          );
+        } else {
+          enqueueEarlyPreloadsAfterInitialWork(request);
+        }
+      }
+    });
+  }
 }
 
 function enqueueEarlyPreloadsAfterInitialWork(request: Request) {
@@ -6143,9 +6155,12 @@ export function stopFlowing(request: Request): void {
 
 // This is called to early terminate a request. It puts all pending boundaries in client rendered state.
 export function abort(request: Request, reason: mixed): void {
-  if (request.status === OPEN || request.status === OPENING) {
-    request.status = ABORTING;
+  if (request.status !== OPEN && request.status !== OPENING) {
+    // Only requests that are not already complete or in the process of aborting
+    // can be aborted. in practice this makes abort callable at most once per render.
+    return;
   }
+  request.status = ABORTING;
 
   try {
     const abortableTasks = request.abortableTasks;
