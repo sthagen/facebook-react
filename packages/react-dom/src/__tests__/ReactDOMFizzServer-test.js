@@ -7063,7 +7063,7 @@ describe('ReactDOMFizzServer', () => {
     );
   });
 
-  it('currently does not report an in-flight root task after another root task fatals while aborting', async () => {
+  it('reports an in-flight root task after another root task fatals while aborting', async () => {
     const promise = new Promise(() => {});
     function SuspendedRoot() {
       use(promise);
@@ -7097,10 +7097,10 @@ describe('ReactDOMFizzServer', () => {
       abortRef.current = abort;
     });
 
-    expect(errors).toEqual(['abort reason']);
+    expect(errors).toEqual(['abort reason', 'abort reason']);
   });
 
-  it('currently does not report a root task that suspends after aborting during render', async () => {
+  it('reports a root task before rendering a suspended child returned after aborting', async () => {
     const promise = new Promise(() => {});
     function SuspendedRoot() {
       use(promise);
@@ -7135,8 +7135,32 @@ describe('ReactDOMFizzServer', () => {
       abortRef.current = abort;
     });
 
-    // TODO: Once abort completion is async, this still-suspended task should
-    // observe ABORTING and report the abort reason as well.
+    expect(errors).toEqual(['abort reason', 'abort reason']);
+  });
+
+  it('reports a root task that suspends directly after aborting during render', async () => {
+    const promise = new Promise(() => {});
+    const abortRef = {current: null};
+    function ComponentThatAbortsAndSuspends() {
+      abortRef.current(new Error('abort reason'));
+      use(promise);
+      return null;
+    }
+
+    const errors = [];
+    await act(() => {
+      const {abort} = renderToPipeableStream(
+        <ComponentThatAbortsAndSuspends />,
+        {
+          onError(error) {
+            errors.push(error.message);
+          },
+          onShellError() {},
+        },
+      );
+      abortRef.current = abort;
+    });
+
     expect(errors).toEqual(['abort reason']);
   });
 
@@ -8444,11 +8468,11 @@ describe('ReactDOMFizzServer', () => {
     }
 
     expect(thrownError).toBe('boom');
-    // TODO there should actually be three errors. One for the pending Suspense, one for the fallback task, and one for the task
-    // that does the abort itself. At the moment abort will flush queues and if there is no pending tasks will close the request before
-    // the task which initiated the abort can even be processed. This is a bug but not one that I am fixing with the current change
-    // so I am asserting the current behavior
     expect(errors).toEqual([
+      {
+        error: 'boom',
+        componentStack: componentStack(['Abort', 'body', 'html', 'App']),
+      },
       {
         error: 'boom',
         componentStack: componentStack([
@@ -8467,9 +8491,6 @@ describe('ReactDOMFizzServer', () => {
           'html',
           'App',
         ]),
-        // }, {
-        //   error: 'boom',
-        //   componentStack: componentStack(['Abort', 'body', 'html', 'App'])
       },
     ]);
 
