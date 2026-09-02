@@ -2991,6 +2991,7 @@ type StoredEventListener = {
   // When once:true, a wrapper that removes the fragment listener after the
   // first fire. Otherwise the same as listener.
   attachedListener: EventListener,
+  cleanup: null | (() => void),
 };
 
 export type FragmentInstanceType = {
@@ -3034,6 +3035,15 @@ FragmentInstance.prototype.addEventListener = function (
   listener: EventListener,
   optionsOrUseCapture?: EventListenerOptionsOrUseCapture,
 ): void {
+  let signal: null | AbortSignal = null;
+  let cleanup: null | (() => void) = null;
+  if (optionsOrUseCapture != null && typeof optionsOrUseCapture !== 'boolean') {
+    signal = optionsOrUseCapture.signal || null;
+    if (signal !== null && signal.aborted) {
+      return;
+    }
+  }
+
   if (this._eventListeners === null) {
     this._eventListeners = [];
   }
@@ -3063,12 +3073,24 @@ FragmentInstance.prototype.addEventListener = function (
         }
       };
     }
+    if (signal !== null) {
+      const onAbort = fragmentInstance.removeEventListener.bind(
+        fragmentInstance,
+        type,
+        listener,
+        optionsOrUseCapture,
+      );
+      signal.addEventListener('abort', onAbort, {once: true});
+      // $FlowFixMe[method-unbinding]
+      cleanup = signal.removeEventListener.bind(signal, 'abort', onAbort);
+    }
     const attachOptions = getAttachOptions(optionsOrUseCapture);
     listeners.push({
       type,
       listener,
       optionsOrUseCapture,
       attachedListener,
+      cleanup,
     });
     traverseFragmentInstancesAndTextInstances(
       this._fragmentFiber,
@@ -3110,8 +3132,11 @@ FragmentInstance.prototype.removeEventListener = function (
   if (index === -1) {
     return;
   }
-  const {attachedListener, optionsOrUseCapture: storedOptions} =
-    listeners[index];
+  const {
+    attachedListener,
+    optionsOrUseCapture: storedOptions,
+    cleanup,
+  } = listeners[index];
   const attachOptions = getAttachOptions(storedOptions);
   traverseFragmentInstancesAndTextInstances(
     this._fragmentFiber,
@@ -3121,6 +3146,9 @@ FragmentInstance.prototype.removeEventListener = function (
     attachOptions,
   );
   listeners.splice(index, 1);
+  if (cleanup !== null) {
+    cleanup();
+  }
 };
 function removeEventListenerFromChild(
   child: Fiber,
@@ -3138,21 +3166,24 @@ function isOnceOption(opts: ?EventListenerOptionsOrUseCapture): boolean {
 function getAttachOptions(
   opts: void | EventListenerOptionsOrUseCapture,
 ): void | EventListenerOptionsOrUseCapture {
-  // Strip once when attaching to host children; Fragment owns once semantics.
-  if (opts == null || typeof opts === 'boolean' || opts.once !== true) {
+  // Strip once and signal when attaching to host children; Fragment owns once and signal semantics.
+  if (
+    opts == null ||
+    typeof opts === 'boolean' ||
+    (opts.once !== true && !(opts.signal instanceof AbortSignal))
+  ) {
     return opts;
   }
   return {
     capture: opts.capture,
     passive: opts.passive,
-    signal: opts.signal,
   };
 }
 function normalizeListenerOptions(
   opts: ?EventListenerOptionsOrUseCapture,
 ): string {
   if (opts == null) {
-    return '0';
+    return 'c=0';
   }
 
   if (typeof opts === 'boolean') {
@@ -3399,6 +3430,7 @@ FragmentInstance.prototype.unobserveUsing = function (
       unobserveChild,
       observer,
     );
+    unobservePendingChildren(this, observer);
   }
 };
 function unobserveChild(
@@ -3414,6 +3446,92 @@ function unobserveChild(
   const instance = getInstanceFromHostFiber<Instance>(child);
   observer.unobserve(instance);
   return false;
+}
+
+type PendingIntersectionUnobserve = {
+  fragmentInstance: FragmentInstanceType,
+  observer: IntersectionObserver,
+  instance: Instance,
+};
+
+let pendingIntersectionUnobserves: Array<PendingIntersectionUnobserve> = [];
+let intersectionUnobserveScheduled: boolean = false;
+
+function isIntersectionObserver(
+  observer: IntersectionObserver | ResizeObserver,
+): boolean {
+  // IntersectionObserver has rootMargin; ResizeObserver does not. Avoid
+  // instanceof so jsdom mocks and cross-realm observers still match.
+  return typeof (observer as any).rootMargin === 'string';
+}
+
+// A later commit can reinsert the same node before the post-paint unobserve
+// runs (Activity hidden → visible). Cancel so the flush does not drop it.
+function cancelPendingIntersectionUnobserve(
+  fragmentInstance: FragmentInstanceType,
+  observer: IntersectionObserver | ResizeObserver,
+  instance: Instance,
+): void {
+  let writeIdx = 0;
+  for (let i = 0; i < pendingIntersectionUnobserves.length; i++) {
+    const pending = pendingIntersectionUnobserves[i];
+    if (
+      pending.fragmentInstance !== fragmentInstance ||
+      pending.observer !== observer ||
+      pending.instance !== instance
+    ) {
+      pendingIntersectionUnobserves[writeIdx++] = pending;
+    }
+  }
+  pendingIntersectionUnobserves.length = writeIdx;
+}
+
+// unobserveUsing() only walks the children that are still mounted, so release
+// the deleted ones that are waiting for their exit record.
+function unobservePendingChildren(
+  fragmentInstance: FragmentInstanceType,
+  observer: IntersectionObserver | ResizeObserver,
+): void {
+  let writeIdx = 0;
+  for (let i = 0; i < pendingIntersectionUnobserves.length; i++) {
+    const pending = pendingIntersectionUnobserves[i];
+    if (
+      pending.fragmentInstance === fragmentInstance &&
+      pending.observer === observer
+    ) {
+      observer.unobserve(pending.instance);
+    } else {
+      pendingIntersectionUnobserves[writeIdx++] = pending;
+    }
+  }
+  pendingIntersectionUnobserves.length = writeIdx;
+}
+
+function schedulePendingIntersectionUnobserve(
+  fragmentInstance: FragmentInstanceType,
+  observer: IntersectionObserver,
+  instance: Instance,
+): void {
+  pendingIntersectionUnobserves.push({
+    fragmentInstance,
+    observer,
+    instance,
+  });
+  if (!intersectionUnobserveScheduled) {
+    intersectionUnobserveScheduled = true;
+    // Unobserving in this commit would cancel the record IntersectionObserver
+    // delivers for the now disconnected target. Wait until after paint so the
+    // exit fires first, then drop the observer's strong ref to the node.
+    requestPostPaintCallback(() => {
+      intersectionUnobserveScheduled = false;
+      const pending = pendingIntersectionUnobserves;
+      pendingIntersectionUnobserves = [];
+      for (let i = 0; i < pending.length; i++) {
+        const item = pending[i];
+        item.observer.unobserve(item.instance);
+      }
+    });
+  }
 }
 // $FlowFixMe[prop-missing]
 FragmentInstance.prototype.getClientRects = function (
@@ -3797,8 +3915,10 @@ export function commitNewChildToFragmentInstance(
     return;
   }
   const instance: InstanceWithFragmentHandles = childInstance as any;
-  if (fragmentInstance._observers !== null) {
-    fragmentInstance._observers.forEach(observer => {
+  const observers = fragmentInstance._observers;
+  if (observers !== null) {
+    observers.forEach(observer => {
+      cancelPendingIntersectionUnobserve(fragmentInstance, observer, instance);
       observer.observe(instance);
     });
   }
@@ -3826,6 +3946,22 @@ export function deleteChildFromFragmentInstance(
     return;
   }
   const instance: InstanceWithFragmentHandles = childInstance as any;
+  const observers = fragmentInstance._observers;
+  if (observers !== null) {
+    observers.forEach(observer => {
+      if (isIntersectionObserver(observer)) {
+        // Stay observed until the next IntersectionObserver delivery so a
+        // disconnected target still gets an isIntersecting: false record.
+        schedulePendingIntersectionUnobserve(
+          fragmentInstance,
+          observer as any as IntersectionObserver,
+          instance,
+        );
+      } else {
+        observer.unobserve(instance);
+      }
+    });
+  }
   if (enableFragmentRefsInstanceHandles) {
     if (instance.reactFragments != null) {
       instance.reactFragments.delete(fragmentInstance);

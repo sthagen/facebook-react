@@ -4520,6 +4520,40 @@ describe('ReactDOMFizzServer', () => {
     );
   });
 
+  it('applies the nonce option to the importmap script', async () => {
+    const importMap = {
+      foo: './path/to/foo.js',
+    };
+    await act(() => {
+      renderToPipeableStream(
+        <html>
+          <head>
+            <script async={true} src="foo" />
+          </head>
+          <body>
+            <div>hello world</div>
+          </body>
+        </html>,
+        {
+          importMap,
+          nonce: 'R4nd0m',
+        },
+      ).pipe(writable);
+    });
+
+    expect(document.head.innerHTML).toBe(
+      '<script type="importmap" nonce="R4nd0m">' +
+        JSON.stringify(importMap) +
+        '</script><script async="" src="foo"></script>' +
+        (gate(flags => flags.shouldUseFizzExternalRuntime)
+          ? '<script src="react-dom-bindings/src/server/ReactDOMServerExternalRuntime.js" async="" nonce="R4nd0m"></script>'
+          : '') +
+        (gate(flags => flags.enableFizzBlockingRender)
+          ? '<link rel="expect" href="#_R_" blocking="render">'
+          : ''),
+    );
+  });
+
   // bugfix: https://github.com/facebook/react/issues/27286
   it('can render custom elements with children on ther server', async () => {
     await act(() => {

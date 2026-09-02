@@ -17,35 +17,43 @@ let act;
 let container;
 let Fragment;
 let Activity;
+let Scheduler;
 let mockIntersectionObserver;
 let simulateIntersection;
 let setClientRects;
 let mockRangeClientRects;
 let assertConsoleErrorDev;
 let assertConsoleWarnDev;
+let assertLog;
+let rafCallbacks;
 
 function Wrapper({children}) {
   return children;
 }
 
+function loadModules() {
+  React = require('react');
+  Fragment = React.Fragment;
+  Activity = React.Activity;
+  ReactDOMClient = require('react-dom/client');
+  ReactDOM = require('react-dom');
+  createPortal = ReactDOM.createPortal;
+  act = require('internal-test-utils').act;
+  Scheduler = require('scheduler');
+  const IntersectionMocks = require('./utils/IntersectionMocks');
+  mockIntersectionObserver = IntersectionMocks.mockIntersectionObserver;
+  simulateIntersection = IntersectionMocks.simulateIntersection;
+  setClientRects = IntersectionMocks.setClientRects;
+  mockRangeClientRects = IntersectionMocks.mockRangeClientRects;
+  assertConsoleErrorDev = require('internal-test-utils').assertConsoleErrorDev;
+  assertConsoleWarnDev = require('internal-test-utils').assertConsoleWarnDev;
+  assertLog = require('internal-test-utils').assertLog;
+}
+
 describe('FragmentRefs', () => {
   beforeEach(() => {
     jest.resetModules();
-    React = require('react');
-    Fragment = React.Fragment;
-    Activity = React.Activity;
-    ReactDOMClient = require('react-dom/client');
-    ReactDOM = require('react-dom');
-    createPortal = ReactDOM.createPortal;
-    act = require('internal-test-utils').act;
-    const IntersectionMocks = require('./utils/IntersectionMocks');
-    mockIntersectionObserver = IntersectionMocks.mockIntersectionObserver;
-    simulateIntersection = IntersectionMocks.simulateIntersection;
-    setClientRects = IntersectionMocks.setClientRects;
-    mockRangeClientRects = IntersectionMocks.mockRangeClientRects;
-    assertConsoleErrorDev =
-      require('internal-test-utils').assertConsoleErrorDev;
-    assertConsoleWarnDev = require('internal-test-utils').assertConsoleWarnDev;
+    loadModules();
 
     container = document.createElement('div');
     document.body.innerHTML = '';
@@ -151,6 +159,152 @@ describe('FragmentRefs', () => {
     const childD = document.querySelector('#childD');
     expect(childD.reactFragments.has(fragmentRef.current)).toBe(false);
     expect(childD.reactFragments.has(fragmentParentRef.current)).toBe(true);
+  });
+
+  // @gate enableFragmentRefs
+  it('runs the ref cleanup when an inline ref callback changes identity', async () => {
+    const fragmentInstances = [];
+    let rerender;
+
+    function Test() {
+      const [step, setStep] = React.useState(0);
+      rerender = () => {
+        setStep(p => p + 1);
+      };
+
+      return (
+        <Fragment
+          ref={fragmentInstance => {
+            fragmentInstances.push(fragmentInstance);
+            Scheduler.log(`fragment attach ${step}`);
+            return () => {
+              Scheduler.log(`fragment cleanup ${step}`);
+            };
+          }}>
+          <div
+            id="child"
+            ref={() => {
+              Scheduler.log(`host attach ${step}`);
+              return () => {
+                Scheduler.log(`host cleanup ${step}`);
+              };
+            }}
+          />
+        </Fragment>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<Test />));
+    assertLog(['fragment attach 0', 'host attach 0']);
+
+    await act(rerender);
+    // Both refs are inlined, so both change identity and are detached before
+    // being re-attached. The Fragment detaches ahead of its children, which is
+    // the same order it uses when the Fragment itself is deleted.
+    assertLog([
+      'fragment cleanup 0',
+      'host cleanup 0',
+      'fragment attach 1',
+      'host attach 1',
+    ]);
+
+    await act(() => root.render(null));
+    // The cleanups created by the final render run on unmount.
+    assertLog(['fragment cleanup 1', 'host cleanup 1']);
+
+    // The same FragmentInstance is handed to every attach, so a callback that
+    // registers event listeners or observers on it can rely on its cleanup to
+    // unregister them again.
+    expect(fragmentInstances).toHaveLength(2);
+    expect(fragmentInstances[0]).toBe(fragmentInstances[1]);
+  });
+
+  // @gate enableFragmentRefs
+  it('runs the ref cleanup when the ref is removed from a mounted Fragment', async () => {
+    function Test({withRef}) {
+      return (
+        <Fragment
+          ref={
+            withRef
+              ? () => {
+                  Scheduler.log('attach');
+                  return () => {
+                    Scheduler.log('cleanup');
+                  };
+                }
+              : null
+          }>
+          <div id="child" />
+        </Fragment>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() => root.render(<Test withRef={true} />));
+    assertLog(['attach']);
+
+    // The Fragment stays mounted and only the ref goes away. commitAttachRef
+    // bails out on a null ref, so the detach is the only thing that can run the
+    // cleanup here.
+    await act(() => root.render(<Test withRef={false} />));
+    assertLog(['cleanup']);
+
+    // Nothing is left to clean up by the time the Fragment is deleted.
+    await act(() => root.render(null));
+    assertLog([]);
+  });
+
+  // @gate enableFragmentRefs
+  it('detaches and reattaches Fragment refs when StrictMode double invokes', async () => {
+    // This one collects its own log rather than using Scheduler.log, because
+    // setIsStrictModeForDevtools disables yield values for the duration of the
+    // double invoke to keep StrictMode tests quiet, which would hide the very
+    // detach and reattach this test is here to observe.
+    const logs = [];
+    let rerender;
+
+    function Test() {
+      const [step, setStep] = React.useState(0);
+      rerender = () => {
+        setStep(p => p + 1);
+      };
+
+      return (
+        <Fragment
+          ref={() => {
+            logs.push(`attach ${step}`);
+            return () => {
+              logs.push(`cleanup ${step}`);
+            };
+          }}>
+          <div id="child" />
+        </Fragment>
+      );
+    }
+
+    const root = ReactDOMClient.createRoot(container);
+    await act(() =>
+      root.render(
+        <React.StrictMode>
+          <Test />
+        </React.StrictMode>,
+      ),
+    );
+    if (__DEV__) {
+      // The double invoke goes through disappearLayoutEffects and
+      // reappearLayoutEffects rather than through the mutation and layout
+      // phases, so it exercises a separate pair of Fragment cases.
+      expect(logs).toEqual(['attach 0', 'cleanup 0', 'attach 0']);
+    } else {
+      expect(logs).toEqual(['attach 0']);
+    }
+
+    // The double invoke only applies to newly mounted fibers, so an update
+    // detaches and reattaches once in both environments.
+    logs.length = 0;
+    await act(rerender);
+    expect(logs).toEqual(['cleanup 0', 'attach 1']);
   });
 
   describe('focus methods', () => {
@@ -683,6 +837,47 @@ describe('FragmentRefs', () => {
       });
 
       // @gate enableFragmentRefs
+      it('matches listeners by their normalized capture flag', async () => {
+        const fragmentRef = React.createRef();
+        const childRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+        const logs = [];
+
+        function addedWithOmittedOptions() {
+          logs.push('addedWithOmittedOptions');
+        }
+
+        function addedWithCaptureFalse() {
+          logs.push('addedWithCaptureFalse');
+        }
+
+        await act(() => {
+          root.render(
+            <Fragment ref={fragmentRef}>
+              <div ref={childRef}>child</div>
+            </Fragment>,
+          );
+        });
+
+        fragmentRef.current.addEventListener('click', addedWithOmittedOptions);
+        fragmentRef.current.addEventListener('click', addedWithCaptureFalse, {
+          capture: false,
+        });
+
+        // Omitted options and an explicit capture: false are the same
+        // EventTarget listener identity, so each removal should match.
+        fragmentRef.current.removeEventListener(
+          'click',
+          addedWithOmittedOptions,
+          false,
+        );
+        fragmentRef.current.removeEventListener('click', addedWithCaptureFalse);
+
+        childRef.current.click();
+        expect(logs).toEqual([]);
+      });
+
+      // @gate enableFragmentRefs
       it('adds and removes event listeners from children with multiple fragments', async () => {
         const fragmentRef = React.createRef();
         const nestedFragmentRef = React.createRef();
@@ -901,6 +1096,122 @@ describe('FragmentRefs', () => {
         logs.length = 0;
         childBRef.current.click();
         expect(logs).toEqual([]);
+      });
+
+      // @gate enableFragmentRefs
+      it('should remove the listener when the signal is aborted before registration', async () => {
+        const fragmentRef = React.createRef();
+        const childRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+        let logs = [];
+
+        function registeredListener() {
+          logs.push('registered');
+        }
+
+        await act(() => {
+          root.render(
+            <Fragment ref={fragmentRef}>
+              <div ref={childRef}>child</div>
+            </Fragment>,
+          );
+        });
+
+        const signal = AbortSignal.abort();
+        fragmentRef.current.addEventListener('click', registeredListener, {
+          signal,
+        });
+        childRef.current.click();
+        expect(logs).toEqual([]);
+
+        // The event listener can be re-added
+        fragmentRef.current.addEventListener('click', registeredListener);
+        logs = [];
+        childRef.current.click();
+        expect(logs).toEqual(['registered']);
+      });
+
+      // @gate enableFragmentRefs
+      it('should remove the listener when the signal is aborted after registration', async () => {
+        const fragmentRef = React.createRef();
+        const childRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+        let logs = [];
+
+        function registeredListener() {
+          logs.push('registered');
+        }
+
+        await act(() => {
+          root.render(
+            <Fragment ref={fragmentRef}>
+              <div ref={childRef}>child</div>
+            </Fragment>,
+          );
+        });
+
+        const controller = new AbortController();
+        fragmentRef.current.addEventListener('click', registeredListener, {
+          signal: controller.signal,
+        });
+        childRef.current.click();
+        expect(logs).toEqual(['registered']);
+
+        logs = [];
+        controller.abort();
+        childRef.current.click();
+        expect(logs).toEqual([]);
+
+        // The event listener can be re-added
+        fragmentRef.current.addEventListener('click', registeredListener);
+        logs = [];
+        childRef.current.click();
+        expect(logs).toEqual(['registered']);
+      });
+
+      // @gate enableFragmentRefs
+      it('should NOT remove the new subscription when the signal for the old subscription is aborted', async () => {
+        const fragmentRef = React.createRef();
+        const childRef = React.createRef();
+        const root = ReactDOMClient.createRoot(container);
+        let logs = [];
+
+        function registeredListener() {
+          logs.push('registered');
+        }
+
+        await act(() => {
+          root.render(
+            <Fragment ref={fragmentRef}>
+              <div ref={childRef}>child</div>
+            </Fragment>,
+          );
+        });
+
+        const controller = new AbortController();
+        fragmentRef.current.addEventListener('click', registeredListener, {
+          signal: controller.signal,
+        });
+        childRef.current.click();
+        expect(logs).toEqual(['registered']);
+
+        fragmentRef.current.removeEventListener('click', registeredListener);
+        logs = [];
+        childRef.current.click();
+        expect(logs).toEqual([]);
+
+        // Added without a signal
+        fragmentRef.current.addEventListener('click', registeredListener);
+        logs = [];
+        childRef.current.click();
+        // Listener is called
+        expect(logs).toEqual(['registered']);
+
+        logs = [];
+        controller.abort();
+        childRef.current.click();
+        // Listener is called
+        expect(logs).toEqual(['registered']);
       });
 
       // @gate enableFragmentRefs && enableFragmentRefsTextNodes
@@ -1563,8 +1874,40 @@ describe('FragmentRefs', () => {
   });
 
   describe('observers', () => {
+    let intersectionObserverMock;
+
+    function observedIds() {
+      return intersectionObserverMock.observedTargets.map(node => node.id);
+    }
+
+    function flushPostPaintCallbacks() {
+      const first = rafCallbacks.slice();
+      rafCallbacks.length = 0;
+      for (let i = 0; i < first.length; i++) {
+        first[i](0);
+      }
+      const second = rafCallbacks.slice();
+      rafCallbacks.length = 0;
+      for (let i = 0; i < second.length; i++) {
+        second[i](0);
+      }
+    }
+
     beforeEach(() => {
-      mockIntersectionObserver();
+      jest.resetModules();
+      // Install before requiring React so host config captures this rAF
+      // (requestPostPaintCallback / delayed observer unobserve).
+      rafCallbacks = [];
+      jest.spyOn(global, 'requestAnimationFrame').mockImplementation(cb => {
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
+      });
+      loadModules();
+      intersectionObserverMock = mockIntersectionObserver();
+
+      container = document.createElement('div');
+      document.body.innerHTML = '';
+      document.body.appendChild(container);
     });
 
     // @gate enableFragmentRefs
@@ -1626,6 +1969,190 @@ describe('FragmentRefs', () => {
       await act(() => root.render(null));
       simulateAllChildrenIntersecting();
       expect(logs).toEqual([]);
+    });
+
+    // @gate enableFragmentRefs
+    it('keeps a removed child observed until after the intersection exit, then unobserves it', async () => {
+      const logs = [];
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          logs.push({id: entry.target.id, ratio: entry.intersectionRatio});
+        });
+      });
+      const fragmentRef = React.createRef();
+      function Test({showB}) {
+        React.useEffect(() => {
+          fragmentRef.current.observeUsing(observer);
+        }, []);
+        return (
+          <div id="parent">
+            <React.Fragment ref={fragmentRef}>
+              <div id="childA">A</div>
+              {showB && <div id="childB">B</div>}
+            </React.Fragment>
+          </div>
+        );
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      await act(() => root.render(<Test showB={true} />));
+      const childA = container.querySelector('#childA');
+      const childB = container.querySelector('#childB');
+      expect(observedIds()).toEqual(['childA', 'childB']);
+
+      await act(() => root.render(<Test showB={false} />));
+      // Still observed so IntersectionObserver can deliver isIntersecting: false.
+      expect(observedIds()).toEqual(['childA', 'childB']);
+      expect(childB.isConnected).toBe(false);
+
+      simulateIntersection(
+        [childA, {y: 0, x: 0, width: 1, height: 1}, 1],
+        [childB, {y: 0, x: 0, width: 0, height: 0}, 0],
+      );
+      expect(logs).toEqual([
+        {id: 'childA', ratio: 1},
+        {id: 'childB', ratio: 0},
+      ]);
+
+      flushPostPaintCallbacks();
+      expect(observedIds()).toEqual(['childA']);
+    });
+
+    // @gate enableFragmentRefs
+    it('unobserveUsing() releases deleted children that were waiting for an exit record', async () => {
+      const observer = new IntersectionObserver(() => {});
+      const fragmentRef = React.createRef();
+      function Test({showB}) {
+        React.useEffect(() => {
+          fragmentRef.current.observeUsing(observer);
+        }, []);
+        return (
+          <React.Fragment ref={fragmentRef}>
+            <div id="childA">A</div>
+            {showB && <div id="childB">B</div>}
+          </React.Fragment>
+        );
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      await act(() => root.render(<Test showB={true} />));
+
+      await act(() => root.render(<Test showB={false} />));
+      expect(observedIds()).toEqual(['childA', 'childB']);
+
+      fragmentRef.current.unobserveUsing(observer);
+      expect(observedIds()).toEqual([]);
+    });
+
+    // @gate enableFragmentRefs
+    it('unobserves ResizeObserver targets as soon as a child is deleted', async () => {
+      const observedTargets = [];
+      const resizeObserver = {
+        observe(target) {
+          observedTargets.push(target);
+        },
+        unobserve(target) {
+          const index = observedTargets.indexOf(target);
+          if (index >= 0) {
+            observedTargets.splice(index, 1);
+          }
+        },
+      };
+      const fragmentRef = React.createRef();
+      function Test({showB}) {
+        React.useEffect(() => {
+          fragmentRef.current.observeUsing(resizeObserver);
+        }, []);
+        return (
+          <React.Fragment ref={fragmentRef}>
+            <div id="childA">A</div>
+            {showB && <div id="childB">B</div>}
+          </React.Fragment>
+        );
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      await act(() => root.render(<Test showB={true} />));
+      expect(observedTargets.map(node => node.id)).toEqual([
+        'childA',
+        'childB',
+      ]);
+
+      await act(() => root.render(<Test showB={false} />));
+      expect(observedTargets.map(node => node.id)).toEqual(['childA']);
+    });
+
+    // @gate enableFragmentRefs
+    it('unobserves a replaced child after post-paint and keeps the new child observed', async () => {
+      const observer = new IntersectionObserver(() => {});
+      const fragmentRef = React.createRef();
+      const childRef = React.createRef();
+      function Test({showChild}) {
+        React.useEffect(() => {
+          fragmentRef.current.observeUsing(observer);
+        }, []);
+        return (
+          <React.Fragment ref={fragmentRef}>
+            {showChild && <div id="child" ref={childRef} />}
+          </React.Fragment>
+        );
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      await act(() => root.render(<Test showChild={true} />));
+      const firstChild = childRef.current;
+      expect(observedIds()).toEqual(['child']);
+
+      await act(() => root.render(<Test showChild={false} />));
+      expect(observedIds()).toEqual(['child']);
+      expect(intersectionObserverMock.observedTargets[0]).toBe(firstChild);
+
+      await act(() => root.render(<Test showChild={true} />));
+      const secondChild = childRef.current;
+      expect(secondChild).not.toBe(firstChild);
+      expect(intersectionObserverMock.observedTargets.length).toBe(2);
+      expect(intersectionObserverMock.observedTargets[0]).toBe(firstChild);
+      expect(intersectionObserverMock.observedTargets[1]).toBe(secondChild);
+
+      flushPostPaintCallbacks();
+      expect(intersectionObserverMock.observedTargets.length).toBe(1);
+      expect(intersectionObserverMock.observedTargets[0]).toBe(secondChild);
+    });
+
+    // @gate enableFragmentRefs
+    it('keeps a child observed if Activity shows it again before the delayed unobserve', async () => {
+      const observer = new IntersectionObserver(() => {});
+      const fragmentRef = React.createRef();
+      function Test({mode}) {
+        React.useEffect(() => {
+          fragmentRef.current.observeUsing(observer);
+        }, []);
+        return (
+          <React.Fragment ref={fragmentRef}>
+            <Activity mode={mode}>
+              <div id="child" />
+            </Activity>
+          </React.Fragment>
+        );
+      }
+
+      const root = ReactDOMClient.createRoot(container);
+      await act(() => root.render(<Test mode="visible" />));
+      const child = container.querySelector('#child');
+      expect(observedIds()).toEqual(['child']);
+
+      await act(() => root.render(<Test mode="hidden" />));
+      // Same node, still observed so the exit record can fire.
+      expect(container.querySelector('#child')).toBe(child);
+      expect(observedIds()).toEqual(['child']);
+
+      // A second commit before post-paint reinserts the same instance.
+      await act(() => root.render(<Test mode="visible" />));
+      expect(container.querySelector('#child')).toBe(child);
+      expect(observedIds()).toEqual(['child']);
+
+      flushPostPaintCallbacks();
+      expect(observedIds()).toEqual(['child']);
     });
 
     // @gate enableFragmentRefs
@@ -2784,7 +3311,7 @@ describe('FragmentRefs', () => {
 
       expect(() => {
         fragmentRef.current.scrollIntoView({block: 'start'});
-      }).toThrowError(
+      }).toThrow(
         'FragmentInstance.scrollIntoView() does not support ' +
           'scrollIntoViewOptions. Use the alignToTop boolean instead.',
       );
